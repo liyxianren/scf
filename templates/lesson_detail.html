@@ -583,6 +583,8 @@ print(f"我是{name}，今年{age}岁")
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+<!-- 输入弹窗组件 -->
+<script src="{{ url_for('static', filename='js/input-dialog.js') }}"></script>
 
 <script>
 let playgroundEditor;
@@ -717,9 +719,19 @@ function addRunButtons() {
     });
 }
 
-function runCodeBlock(code, wrapper) {
+async function runCodeBlock(code, wrapper) {
     const outputDiv = wrapper.querySelector('.code-output');
     const btn = wrapper.querySelector('.code-run-btn');
+
+    // 先收集用户输入
+    let userInput = '';
+    try {
+        userInput = await window.pythonInputDialog.collectAllInputs(code);
+    } catch (e) {
+        if (e.message === 'cancelled') {
+            return; // 用户取消
+        }
+    }
 
     btn.innerHTML = '⏳ 运行中...';
     btn.disabled = true;
@@ -731,7 +743,7 @@ function runCodeBlock(code, wrapper) {
     fetch('/api/code/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code })
+        body: JSON.stringify({ code: code, input: userInput })
     })
     .then(response => response.json())
     .then(data => {
@@ -755,11 +767,21 @@ function runCodeBlock(code, wrapper) {
 }
 
 // 右侧练习区功能
-function runPlaygroundCode() {
+async function runPlaygroundCode() {
     const code = playgroundEditor.getValue();
     const outputDiv = document.getElementById('playground-output');
     const statusDot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
+
+    // 先收集用户输入
+    let userInput = '';
+    try {
+        userInput = await window.pythonInputDialog.collectAllInputs(code);
+    } catch (e) {
+        if (e.message === 'cancelled') {
+            return; // 用户取消
+        }
+    }
 
     statusDot.className = 'status-dot running';
     statusText.textContent = '运行中...';
@@ -769,7 +791,7 @@ function runPlaygroundCode() {
     fetch('/api/code/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code })
+        body: JSON.stringify({ code: code, input: userInput })
     })
     .then(response => response.json())
     .then(data => {

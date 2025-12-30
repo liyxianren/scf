@@ -23,26 +23,19 @@ name = input("请输入你的名字：")
 print(f"你好，{name}！")</textarea>
         </div>
 
-        <div class="io-section">
-            <div class="input-section">
-                <div class="section-header">
-                    <h3>输入 (stdin)</h3>
-                </div>
-                <textarea id="stdin-input" placeholder="程序需要的输入，每行一个..."></textarea>
+        <div class="output-section">
+            <div class="section-header">
+                <h3>输出结果</h3>
+                <button id="clear-output" class="btn btn-small">清空</button>
             </div>
-
-            <div class="output-section">
-                <div class="section-header">
-                    <h3>输出</h3>
-                    <button id="clear-output" class="btn btn-small">清空</button>
-                </div>
-                <pre id="output" class="output-area">点击"运行代码"查看结果...</pre>
-            </div>
+            <pre id="output" class="output-area">点击"运行代码"查看结果...
+如果代码中有 input()，会自动弹窗让你输入</pre>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/input-dialog.js') }}"></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 {% endblock %}

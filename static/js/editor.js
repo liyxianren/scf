@@ -16,13 +16,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const runBtn = document.getElementById('run-btn');
     const clearBtn = document.getElementById('clear-output');
-    const stdinInput = document.getElementById('stdin-input');
     const outputEl = document.getElementById('output');
 
     // 运行代码
     runBtn.addEventListener('click', async function() {
         const code = editor.getValue();
-        const input = stdinInput.value;
+
+        // 检测是否需要输入，弹窗收集
+        let userInput = '';
+        try {
+            userInput = await window.pythonInputDialog.collectAllInputs(code);
+        } catch (e) {
+            if (e.message === 'cancelled') {
+                // 用户取消了输入
+                return;
+            }
+        }
 
         outputEl.textContent = '运行中...';
         outputEl.className = 'output-area';
@@ -35,7 +44,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ code, input })
+                body: JSON.stringify({ code, input: userInput })
             });
 
             const result = await response.json();
