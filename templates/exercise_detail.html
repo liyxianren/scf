@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}练习题详情 - Python学习平台{% endblock %}
+
+{% block content %}
+<div class="container exercise-detail-container">
+    <div class="exercise-info" id="exercise-info">
+        <div class="loading">加载中...</div>
+    </div>
+
+    <div class="exercise-editor">
+        <div class="section-header">
+            <h3>你的代码</h3>
+            <div class="editor-actions">
+                <button id="submit-btn" class="btn btn-primary">提交答案</button>
+                <button id="hint-btn" class="btn btn-outline">显示提示</button>
+                <button id="solution-btn" class="btn btn-outline">查看答案</button>
+            </div>
+        </div>
+        <textarea id="code-editor"></textarea>
+    </div>
+
+    <div class="result-section" id="result-section" style="display: none;">
+        <div class="section-header">
+            <h3>判题结果</h3>
+        </div>
+        <div id="result-content"></div>
+    </div>
+
+    <div class="hint-section" id="hint-section" style="display: none;">
+        <div class="section-header">
+            <h3>提示</h3>
+            <button id="close-hint" class="btn btn-small">关闭</button>
+        </div>
+        <div id="hint-content"></div>
+    </div>
+
+    <div class="solution-section" id="solution-section" style="display: none;">
+        <div class="section-header">
+            <h3>参考答案</h3>
+            <button id="close-solution" class="btn btn-small">关闭</button>
+        </div>
+        <pre id="solution-content"></pre>
+    </div>
+
+    <div class="exercise-nav">
+        <a href="/exercises" class="btn btn-outline">返回列表</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const exerciseId = {{ exercise_id }};
+</script>
+<script src="{{ url_for('static', filename='js/exercise.js') }}"></script>
+{% endblock %}

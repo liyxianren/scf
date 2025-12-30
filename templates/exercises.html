@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}练习题 - Python学习平台{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <h1>📝 练习题</h1>
+        <p>通过练习巩固所学知识，选择对应章节开始挑战吧</p>
+    </div>
+
+    <!-- 章节筛选 -->
+    <div class="exercises-filter" id="filter-buttons">
+        <button class="filter-btn active" data-lesson="0">全部</button>
+        <button class="filter-btn" data-lesson="1">第1章 Python基础</button>
+        <button class="filter-btn" data-lesson="2">第2章 条件与循环</button>
+        <button class="filter-btn" data-lesson="3">第3章 函数与方法</button>
+        <button class="filter-btn" data-lesson="4">第4章 列表与字典</button>
+        <button class="filter-btn" data-lesson="5">第5章 类与对象</button>
+        <button class="filter-btn" data-lesson="6">第6章 面向对象</button>
+        <button class="filter-btn" data-lesson="7">第7章 异常处理</button>
+    </div>
+
+    <div class="exercises-container" id="exercises-list">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <div>正在加载练习题...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allExercises = [];
+const chapterNames = ['', 'Python基础', '条件与循环', '函数与方法', '列表与字典', '类与对象', '面向对象', '异常处理'];
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 加载所有练习题
+    loadExercises();
+
+    // 筛选按钮事件
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            const lessonId = parseInt(this.dataset.lesson);
+            filterExercises(lessonId);
+        });
+    });
+});
+
+function loadExercises() {
+    fetch('/api/exercises')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                allExercises = data.data;
+                renderExercises(allExercises);
+            } else {
+                showError();
+            }
+        })
+        .catch(error => {
+            showError();
+        });
+}
+
+function filterExercises(lessonId) {
+    if (lessonId === 0) {
+        renderExercises(allExercises);
+    } else {
+        const filtered = allExercises.filter(ex => ex.lesson_id === lessonId);
+        renderExercises(filtered);
+    }
+}
+
+function renderExercises(exercises) {
+    const container = document.getElementById('exercises-list');
+
+    if (exercises.length === 0) {
+        container.innerHTML = '<p class="empty-message">该章节暂无练习题</p>';
+        return;
+    }
+
+    container.innerHTML = exercises.map(ex => `
+        <a href="/exercises/${ex.id}" class="exercise-card">
+            <div class="exercise-header">
+                <h3 class="exercise-title">${ex.title}</h3>
+                <span class="difficulty-badge difficulty-${ex.difficulty}">
+                    ${['', '简单', '中等', '困难'][ex.difficulty] || '未知'}
+                </span>
+            </div>
+            <p class="exercise-desc">${stripMarkdown(ex.description).substring(0, 80)}...</p>
+            <div class="exercise-footer">
+                <span class="exercise-chapter">第${ex.lesson_id}章 · ${chapterNames[ex.lesson_id] || '未知'}</span>
+                <span class="exercise-arrow">→</span>
+            </div>
+        </a>
+    `).join('');
+}
+
+function stripMarkdown(text) {
+    // 简单去除Markdown格式
+    return text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/`/g, '')
+        .replace(/\n/g, ' ')
+        .trim();
+}
+
+function showError() {
+    document.getElementById('exercises-list').innerHTML =
+        '<p class="error-message">加载失败，请刷新重试</p>';
+}
+</script>
+{% endblock %}

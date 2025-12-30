@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\\\\1.txt\" -ErrorAction SilentlyContinue)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\\\\nul\" -ErrorAction SilentlyContinue)",
+      "Bash(Get-ChildItem \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(pip install:*)",
+      "Bash(python init_db.py:*)",
+      "Bash(python app.py:*)",
+      "Bash(curl:*)",
+      "Bash(cd:*)",
+      "Bash(git init:*)",
+      "Bash(git -C \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\" init)",
+      "Bash(git -C \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\" add -A)",
+      "Bash(git -C \"c:\\\\Users\\\\Administrator\\\\Desktop\\\\python\" status)"
+    ]
+  }
+}

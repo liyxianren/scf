@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}代码练习场 - Python学习平台{% endblock %}
+
+{% block content %}
+<div class="container playground-container">
+    <div class="page-header">
+        <h1>Python代码练习场</h1>
+        <p>在这里自由编写和运行Python代码</p>
+    </div>
+
+    <div class="editor-layout">
+        <div class="editor-section">
+            <div class="section-header">
+                <h3>代码编辑器</h3>
+                <button id="run-btn" class="btn btn-primary">运行代码</button>
+            </div>
+            <textarea id="code-editor"># 在这里编写Python代码
+print("Hello, Python!")
+
+# 试试其他代码
+name = input("请输入你的名字：")
+print(f"你好，{name}！")</textarea>
+        </div>
+
+        <div class="io-section">
+            <div class="input-section">
+                <div class="section-header">
+                    <h3>输入 (stdin)</h3>
+                </div>
+                <textarea id="stdin-input" placeholder="程序需要的输入，每行一个..."></textarea>
+            </div>
+
+            <div class="output-section">
+                <div class="section-header">
+                    <h3>输出</h3>
+                    <button id="clear-output" class="btn btn-small">清空</button>
+                </div>
+                <pre id="output" class="output-area">点击"运行代码"查看结果...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+{% endblock %}

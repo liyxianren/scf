@@ -1,0 +1,820 @@
+{% extends "base.html" %}
+
+{% block title %}教程详情 - Python学习平台{% endblock %}
+
+{% block extra_css %}
+<style>
+/* 教案详情页专用样式 */
+.lesson-page {
+    display: flex;
+    gap: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* 左侧主内容区 */
+.lesson-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.lesson-detail {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 30px;
+    margin-bottom: 20px;
+}
+
+.lesson-header {
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.lesson-chapter-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.lesson-header h1 {
+    font-size: 28px;
+    color: #1a1a2e;
+    margin: 0;
+    font-weight: 600;
+}
+
+/* Markdown内容增强样式 */
+.lesson-body {
+    font-size: 16px;
+    line-height: 1.8;
+    color: #333;
+}
+
+.lesson-body h2 {
+    font-size: 22px;
+    color: #1a1a2e;
+    margin: 35px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #667eea;
+    position: relative;
+}
+
+.lesson-body h3 {
+    font-size: 18px;
+    color: #2d3748;
+    margin: 25px 0 15px;
+}
+
+.lesson-body p {
+    margin-bottom: 16px;
+}
+
+.lesson-body ul, .lesson-body ol {
+    margin: 16px 0;
+    padding-left: 24px;
+}
+
+.lesson-body li {
+    margin-bottom: 8px;
+}
+
+/* 代码块样式 - 可运行 */
+.lesson-body pre {
+    position: relative;
+    background: #1e1e2e;
+    border-radius: 10px;
+    margin: 20px 0;
+    overflow: hidden;
+}
+
+.lesson-body pre code {
+    display: block;
+    padding: 20px;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: auto;
+}
+
+/* 代码块运行按钮 */
+.code-block-wrapper {
+    position: relative;
+}
+
+.code-run-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.3s;
+    z-index: 10;
+}
+
+.code-run-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,184,148,0.4);
+}
+
+.code-run-btn:active {
+    transform: translateY(0);
+}
+
+.code-output {
+    background: #0d1117;
+    border-top: 1px solid #30363d;
+    padding: 15px 20px;
+    color: #c9d1d9;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+}
+
+.code-output.show {
+    display: block;
+}
+
+.code-output.error {
+    color: #f85149;
+}
+
+.code-output-label {
+    color: #8b949e;
+    font-size: 11px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* 表格样式增强 */
+.lesson-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.lesson-body th {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 500;
+}
+
+.lesson-body td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.lesson-body tr:last-child td {
+    border-bottom: none;
+}
+
+.lesson-body tr:nth-child(even) {
+    background: #f8fafc;
+}
+
+/* 引用块增强 */
+.lesson-body blockquote {
+    background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
+    border-left: 4px solid #0ea5e9;
+    padding: 16px 20px;
+    margin: 20px 0;
+    border-radius: 0 8px 8px 0;
+    color: #0c4a6e;
+}
+
+.lesson-body blockquote strong {
+    color: #0369a1;
+}
+
+/* 行内代码 */
+.lesson-body p code, .lesson-body li code {
+    background: #f1f5f9;
+    color: #e11d48;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* 章节练习题区域 */
+.chapter-exercises {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 25px;
+    margin-top: 30px;
+}
+
+.chapter-exercises h2 {
+    font-size: 20px;
+    color: #1a1a2e;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.chapter-exercises h2::before {
+    content: "📝";
+}
+
+.exercise-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.exercise-item {
+    display: flex;
+    align-items: center;
+    padding: 15px 20px;
+    background: #f8fafc;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s;
+    border: 1px solid #e2e8f0;
+}
+
+.exercise-item:hover {
+    background: #fff;
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102,126,234,0.15);
+    transform: translateX(5px);
+}
+
+.exercise-num {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 14px;
+    margin-right: 15px;
+}
+
+.exercise-info {
+    flex: 1;
+}
+
+.exercise-name {
+    font-weight: 500;
+    color: #1a1a2e;
+    margin-bottom: 4px;
+}
+
+.exercise-difficulty {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.exercise-difficulty.easy {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.exercise-difficulty.medium {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.exercise-difficulty.hard {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.exercise-arrow {
+    color: #9ca3af;
+    font-size: 20px;
+}
+
+/* 右侧代码练习栏 */
+.lesson-sidebar {
+    width: 420px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 80px;
+    height: calc(100vh - 100px);
+    display: flex;
+    flex-direction: column;
+}
+
+.code-playground {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.playground-header {
+    padding: 15px 20px;
+    background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.playground-title {
+    font-size: 15px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.playground-title::before {
+    content: "💻";
+}
+
+.playground-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.playground-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.playground-btn:hover {
+    background: rgba(255,255,255,0.2);
+}
+
+.playground-btn.run-btn {
+    background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+}
+
+.playground-btn.run-btn:hover {
+    box-shadow: 0 4px 12px rgba(0,184,148,0.4);
+}
+
+.playground-editor {
+    flex: 1;
+    min-height: 300px;
+    overflow: hidden;
+}
+
+.playground-editor .CodeMirror {
+    height: 100% !important;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+.playground-output-section {
+    border-top: 1px solid #e2e8f0;
+}
+
+.output-header {
+    padding: 10px 15px;
+    background: #f8fafc;
+    font-size: 13px;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.output-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #9ca3af;
+}
+
+.status-dot.running {
+    background: #f59e0b;
+    animation: pulse 1s infinite;
+}
+
+.status-dot.success {
+    background: #10b981;
+}
+
+.status-dot.error {
+    background: #ef4444;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.clear-output-btn {
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.clear-output-btn:hover {
+    color: #64748b;
+}
+
+.playground-output {
+    background: #1e1e2e;
+    color: #c9d1d9;
+    padding: 15px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 120px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.playground-output.error {
+    color: #f85149;
+}
+
+.playground-output .placeholder {
+    color: #6b7280;
+    font-style: italic;
+}
+
+/* 底部导航 */
+.lesson-nav {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+
+.lesson-nav .btn {
+    padding: 12px 28px;
+    font-size: 15px;
+    border-radius: 8px;
+}
+
+/* 响应式 */
+@media (max-width: 1200px) {
+    .lesson-page {
+        flex-direction: column;
+    }
+
+    .lesson-sidebar {
+        width: 100%;
+        position: static;
+        height: auto;
+    }
+
+    .code-playground {
+        height: 500px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="lesson-page">
+    <!-- 左侧主内容 -->
+    <div class="lesson-main">
+        <div class="lesson-detail" id="lesson-content">
+            <div class="loading">
+                <div style="font-size: 40px; margin-bottom: 15px;">📚</div>
+                <div>正在加载课程内容...</div>
+            </div>
+        </div>
+
+        <!-- 本章练习题 -->
+        <div class="chapter-exercises" id="chapter-exercises" style="display: none;">
+            <h2>本章练习题</h2>
+            <div class="exercise-list" id="exercise-list">
+                <!-- 动态加载 -->
+            </div>
+        </div>
+
+        <!-- 底部导航 -->
+        <div class="lesson-nav">
+            <a href="/lessons" class="btn btn-outline">← 返回课程列表</a>
+            <a href="#" class="btn btn-primary" id="next-lesson-btn" style="display: none;">下一章 →</a>
+        </div>
+    </div>
+
+    <!-- 右侧代码练习栏 -->
+    <div class="lesson-sidebar">
+        <div class="code-playground">
+            <div class="playground-header">
+                <div class="playground-title">代码练习区</div>
+                <div class="playground-actions">
+                    <button class="playground-btn" onclick="clearEditor()">清空</button>
+                    <button class="playground-btn run-btn" onclick="runPlaygroundCode()">▶ 运行</button>
+                </div>
+            </div>
+            <div class="playground-editor">
+                <textarea id="playground-code"># 在这里编写你的Python代码
+# 试试输入以下代码然后点击运行：
+
+print("Hello, Python!")
+
+# 或者试试变量：
+name = "小明"
+age = 18
+print(f"我是{name}，今年{age}岁")
+</textarea>
+            </div>
+            <div class="playground-output-section">
+                <div class="output-header">
+                    <div class="output-status">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="status-text">输出结果</span>
+                    </div>
+                    <button class="clear-output-btn" onclick="clearOutput()">清空输出</button>
+                </div>
+                <div class="playground-output" id="playground-output">
+                    <span class="placeholder">运行代码后，结果将显示在这里...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- CodeMirror -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+
+<script>
+let playgroundEditor;
+const lessonId = {{ lesson_id }};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化CodeMirror编辑器
+    playgroundEditor = CodeMirror.fromTextArea(document.getElementById('playground-code'), {
+        mode: 'python',
+        theme: 'dracula',
+        lineNumbers: true,
+        indentUnit: 4,
+        tabSize: 4,
+        indentWithTabs: false,
+        lineWrapping: true,
+        matchBrackets: true,
+        autoCloseBrackets: true
+    });
+
+    // 加载课程内容
+    loadLesson();
+
+    // 加载本章练习题
+    loadExercises();
+});
+
+function loadLesson() {
+    fetch(`/api/lessons/${lessonId}`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('lesson-content');
+            if (data.success) {
+                const lesson = data.data;
+                container.innerHTML = `
+                    <div class="lesson-header">
+                        <span class="lesson-chapter-badge">第 ${lesson.chapter_num} 章</span>
+                        <h1>${lesson.title}</h1>
+                    </div>
+                    <div class="lesson-body markdown-content">
+                        ${lesson.content_html || '<p>暂无内容</p>'}
+                    </div>
+                `;
+
+                // 代码高亮
+                document.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                });
+
+                // 为代码块添加运行按钮
+                addRunButtons();
+
+                // 设置下一章按钮
+                if (lesson.chapter_num < 7) {
+                    const nextBtn = document.getElementById('next-lesson-btn');
+                    nextBtn.href = `/lessons/${lesson.chapter_num + 1}`;
+                    nextBtn.style.display = 'inline-block';
+                }
+            } else {
+                container.innerHTML = '<p class="error-message">加载失败</p>';
+            }
+        })
+        .catch(error => {
+            document.getElementById('lesson-content').innerHTML =
+                '<p class="error-message">加载失败，请刷新重试</p>';
+        });
+}
+
+function loadExercises() {
+    fetch(`/api/exercises?lesson_id=${lessonId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data.length > 0) {
+                const container = document.getElementById('chapter-exercises');
+                const list = document.getElementById('exercise-list');
+
+                container.style.display = 'block';
+
+                const difficultyText = ['', '简单', '中等', '困难'];
+                const difficultyClass = ['', 'easy', 'medium', 'hard'];
+
+                list.innerHTML = data.data.map((ex, index) => `
+                    <a href="/exercises/${ex.id}" class="exercise-item">
+                        <div class="exercise-num">${index + 1}</div>
+                        <div class="exercise-info">
+                            <div class="exercise-name">${ex.title}</div>
+                            <span class="exercise-difficulty ${difficultyClass[ex.difficulty]}">${difficultyText[ex.difficulty]}</span>
+                        </div>
+                        <div class="exercise-arrow">→</div>
+                    </a>
+                `).join('');
+            }
+        })
+        .catch(error => {
+            console.error('加载练习题失败:', error);
+        });
+}
+
+function addRunButtons() {
+    document.querySelectorAll('.lesson-body pre').forEach((pre, index) => {
+        const code = pre.querySelector('code');
+        if (!code) return;
+
+        // 只为Python代码块添加运行按钮
+        const codeText = code.textContent;
+        if (!codeText.trim()) return;
+
+        // 检查是否是可执行的Python代码（排除纯输出或说明性代码）
+        const isPythonCode = code.className.includes('python') ||
+                            code.className.includes('language-python') ||
+                            !code.className.includes('language-');
+
+        if (isPythonCode && !codeText.startsWith('#') || codeText.includes('print') || codeText.includes('=')) {
+            // 创建包装器
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+
+            // 添加运行按钮
+            const runBtn = document.createElement('button');
+            runBtn.className = 'code-run-btn';
+            runBtn.innerHTML = '▶ 运行';
+            runBtn.onclick = () => runCodeBlock(codeText, wrapper);
+            wrapper.appendChild(runBtn);
+
+            // 添加输出区域
+            const output = document.createElement('div');
+            output.className = 'code-output';
+            output.id = `output-${index}`;
+            pre.appendChild(output);
+        }
+    });
+}
+
+function runCodeBlock(code, wrapper) {
+    const outputDiv = wrapper.querySelector('.code-output');
+    const btn = wrapper.querySelector('.code-run-btn');
+
+    btn.innerHTML = '⏳ 运行中...';
+    btn.disabled = true;
+
+    outputDiv.innerHTML = '<div class="code-output-label">输出结果</div>';
+    outputDiv.classList.add('show');
+    outputDiv.classList.remove('error');
+
+    fetch('/api/code/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.innerHTML = '▶ 运行';
+        btn.disabled = false;
+
+        if (data.success) {
+            outputDiv.innerHTML = '<div class="code-output-label">输出结果</div>' +
+                                 (data.output || '<span style="color:#6b7280">(无输出)</span>');
+        } else {
+            outputDiv.classList.add('error');
+            outputDiv.innerHTML = '<div class="code-output-label">错误信息</div>' + data.error;
+        }
+    })
+    .catch(error => {
+        btn.innerHTML = '▶ 运行';
+        btn.disabled = false;
+        outputDiv.classList.add('error');
+        outputDiv.innerHTML = '<div class="code-output-label">错误</div>网络错误，请重试';
+    });
+}
+
+// 右侧练习区功能
+function runPlaygroundCode() {
+    const code = playgroundEditor.getValue();
+    const outputDiv = document.getElementById('playground-output');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    statusDot.className = 'status-dot running';
+    statusText.textContent = '运行中...';
+    outputDiv.innerHTML = '';
+    outputDiv.classList.remove('error');
+
+    fetch('/api/code/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            statusDot.className = 'status-dot success';
+            statusText.textContent = '运行成功';
+            outputDiv.textContent = data.output || '(程序无输出)';
+        } else {
+            statusDot.className = 'status-dot error';
+            statusText.textContent = '运行出错';
+            outputDiv.classList.add('error');
+            outputDiv.textContent = data.error;
+        }
+    })
+    .catch(error => {
+        statusDot.className = 'status-dot error';
+        statusText.textContent = '网络错误';
+        outputDiv.classList.add('error');
+        outputDiv.textContent = '网络错误，请重试';
+    });
+}
+
+function clearEditor() {
+    playgroundEditor.setValue('# 在这里编写你的Python代码\n\n');
+    playgroundEditor.focus();
+}
+
+function clearOutput() {
+    const outputDiv = document.getElementById('playground-output');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    outputDiv.innerHTML = '<span class="placeholder">运行代码后，结果将显示在这里...</span>';
+    outputDiv.classList.remove('error');
+    statusDot.className = 'status-dot';
+    statusText.textContent = '输出结果';
+}
+
+// 快捷键支持
+document.addEventListener('keydown', function(e) {
+    // Ctrl+Enter 运行代码
+    if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        runPlaygroundCode();
+    }
+});
+</script>
+{% endblock %}

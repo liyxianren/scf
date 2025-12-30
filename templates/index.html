@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - Python学习平台{% endblock %}
+
+{% block content %}
+<div class="container">
+    <section class="hero">
+        <h1>Python 学习平台</h1>
+        <p class="hero-subtitle">从零开始，系统学习Python编程，掌握编程思维，开启你的编程之旅</p>
+        <div class="hero-actions">
+            <a href="/lessons/1" class="btn btn-white btn-large">立即开始学习</a>
+            <a href="/playground" class="btn btn-outline btn-large" style="border-color: white; color: white;">代码练习场</a>
+        </div>
+    </section>
+
+    <section class="features">
+        <h2>📚 课程内容</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📝</div>
+                <h3>Python基础</h3>
+                <p>变量与数据类型、输入输出、运算符、类型转换，打下坚实的编程基础</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3>条件与循环</h3>
+                <p>if/elif/else条件判断、for和while循环、break与continue控制流程</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>函数与方法</h3>
+                <p>函数定义与调用、参数传递、返回值、作用域、lambda表达式</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>列表与字典</h3>
+                <p>列表的创建与操作、字典的使用、切片、推导式等高效数据处理</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3>类与对象</h3>
+                <p>面向对象基础、类的定义、构造函数、实例属性与类属性</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏗️</div>
+                <h3>面向对象编程</h3>
+                <p>继承与多态、封装、super()方法、魔术方法，掌握OOP精髓</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3>异常处理</h3>
+                <p>try/except异常捕获、raise抛出异常、自定义异常类，编写健壮代码</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="quick-actions">
+        <h2>🚀 开始你的学习之旅</h2>
+        <div class="action-buttons">
+            <a href="/lessons" class="btn btn-primary btn-large">查看全部课程</a>
+            <a href="/playground" class="btn btn-secondary btn-large">在线代码练习</a>
+            <a href="/exercises" class="btn btn-outline btn-large">练习题挑战</a>
+        </div>
+    </section>
+</div>
+{% endblock %}
