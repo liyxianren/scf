@@ -1,5 +1,3 @@
-import os
-
-# Bind to PORT environment variable
-bind = f"0.0.0.0:{os.environ.get('PORT', '8080')}"
+# Gunicorn configuration
+bind = "0.0.0.0:5000"
 workers = 1
