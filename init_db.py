@@ -1,4 +1,6 @@
 import json
+from app import app, db
+from models import Lesson, Exercise, Agent
 
 
 def init_agents():
