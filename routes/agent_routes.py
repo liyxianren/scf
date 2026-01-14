@@ -116,6 +116,11 @@ def chat_refinement():
     # Enable Thinking for chat as well to ensure high quality replies
     response = client.generate_chat(system_prompt, user_message, temperature=0.8, enable_thinking=True)
     
+    if response:
+        return jsonify({'response': response})
+    else:
+        return jsonify({'error': 'Failed to generate response'}), 500
+
 @agent_bp.route('/projects/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
     """删除项目"""
