@@ -1,11 +1,45 @@
-"""
-数据库初始化脚本
-运行此脚本来创建数据库表和初始数据
-"""
-
 import json
-from app import app, db
-from models import Lesson, Exercise
+
+
+def init_agents():
+    """初始化 Agent 数据"""
+    from app import db
+    from models import Agent
+
+    agents_data = [
+        {
+            "name": "智能客服助手",
+            "description": "24/7 在线自动回复客户咨询，支持多语言和上下文理解。",
+            "icon": "chat_bubble",
+            "status": "active"
+        },
+        {
+            "name": "数据分析专家",
+            "description": "自动生成销售报表，分析市场趋势，提供决策支持。",
+            "icon": "analytics",
+            "status": "active"
+        },
+        {
+            "name": "代码审查 Bot",
+            "description": "集成在 CI/CD 流程中，自动检查代码质量和安全漏洞。",
+            "icon": "code",
+            "status": "testing"
+        },
+        {
+            "name": "营销文案生成器",
+            "description": "根据产品特性自动生成社交媒体推广文案。",
+            "icon": "edit_note",
+            "status": "active"
+        }
+    ]
+
+    for data in agents_data:
+        if not Agent.query.filter_by(name=data['name']).first():
+            agent = Agent(**data)
+            db.session.add(agent)
+
+    db.session.commit()
+    print(f"已添加 {len(agents_data)} 个演示 Agent")
 
 
 def init_lessons():

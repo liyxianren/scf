@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ agent.name }} - Agent 详情{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+            <a href="/company/agents" style="text-decoration: none; color: var(--text-secondary);">&larr; 返回大厅</a>
+        </div>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <span class="material-icons" style="font-size: 48px; color: var(--primary-color);">{{ agent.icon }}</span>
+            <h1>{{ agent.name }}</h1>
+        </div>
+        <p class="badge badge-{{ agent.status }}"
+            style="display: inline-block; padding: 4px 12px; border-radius: 4px; background: #eee; margin-top: 10px;">
+            {{ agent.status | upper }}
+        </p>
+    </div>
+
+    <div class="card"
+        style="background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+        <h2>功能介绍</h2>
+        <p style="font-size: 1.1em; line-height: 1.6; color: var(--text-secondary);">
+            {{ agent.description }}
+        </p>
+
+        <hr style="margin: 30px 0; border: 0; border-top: 1px solid #eee;">
+
+        {% if agent.name == 'Creative Copilot' %}
+        <div style="text-align: center; padding: 40px; background: #f8fafc; border-radius: 8px;">
+            <p style="margin-bottom: 20px;">点击下方按钮启动创意生成器</p>
+            <a href="/company/creative" class="btn-primary"
+                style="text-decoration: none; display: inline-block; padding: 12px 30px; font-size: 1.1em;">
+                <span class="material-icons" style="vertical-align: middle; margin-right: 8px;">rocket_launch</span>
+                启动 Creative Copilot
+            </a>
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 40px; background: #f8fafc; border-radius: 8px;">
+            <span class="material-icons"
+                style="font-size: 64px; color: #cbd5e1; margin-bottom: 16px;">engineering</span>
+            <p>Agent 工作流交互界面正在开发中...</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+{% endblock %}

@@ -1,7 +1,7 @@
 import os
 from flask import Flask, render_template
 from config import Config
-from models import db, Lesson, Exercise
+from models import db, Lesson, Exercise, Agent
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -13,24 +13,37 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
     # 检查是否需要初始化数据
+    # 检查是否需要初始化数据
     if Lesson.query.count() == 0:
-        from init_db import init_lessons, init_exercises
+        from init_db import init_lessons, init_exercises, init_agents
         init_lessons()
         init_exercises()
+        init_agents()
         print("数据库已自动初始化")
+    elif Agent.query.count() == 0:
+         # 单独补充 Agent 数据
+        from init_db import init_agents
+        init_agents()
 
 # 注册蓝图
-from routes import lesson_bp, exercise_bp, code_runner_bp
+from routes import lesson_bp, exercise_bp, code_runner_bp, agent_bp
 
 app.register_blueprint(lesson_bp, url_prefix='/api/lessons')
 app.register_blueprint(exercise_bp, url_prefix='/api/exercises')
 app.register_blueprint(code_runner_bp, url_prefix='/api/code')
+app.register_blueprint(agent_bp, url_prefix='/company')
 
 
 # ========== 首页 ==========
 @app.route('/')
 def index():
-    """首页 - 选择语言"""
+    """首页 - SCF Hub"""
+    return render_template('landing.html')
+
+
+@app.route('/code')
+def code_lobby():
+    """编程学习大厅 (原 index.html)"""
     return render_template('index.html')
 
 
@@ -131,5 +144,4 @@ if __name__ == '__main__':
     # 从环境变量获取端口，Zeabur 会自动设置 PORT
     port = int(os.environ.get('PORT', 5000))
     # 生产环境关闭 debug 模式
-    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=port)

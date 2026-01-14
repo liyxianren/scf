@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,14 +14,25 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
+
 <body>
     {% set lang = language|default('python') %}
     {% set lang_name = 'Python' if lang == 'python' else 'C语言' %}
     {% set lang_prefix = '/' + lang %}
 
     <nav class="navbar">
+        <!-- Debug: Request Path = [{{ request.path }}] -->
         <div class="nav-container">
-            <!-- Logo -->
+            {% if request.path.startswith('/company') or request.path.startswith('/projects') %}
+            <!-- Agent 导航 -->
+            <a href="/company/agents" class="nav-logo">SCF Agent Hub</a>
+            <div class="nav-links">
+                <a href="/company/creative" class="nav-link">创意助手</a>
+                <a href="/projects" class="nav-link">我的收藏</a>
+                <a href="/" class="nav-link" style="opacity: 0.7; font-size: 0.9em;">返回首页</a>
+            </div>
+            {% else %}
+            <!-- Code Learn 导航 -->
             <a href="/" class="nav-logo">Code Learn</a>
 
             <!-- 导航链接 -->
@@ -35,6 +47,7 @@
                 <a href="/python/lessons" class="lang-btn {% if lang == 'python' %}active{% endif %}">Python</a>
                 <a href="/c/lessons" class="lang-btn {% if lang == 'c' %}active{% endif %}">C</a>
             </div>
+            {% endif %}
         </div>
     </nav>
 
@@ -64,4 +77,5 @@
 
     {% block extra_js %}{% endblock %}
 </body>
+
 </html>

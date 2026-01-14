@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Agent 工作流展示 - 公司大厅{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <h1>Agent 智能体展示大厅</h1>
+        <p>探索我们基于 AI 驱动的自动化工作流 Agent，提升您的业务效率</p>
+    </div>
+
+    <div class="lessons-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+        {% for agent in agents %}
+        <a href="/company/agents/{{ agent.id }}" class="lesson-card" style="text-decoration: none; color: inherit;">
+            <div class="lesson-card-header">
+                <div class="lesson-chapter" style="display: flex; align-items: center; gap: 8px;">
+                    <span class="material-icons">{{ agent.icon }}</span>
+                    <span>{{ agent.status | upper }}</span>
+                </div>
+                <h3 class="lesson-title">{{ agent.name }}</h3>
+            </div>
+            <div class="lesson-card-body">
+                <p class="lesson-desc">{{ agent.description }}</p>
+            </div>
+            <div class="lesson-card-footer">
+                <span class="start-btn">查看详情 →</span>
+            </div>
+        </a>
+        {% else %}
+        <p class="empty-message">暂无 Agent 展示</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<!-- 引入 Material Icons 用于显示图标 -->
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+{% endblock %}

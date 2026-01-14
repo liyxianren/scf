@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+
+{% block title %}创意项目生成器 - SCF AI Copilot{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+            <a href="/company/agents" style="text-decoration: none; color: var(--text-secondary);">&larr; 返回大厅</a>
+            <a href="/company/projects"
+                style="text-decoration: none; color: var(--primary-color); margin-left: auto; display: flex; align-items: center; gap: 5px;">
+                <span class="material-icons" style="font-size: 18px;">stars</span> 我的收藏
+            </a>
+        </div>
+        <h1>创意项目生成器 (Creative Generator)</h1>
+        <p>基于 ChatGLM 大模型，辅助生成高可行性、有创意的商赛项目提案</p>
+    </div>
+
+    <div class="row" style="display: flex; gap: 30px; flex-wrap: wrap;">
+        <!-- 左侧输入区 -->
+        <div class="col-md-5" style="flex: 1; min-width: 300px;">
+            <div class="card"
+                style="background: white; border-radius: 12px; padding: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <form id="creativeForm">
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="competition" style="display: block; margin-bottom: 8px; font-weight: 500;">目标赛事
+                            (Target Competition)</label>
+                        <select id="competition" class="form-control"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                            <option value="Diamond Challenge">Diamond Challenge (钻石挑战赛)</option>
+                            <option value="CTB">CTB (全球创新研究大挑战)</option>
+                            <option value="USAD">USAD (美国学术十项全能)</option>
+                            <option value="Yau Science Award">丘成桐中学科学奖</option>
+                            <option value="Other">其他/通用商业类</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="studentProfile" style="display: block; margin-bottom: 8px; font-weight: 500;">学生画像
+                            (Student Profile)</label>
+                        <textarea id="studentProfile" rows="3" placeholder="例如：擅长编程的环保主义者，喜欢生物学，有些社恐..."
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="keywords" style="display: block; margin-bottom: 8px; font-weight: 500;">核心关键词
+                            (Keywords)</label>
+                        <input type="text" id="keywords" placeholder="例如：环保 + APP + AI + 垃圾分类"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 25px;">
+                        <label for="extraReq" style="display: block; margin-bottom: 8px; font-weight: 500;">额外要求 (Extra
+                            Requirements)</label>
+                        <textarea id="extraReq" rows="2" placeholder="例如：必须包含硬件原型，或者是纯公益性质..."
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary"
+                        style="width: 100%; padding: 12px; background: var(--primary-color); color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background 0.2s;">
+                        <span class="material-icons"
+                            style="vertical-align: middle; font-size: 18px; margin-right: 5px;">auto_awesome</span>
+                        开始生成创意
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 右侧结果区 -->
+        <div class="col-md-7" style="flex: 1.5; min-width: 300px;">
+            <div class="card"
+                style="background: white; border-radius: 12px; padding: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 500px;">
+                <div id="outputHeader"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 1.2rem;">生成的项目提案</h3>
+                    <div id="statusIndicator"
+                        style="display: none; align-items: center; gap: 8px; color: var(--primary-color); font-size: 0.9em;">
+                        <div class="loading-spinner" style="width: 16px; height: 16px; border-width: 2px;"></div>
+                        <span>AI 正在思考中...</span>
+                    </div>
+                </div>
+
+                <div id="outputContent" class="markdown-body" style="line-height: 1.6; color: #333;">
+                    <div style="text-align: center; color: #999; margin-top: 100px;">
+                        <span class="material-icons" style="font-size: 48px; color: #eee;">light_mode</span>
+                        <p>请在左侧填写信息，点击生成按钮获取创意方案</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Old chat section removed -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+    }
+
+    .markdown-body ul {
+        padding-left: 20px;
+    }
+
+    .markdown-body blockquote {
+        border-left: 4px solid #eee;
+        padding-left: 15px;
+        color: #666;
+        margin: 0;
+    }
+
+    .btn-outline {
+        background: white;
+        border: 1px solid var(--primary-color);
+        color: var(--primary-color);
+        padding: 5px 15px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 0.9em;
+        transition: all 0.2s;
+    }
+
+    .btn-outline:hover {
+        background: var(--primary-color);
+        color: white;
+    }
+</style>
+<style>
+    /* Modal Styles */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(4px);
+        animation: fadeIn 0.2s;
+    }
+
+    .modal-content {
+        width: 85%;
+        height: 85%;
+        background: white;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        animation: slideUp 0.3s;
+    }
+
+    .modal-header {
+        padding: 20px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #fcfcfc;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: #333;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #999;
+    }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        background: #fff;
+    }
+
+    .modal-footer {
+        padding: 15px;
+        border-top: 1px solid #eee;
+        display: flex;
+        gap: 10px;
+        background: #fcfcfc;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideUp {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<!-- 引入 Markdown 渲染库 (UMD版本，确保兼容性) -->
+<script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
+
+<!-- Chat Modal Structure -->
+<div id="chatModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">💬 方案优化与讨论</h3>
+            <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="chatHistory">
+            <div style="color: #888; text-align: center; font-style: italic; margin-top: 100px;">
+                正在连接 AI 顾问...
+            </div>
+        </div>
+        <div class="modal-footer">
+            <input type="text" id="chatInput" class="form-control" placeholder="输入您的想法..."
+                style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+            <button id="sendChatBtn" class="btn-primary"
+                style="padding: 10px 25px; border: none; border-radius: 8px;">发送</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('creativeForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        // 获取表单数据
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value
+        };
+
+        // UI 状态更新
+        const outputContent = document.getElementById('outputContent');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = statusIndicator.querySelector('span');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const actionArea = document.getElementById('actionArea'); // New Action Area
+
+        outputContent.innerHTML = ''; // 清空内容
+        if (actionArea) actionArea.style.display = 'none'; // Hide buttons during generation
+
+        statusIndicator.style.display = 'flex'; // 显示加载中
+        statusText.innerText = "AI 正在深度思考中 (预计需 30-60 秒)...";
+        submitBtn.disabled = true; // 禁用按钮
+
+        // 调用后端 API
+        fetch('/company/creative/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.error) {
+                    outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
+                } else {
+                    const report = result.report;
+                    // 简单的打字机效果展示结果
+                    let index = 0;
+                    statusText.innerText = "生成完成，正在渲染...";
+
+                    const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+
+                    // 为了避免打字机效果在渲染 Markdown 时出现格式错乱（如未闭合的标签），
+                    // 这里简化为：先 parse 成 HTML，然后直接显示，或者依然使用全量展示
+                    // 考虑到 markdown 逐步渲染的复杂性，这里直接展示最终结果，或者简单的渐显
+
+                    outputContent.innerHTML = parser(report);
+                    statusIndicator.style.display = 'none';
+
+                    // 显示聊天区域
+                    // document.getElementById('chatSection').style.display = 'block'; // REMOVED
+
+                    // Show Action Area (Buttons)
+                    if (actionArea) actionArea.style.display = 'block';
+                    else createActionArea(); // Create if not exists
+
+                    // 保存当前的报告内容作为 Context
+                    window.currentReportContext = report;
+                }
+            })
+            .catch(err => {
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+                statusIndicator.style.display = 'none';
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+            });
+    });
+
+    function createActionArea() {
+        const container = document.getElementById('outputContent').parentNode;
+        let div = document.getElementById('actionArea');
+        if (!div) {
+            div = document.createElement('div');
+            div.id = 'actionArea';
+            div.style.marginTop = '20px';
+            div.style.paddingTop = '20px';
+            div.style.borderTop = '1px solid #eee';
+            container.appendChild(div);
+        }
+
+        div.innerHTML = `
+            <h4 style="margin-bottom: 15px;">🚀 下一步操作</h4>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <button class="btn-outline" onclick="openOptimization(1)">优化方案 1 (工具类)</button>
+                <button class="btn-outline" onclick="openOptimization(2)">优化方案 2 (平台类)</button>
+                <button class="btn-outline" onclick="openOptimization(3)">优化方案 3 (硬件类)</button>
+                <button class="btn-outline" style="border-color: #666; color: #666;" onclick="openOptimization(0)">💬 自由讨论</button>
+                <div style="flex: 1;"></div>
+                <button class="btn-primary" onclick="saveProject()" style="padding: 6px 15px; border-radius: 20px; font-size: 0.9em; display: flex; align-items: center; gap: 5px;">
+                    <span class="material-icons" style="font-size: 16px;">favorite</span> 收藏方案
+                </button>
+            </div>
+        `;
+    }
+
+    // Save Project Logic
+    window.saveProject = function () {
+        const content = window.currentReportContext;
+        if (!content) { alert("没有可保存的内容！"); return; }
+
+        // Simple extraction of Title
+        const titleMatch = content.match(/#\s*(.+)/) || content.match(/\*\*(.+)\*\*/);
+        const title = titleMatch ? titleMatch[1].replace(/[:：]/g, '').trim() : "AI 创意项目";
+
+        fetch('/company/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title,
+                content: content,
+                tags: "AI Generated"
+            })
+        })
+            .then(res => res.json())
+            .then(data => {
+                alert("✅ 项目已收藏到对应页面！");
+            })
+            .catch(err => alert("保存失败: " + err));
+    };
+
+    // Modal & Chat Logic
+    const chatModal = document.getElementById('chatModal');
+    const chatHistory = document.getElementById('chatHistory');
+    const chatInput = document.getElementById('chatInput');
+    const sendChatBtn = document.getElementById('sendChatBtn');
+
+    function openModal() {
+        chatModal.style.display = 'flex';
+        chatInput.focus();
+    }
+
+    function closeModal() {
+        chatModal.style.display = 'none';
+    }
+
+    // Close when clicking outside
+    chatModal.addEventListener('click', (e) => {
+        if (e.target === chatModal) closeModal();
+    });
+
+    function appendMessage(role, text) {
+        const msgDiv = document.createElement('div');
+        msgDiv.style.margin = "10px 0";
+        msgDiv.style.padding = "12px 16px";
+        msgDiv.style.borderRadius = "12px";
+        msgDiv.style.maxWidth = "85%";
+        msgDiv.style.lineHeight = "1.5";
+
+        if (role === 'user') {
+            msgDiv.style.background = "#e3f2fd";
+            msgDiv.style.marginLeft = "auto";
+            msgDiv.style.color = "#000";
+            msgDiv.innerHTML = `<strong>You:</strong> ${text}`;
+        } else {
+            msgDiv.style.background = "#f4f6f8";
+            msgDiv.style.marginRight = "auto";
+            const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+            msgDiv.innerHTML = parser(text); // AI text is markdown
+        }
+
+        chatHistory.appendChild(msgDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    function sendChat(message) {
+        if (!message) return;
+
+        appendMessage('user', message);
+        chatInput.value = '';
+
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'chatLoading';
+        loadingDiv.innerText = "AI 正在思考中...";
+        loadingDiv.style.padding = "12px";
+        loadingDiv.style.color = "#999";
+        chatHistory.appendChild(loadingDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+
+        fetch('/company/creative/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: message,
+                context: window.currentReportContext || ""
+            })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
+                if (data.reply) {
+                    appendMessage('ai', data.reply);
+
+                    // Update Context if reply looks like a new report (Auto-Update Logic)
+                    // Heuristic: Length > 200 and contains Headers
+                    if (data.reply.length > 200 && (data.reply.includes("# ") || data.reply.includes("### "))) {
+                        console.log("Updating context with new report...");
+                        window.currentReportContext = data.reply;
+
+                        // Add a mini notification in chat
+                        const updateDiv = document.createElement('div');
+                        updateDiv.style.textAlign = 'center';
+                        updateDiv.style.fontSize = '0.8em';
+                        updateDiv.style.color = '#10b981';
+                        updateDiv.style.margin = '10px 0';
+                        updateDiv.innerHTML = '💾 系统检测到新方案，点击主界面的“收藏”即可保存此版本。';
+                        chatHistory.appendChild(updateDiv);
+                        chatHistory.scrollTop = chatHistory.scrollHeight;
+                    }
+                } else {
+                    appendMessage('ai', "Error generating reply.");
+                }
+            })
+            .catch(err => {
+                if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
+                appendMessage('ai', `Error: ${err}`);
+            });
+    }
+
+    // Trigger Optimization
+    window.openOptimization = function (idx) {
+        openModal();
+        // Clear history if it's a fresh session or just append separator? 
+        // Let's clear for better focus if user switches context, or keep it?
+        // User might want to compare. Let's keep history but add a divider or system note.
+
+        let msg = "";
+        if (idx === 0) {
+            document.getElementById('modalTitle').innerText = "💬 自由讨论模式";
+            // Don't auto send, just ready
+            chatHistory.innerHTML = '<div style="text-align:center; color:#999; margin: 20px;">已进入自由讨论模式，请直接提问。</div>';
+        } else {
+            document.getElementById('modalTitle').innerText = `🚀 正在优化：方案 ${idx}`;
+            chatHistory.innerHTML = ''; // Start fresh for specific optimization
+            msg = `我对方案 ${idx} 很感兴趣。请担任技术顾问，详细列出它的落地执行步骤（Roadmap），并分析潜在的技术难点（Tech Challenges）。`;
+            sendChat(msg);
+        }
+    };
+
+    sendChatBtn.addEventListener('click', () => sendChat(chatInput.value));
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendChat(chatInput.value);
+    });
+</script>
+{% endblock %}
