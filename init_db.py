@@ -32,6 +32,12 @@ def init_agents():
             "description": "根据产品特性自动生成社交媒体推广文案。",
             "icon": "edit_note",
             "status": "active"
+        },
+        {
+            "name": "Creative Copilot",
+            "description": "基于 AI 的创意生成与优化助手。它可以帮助您分析需求、生成创意方案、评估可行性，并输出完整的项目报告。",
+            "icon": "lightbulb",
+            "status": "active"
         }
     ]
 

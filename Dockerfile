@@ -23,4 +23,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run with gunicorn using shell form to expand $PORT
-CMD gunicorn app:app --bind 0.0.0.0:$PORT
+CMD gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
