@@ -17,7 +17,16 @@ class CreativeAgent:
             "行业领域（例如：教育/环保/健康/金融/公益）",
         ]
 
-    def analyze_input(self, keywords, student_profile, competition=None, extra_requirements=None, history_ideas=None):
+    def analyze_input(
+        self,
+        keywords,
+        student_profile,
+        competition=None,
+        extra_requirements=None,
+        history_ideas=None,
+        avoid_topics=None,
+        feedback=None,
+    ):
         """
         Node 1: 需求拆解与扩充 (Input Analysis)
         Input: keywords (str), student_profile (str)
@@ -25,6 +34,7 @@ class CreativeAgent:
         """
         diversity_seed = self._pick_diversity_seed()
         history_summary = self._format_history(history_ideas)
+        avoid_summary = self._format_avoid_topics(avoid_topics)
         system_prompt = """
 # Role
 资深国际课程规划师，擅长将模糊的学生兴趣转化为具体的竞赛赛道。
@@ -43,6 +53,7 @@ class CreativeAgent:
 - 必须严格遵守用户的额外要求与目标赛事偏好。
 - 必须显式体现关键词与学生画像中的特点。
 - 避免与历史输出重复，如果发现高度相似必须替换为新方向。
+- 必须避开以下主题或方向：{avoid_summary}
 - 多样性锚点：{diversity_seed}
 - 历史输出（避免重复）：{history_summary}
 - 输出必须是合法的 JSON 格式。
@@ -60,7 +71,8 @@ class CreativeAgent:
             f"目标赛事：{competition or '未指定'}\n"
             f"关键词：{keywords}\n"
             f"学生画像：{student_profile}\n"
-            f"额外要求：{extra_requirements or '无'}"
+            f"额外要求：{extra_requirements or '无'}\n"
+            f"用户修改建议：{feedback or '无'}"
         )
         
         print(f"--- Node 1 Agent Thinking (Deep Mode) ---\nInput: {user_content}")
@@ -68,6 +80,7 @@ class CreativeAgent:
             system_prompt.format(
                 diversity_seed=", ".join(diversity_seed),
                 history_summary=history_summary,
+                avoid_summary=avoid_summary,
             ),
             user_content,
             enable_thinking=True,
@@ -84,7 +97,17 @@ class CreativeAgent:
             print(f"JSON Parse Error in Node 1: {e}\nRaw Response: {response}")
             return []
 
-    def brainstorm(self, directions, keywords=None, student_profile=None, competition=None, extra_requirements=None, history_ideas=None):
+    def brainstorm(
+        self,
+        directions,
+        keywords=None,
+        student_profile=None,
+        competition=None,
+        extra_requirements=None,
+        history_ideas=None,
+        avoid_topics=None,
+        feedback=None,
+    ):
         """
         Node 2: 头脑风暴 (Brainstorming)
         Input: list of directions (str)
@@ -92,6 +115,7 @@ class CreativeAgent:
         """
         diversity_seed = self._pick_diversity_seed()
         history_summary = self._format_history(history_ideas)
+        avoid_summary = self._format_avoid_topics(avoid_topics)
         system_prompt = """
 # Role
 硅谷创业公司的创意总监，思维活跃，擅长提出颠覆性的点子。
@@ -106,6 +130,7 @@ class CreativeAgent:
 - 描述要吸引人，体现"新想法"。
 - 必须与用户关键词、学生画像和额外要求强相关。
 - 避免与历史输出重复，如果相似必须换成新创意。
+- 必须避开以下主题或方向：{avoid_summary}
 - 多样性锚点：{diversity_seed}
 - 历史输出（避免重复）：{history_summary}
 
@@ -123,6 +148,7 @@ class CreativeAgent:
             f"关键词：{keywords or '未提供'}\n"
             f"学生画像：{student_profile or '未提供'}\n"
             f"额外要求：{extra_requirements or '无'}\n"
+            f"用户修改建议：{feedback or '无'}\n"
             f"赛道方向列表：\n" + "\n".join(directions)
         )
         
@@ -131,6 +157,7 @@ class CreativeAgent:
             system_prompt.format(
                 diversity_seed=", ".join(diversity_seed),
                 history_summary=history_summary,
+                avoid_summary=avoid_summary,
             ),
             user_content,
             temperature=1.0,
@@ -201,13 +228,24 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
             print(f"JSON Parse Error in Node 3: {e}\nRaw Response: {response}")
             return []
 
-    def generate_report(self, selected_ideas, keywords=None, student_profile=None, competition=None, extra_requirements=None, history_ideas=None):
+    def generate_report(
+        self,
+        selected_ideas,
+        keywords=None,
+        student_profile=None,
+        competition=None,
+        extra_requirements=None,
+        history_ideas=None,
+        avoid_topics=None,
+        feedback=None,
+    ):
         """
         Node 4: 方案细化 (Detailing)
         Input: list of selected ideas (str)
         Output: Full Markdown Report (str)
         """
         history_summary = self._format_history(history_ideas)
+        avoid_summary = self._format_avoid_topics(avoid_topics)
         system_prompt = """
 # Role
 商业计划书撰写专家。
@@ -225,6 +263,7 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
 6. **商业价值**: 怎么赚钱或产生社会影响力？
 - 必须显式体现用户关键词、学生画像和额外要求。
 - 不得与历史输出重复；如相似必须改写为全新方案。
+- 必须避开以下主题或方向：{avoid_summary}
 - 历史输出（避免重复）：{history_summary}
 
 # Output Format
@@ -236,13 +275,17 @@ Start with a title: "# 🚀 推荐项目方案"
             f"关键词：{keywords or '未提供'}\n"
             f"学生画像：{student_profile or '未提供'}\n"
             f"额外要求：{extra_requirements or '无'}\n"
+            f"用户修改建议：{feedback or '无'}\n"
             f"入选创意列表：\n" + "\n".join(selected_ideas)
         )
         
         print(f"--- Node 4 Agent Thinking ---\nGenerating Report for {len(selected_ideas)} ideas")
         # Stream=False for now to keep logic simple in CLI, we can stream in route later
         response = self.client.generate_chat(
-            system_prompt.format(history_summary=history_summary),
+            system_prompt.format(
+                history_summary=history_summary,
+                avoid_summary=avoid_summary,
+            ),
             user_content,
             temperature=0.7,
         )
@@ -257,3 +300,49 @@ Start with a title: "# 🚀 推荐项目方案"
             return "无"
         trimmed = history_ideas[:10]
         return "\n".join(f"- {idea}" for idea in trimmed)
+
+    def _format_avoid_topics(self, avoid_topics):
+        if not avoid_topics:
+            return "无"
+        trimmed = avoid_topics[:8]
+        return "、".join(trimmed)
+
+    def summarize_report(self, report, feedback=None):
+        system_prompt = """
+# Role
+资深商业评审与课程顾问。
+
+# Task
+对给定的项目报告进行精炼总结，并提取应避免的主题方向。
+
+# Requirements
+- 输出 JSON，包含 summary 与 avoid_topics。
+- summary 需包含整体主题和常见重复点。
+- avoid_topics 要列出需要避开的方向（例如具体方案名称、核心机制、核心关键词）。
+- 如果用户反馈中明确表达“不喜欢/要避免”的内容，必须加入 avoid_topics。
+
+# Output Format (JSON)
+{
+  "summary": "简短总结...",
+  "avoid_topics": ["主题A", "主题B", "主题C"]
+}
+"""
+        user_content = (
+            f"用户反馈：{feedback or '无'}\n"
+            f"报告内容：\n{report}"
+        )
+        response = self.client.generate_chat(
+            system_prompt,
+            user_content,
+            temperature=0.3,
+        )
+        try:
+            cleaned_response = response.replace("```json", "").replace("```", "").strip()
+            data = json.loads(cleaned_response)
+            return {
+                "summary": data.get("summary", ""),
+                "avoid_topics": data.get("avoid_topics", []),
+            }
+        except Exception as e:
+            print(f"JSON Parse Error in Summary: {e}\nRaw Response: {response}")
+            return {"summary": "", "avoid_topics": []}

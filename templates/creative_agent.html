@@ -62,6 +62,12 @@
                             style="vertical-align: middle; font-size: 18px; margin-right: 5px;">auto_awesome</span>
                         开始生成创意
                     </button>
+                    <button type="button" id="brainstormStartBtn" class="btn btn-outline"
+                        style="width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; font-size: 16px; cursor: pointer;">
+                        <span class="material-icons"
+                            style="vertical-align: middle; font-size: 18px; margin-right: 5px;">psychology</span>
+                        开启头脑风暴
+                    </button>
                 </form>
             </div>
         </div>
@@ -285,6 +291,40 @@
     }
 
     window.ideaHistory = loadIdeaHistory();
+    window.brainstormState = {
+        report: '',
+        avoidTopics: [],
+        summary: ''
+    };
+
+    function setLoadingState(isLoading) {
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = statusIndicator.querySelector('span');
+        const submitBtn = document.querySelector('#creativeForm button[type="submit"]');
+        const brainstormBtn = document.getElementById('brainstormStartBtn');
+
+        statusIndicator.style.display = isLoading ? 'flex' : 'none';
+        statusText.innerText = isLoading ? "AI 正在深度思考中 (预计需 30-60 秒)..." : "";
+        submitBtn.disabled = isLoading;
+        brainstormBtn.disabled = isLoading;
+    }
+
+    function handleReportResult(report) {
+        const outputContent = document.getElementById('outputContent');
+        const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+        outputContent.innerHTML = parser(report);
+
+        const actionArea = document.getElementById('actionArea');
+        if (actionArea) actionArea.style.display = 'block';
+        else createActionArea();
+
+        window.currentReportContext = report;
+        const newIdeas = extractProjectNames(report);
+        if (newIdeas.length) {
+            window.ideaHistory = [...newIdeas, ...window.ideaHistory].filter((value, index, self) => self.indexOf(value) === index);
+            saveIdeaHistory(window.ideaHistory);
+        }
+    }
 
     document.getElementById('creativeForm').addEventListener('submit', function (e) {
         e.preventDefault();
@@ -300,17 +340,11 @@
 
         // UI 状态更新
         const outputContent = document.getElementById('outputContent');
-        const statusIndicator = document.getElementById('statusIndicator');
-        const statusText = statusIndicator.querySelector('span');
-        const submitBtn = this.querySelector('button[type="submit"]');
-        const actionArea = document.getElementById('actionArea'); // New Action Area
+        const actionArea = document.getElementById('actionArea');
 
-        outputContent.innerHTML = ''; // 清空内容
-        if (actionArea) actionArea.style.display = 'none'; // Hide buttons during generation
-
-        statusIndicator.style.display = 'flex'; // 显示加载中
-        statusText.innerText = "AI 正在深度思考中 (预计需 30-60 秒)...";
-        submitBtn.disabled = true; // 禁用按钮
+        outputContent.innerHTML = '';
+        if (actionArea) actionArea.style.display = 'none';
+        setLoadingState(true);
 
         // 调用后端 API
         fetch('/company/creative/generate', {
@@ -326,43 +360,130 @@
                     outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
                 } else {
                     const report = result.report;
-                    // 简单的打字机效果展示结果
-                    let index = 0;
-                    statusText.innerText = "生成完成，正在渲染...";
-
-                    const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
-
-                    // 为了避免打字机效果在渲染 Markdown 时出现格式错乱（如未闭合的标签），
-                    // 这里简化为：先 parse 成 HTML，然后直接显示，或者依然使用全量展示
-                    // 考虑到 markdown 逐步渲染的复杂性，这里直接展示最终结果，或者简单的渐显
-
-                    outputContent.innerHTML = parser(report);
-                    statusIndicator.style.display = 'none';
-
-                    // 显示聊天区域
-                    // document.getElementById('chatSection').style.display = 'block'; // REMOVED
-
-                    // Show Action Area (Buttons)
-                    if (actionArea) actionArea.style.display = 'block';
-                    else createActionArea(); // Create if not exists
-
-                    // 保存当前的报告内容作为 Context
-                    window.currentReportContext = report;
-                    const newIdeas = extractProjectNames(report);
-                    if (newIdeas.length) {
-                        window.ideaHistory = [...newIdeas, ...window.ideaHistory].filter((value, index, self) => self.indexOf(value) === index);
-                        saveIdeaHistory(window.ideaHistory);
-                    }
+                    handleReportResult(report);
                 }
             })
             .catch(err => {
                 outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
-                statusIndicator.style.display = 'none';
             })
             .finally(() => {
-                submitBtn.disabled = false;
+                setLoadingState(false);
             });
     });
+
+    document.getElementById('brainstormStartBtn').addEventListener('click', () => {
+        const outputContent = document.getElementById('outputContent');
+        const actionArea = document.getElementById('actionArea');
+        outputContent.innerHTML = '';
+        if (actionArea) actionArea.style.display = 'none';
+        setLoadingState(true);
+
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory,
+            avoidTopics: window.brainstormState.avoidTopics,
+            previousReport: window.brainstormState.report
+        };
+
+        fetch('/company/creative/brainstorm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.error) {
+                    outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
+                    return;
+                }
+                window.brainstormState = {
+                    report: result.report || '',
+                    summary: result.summary || '',
+                    avoidTopics: result.avoidTopics || []
+                };
+                handleReportResult(result.report);
+                renderBrainstormControls();
+            })
+            .catch(err => {
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+            })
+            .finally(() => {
+                setLoadingState(false);
+            });
+    });
+
+    function renderBrainstormControls() {
+        const container = document.getElementById('outputContent').parentNode;
+        let div = document.getElementById('brainstormControls');
+        if (!div) {
+            div = document.createElement('div');
+            div.id = 'brainstormControls';
+            div.style.marginTop = '20px';
+            div.style.paddingTop = '20px';
+            div.style.borderTop = '1px solid #eee';
+            container.appendChild(div);
+        }
+
+        div.innerHTML = `
+            <h4 style="margin-bottom: 10px;">🧠 继续头脑风暴</h4>
+            <textarea id="brainstormFeedback" rows="2" placeholder="可选：输入你的修改建议（比如不喜欢的方向/想要的改动）"
+                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+            <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
+                <button class="btn-outline" onclick="runBrainstormCycle()">再次头脑风暴</button>
+                <span style="color: #999; font-size: 0.85em;">将自动避开上一轮总结的重复方向</span>
+            </div>
+        `;
+    }
+
+    window.runBrainstormCycle = function () {
+        const outputContent = document.getElementById('outputContent');
+        const feedbackInput = document.getElementById('brainstormFeedback');
+        const feedback = feedbackInput ? feedbackInput.value.trim() : '';
+
+        outputContent.innerHTML = '';
+        setLoadingState(true);
+
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory,
+            avoidTopics: window.brainstormState.avoidTopics,
+            previousReport: window.brainstormState.report,
+            feedback: feedback
+        };
+
+        fetch('/company/creative/brainstorm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.error) {
+                    outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
+                    return;
+                }
+                window.brainstormState = {
+                    report: result.report || '',
+                    summary: result.summary || '',
+                    avoidTopics: result.avoidTopics || []
+                };
+                handleReportResult(result.report);
+                renderBrainstormControls();
+                if (feedbackInput) feedbackInput.value = '';
+            })
+            .catch(err => {
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+            })
+            .finally(() => {
+                setLoadingState(false);
+            });
+    };
 
     function createActionArea() {
         const container = document.getElementById('outputContent').parentNode;

@@ -65,6 +65,8 @@ def generate_creative_project():
     competition = data.get('competition')
     extra_requirements = data.get('extraReq')
     history_ideas = data.get('historyIdeas', [])
+    avoid_topics = data.get('avoidTopics', [])
+    feedback = data.get('feedback')
     
     if not keywords:
         return jsonify({'error': 'Keywords are required'}), 400
@@ -78,6 +80,8 @@ def generate_creative_project():
         competition=competition,
         extra_requirements=extra_requirements,
         history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
     )
     
     # Step 2: Brainstorming
@@ -88,6 +92,8 @@ def generate_creative_project():
         competition=competition,
         extra_requirements=extra_requirements,
         history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
     )
     
     # Step 3: Feasibility Check
@@ -102,9 +108,71 @@ def generate_creative_project():
         competition=competition,
         extra_requirements=extra_requirements,
         history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
     )
     
     return jsonify({'report': report})
+
+@agent_bp.route('/creative/brainstorm', methods=['POST'])
+def brainstorm_cycle():
+    """处理头脑风暴循环请求"""
+    data = request.json
+    keywords = data.get('keywords')
+    student_profile = data.get('studentProfile')
+    competition = data.get('competition')
+    extra_requirements = data.get('extraReq')
+    history_ideas = data.get('historyIdeas', [])
+    feedback = data.get('feedback')
+    previous_report = data.get('previousReport')
+    avoid_topics = data.get('avoidTopics', [])
+
+    if not keywords:
+        return jsonify({'error': 'Keywords are required'}), 400
+
+    agent = CreativeAgent()
+    summary_payload = None
+
+    if previous_report:
+        summary_payload = agent.summarize_report(previous_report, feedback=feedback)
+        avoid_topics = list({*avoid_topics, *summary_payload.get('avoid_topics', [])})
+
+    directions = agent.analyze_input(
+        keywords,
+        student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+    )
+    ideas = agent.brainstorm(
+        directions,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+    )
+    selected_ideas = agent.assess_feasibility(ideas)
+    report = agent.generate_report(
+        selected_ideas,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+    )
+
+    return jsonify({
+        'report': report,
+        'summary': summary_payload.get('summary') if summary_payload else '',
+        'avoidTopics': avoid_topics,
+    })
 
 @agent_bp.route('/creative/chat', methods=['POST'])
 def chat_refinement():
@@ -151,4 +219,3 @@ def delete_project(project_id):
     db.session.delete(project)
     db.session.commit()
     return jsonify({'message': 'Deleted successfully'})
-
