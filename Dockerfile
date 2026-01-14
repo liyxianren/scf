@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV REFRESHED_AT=2024-01-14
 
 # Copy requirements first for better caching
 COPY requirements.txt .
