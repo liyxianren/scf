@@ -91,7 +91,7 @@ class CreativeAgent:
         try:
             # Handle potential markdown code blocks in response
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("directions", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 1: {e}\nRaw Response: {response}")
@@ -166,7 +166,7 @@ class CreativeAgent:
         
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("ideas", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 2: {e}\nRaw Response: {response}")
@@ -222,7 +222,7 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
         
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("selected_ideas", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 3: {e}\nRaw Response: {response}")
@@ -346,7 +346,7 @@ Start with a title: "# 🚀 推荐项目方案"
         )
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return {
                 "summary": data.get("summary", ""),
                 "avoid_topics": data.get("avoid_topics", []),
@@ -354,3 +354,33 @@ Start with a title: "# 🚀 推荐项目方案"
         except Exception as e:
             print(f"JSON Parse Error in Summary: {e}\nRaw Response: {response}")
             return {"summary": "", "avoid_topics": []}
+
+    def _sanitize_json(self, raw_text):
+        if not raw_text:
+            return raw_text
+        sanitized = []
+        in_string = False
+        escape = False
+        for ch in raw_text:
+            if escape:
+                sanitized.append(ch)
+                escape = False
+                continue
+            if ch == "\\":
+                sanitized.append(ch)
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                sanitized.append(ch)
+                continue
+            if in_string and ch in ("\n", "\r", "\t"):
+                if ch == "\n":
+                    sanitized.append("\\n")
+                elif ch == "\r":
+                    sanitized.append("\\r")
+                else:
+                    sanitized.append("\\t")
+                continue
+            sanitized.append(ch)
+        return "".join(sanitized)
