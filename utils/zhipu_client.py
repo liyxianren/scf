@@ -57,7 +57,12 @@ class ZhipuClient:
                 if not chunk or not getattr(chunk, "choices", None):
                     continue
                 delta = getattr(chunk.choices[0], "delta", None)
-                content = getattr(delta, "content", None) if delta else None
+                if not delta:
+                    continue
+                reasoning = getattr(delta, "reasoning_content", None)
+                content = getattr(delta, "content", None)
+                if reasoning:
+                    yield reasoning
                 if content:
                     yield content
         except Exception as e:

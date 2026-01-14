@@ -163,6 +163,9 @@ def generate_creative_project_stream():
         stream=True,
     )
 
+    if report_stream is None:
+        return jsonify({'error': 'Failed to generate response'}), 500
+
     def generate():
         for chunk in report_stream:
             yield chunk
