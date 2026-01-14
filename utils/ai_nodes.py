@@ -1,18 +1,30 @@
-from utils.zhipu_client import ZhipuClient
 import json
+import random
+from utils.zhipu_client import ZhipuClient
 
 client = ZhipuClient()
 
 class CreativeAgent:
     def __init__(self):
         self.client = client
+        self.diversity_axes = [
+            "技术手段（例如：语音交互/计算机视觉/推荐系统/知识图谱/IoT传感）",
+            "应用场景（例如：校园/家庭/社区/城市/偏远地区）",
+            "目标人群（例如：特殊教育/老年人/环保志愿者/青少年）",
+            "商业模式（例如：订阅/公益/政府合作/企业SaaS）",
+            "数据来源（例如：公开数据/传感器/用户生成内容/企业系统）",
+            "交互方式（例如：移动端/桌面端/可穿戴设备/微信小程序）",
+            "行业领域（例如：教育/环保/健康/金融/公益）",
+        ]
 
-    def analyze_input(self, keywords, student_profile):
+    def analyze_input(self, keywords, student_profile, competition=None, extra_requirements=None, history_ideas=None):
         """
         Node 1: 需求拆解与扩充 (Input Analysis)
         Input: keywords (str), student_profile (str)
         Output: list of 3 directions (str)
         """
+        diversity_seed = self._pick_diversity_seed()
+        history_summary = self._format_history(history_ideas)
         system_prompt = """
 # Role
 资深国际课程规划师，擅长将模糊的学生兴趣转化为具体的竞赛赛道。
@@ -28,6 +40,11 @@ class CreativeAgent:
 # Constraints
 - 方向必须具体，不能太宽泛。
 - 三个方向的核心逻辑不能雷同（例如不能全是“拍照识别”）。
+- 必须严格遵守用户的额外要求与目标赛事偏好。
+- 必须显式体现关键词与学生画像中的特点。
+- 避免与历史输出重复，如果发现高度相似必须替换为新方向。
+- 多样性锚点：{diversity_seed}
+- 历史输出（避免重复）：{history_summary}
 - 输出必须是合法的 JSON 格式。
 
 # Output Format (JSON)
@@ -39,10 +56,23 @@ class CreativeAgent:
   ]
 }
 """
-        user_content = f"关键词：{keywords}\n学生画像：{student_profile}"
+        user_content = (
+            f"目标赛事：{competition or '未指定'}\n"
+            f"关键词：{keywords}\n"
+            f"学生画像：{student_profile}\n"
+            f"额外要求：{extra_requirements or '无'}"
+        )
         
         print(f"--- Node 1 Agent Thinking (Deep Mode) ---\nInput: {user_content}")
-        response = self.client.generate_chat(system_prompt, user_content, enable_thinking=True)
+        response = self.client.generate_chat(
+            system_prompt.format(
+                diversity_seed=", ".join(diversity_seed),
+                history_summary=history_summary,
+            ),
+            user_content,
+            enable_thinking=True,
+            temperature=0.9,
+        )
         
         # Simple JSON parsing (robustness can be improved later)
         try:
@@ -54,12 +84,14 @@ class CreativeAgent:
             print(f"JSON Parse Error in Node 1: {e}\nRaw Response: {response}")
             return []
 
-    def brainstorm(self, directions):
+    def brainstorm(self, directions, keywords=None, student_profile=None, competition=None, extra_requirements=None, history_ideas=None):
         """
         Node 2: 头脑风暴 (Brainstorming)
         Input: list of directions (str)
         Output: list of ideas (str)
         """
+        diversity_seed = self._pick_diversity_seed()
+        history_summary = self._format_history(history_ideas)
         system_prompt = """
 # Role
 硅谷创业公司的创意总监，思维活跃，擅长提出颠覆性的点子。
@@ -72,6 +104,10 @@ class CreativeAgent:
 - **强制多样性**: 绝对禁止所有创意都使用相同的技术（如“拍照识别”）。如果方向1用了图像识别，方向2和方向3必须使用其他技术（如语音交互、IoT传感、区块链、大数据分析等）。
 - 每个创意必须包含：[项目名称] + 一句话描述（<20字）。
 - 描述要吸引人，体现"新想法"。
+- 必须与用户关键词、学生画像和额外要求强相关。
+- 避免与历史输出重复，如果相似必须换成新创意。
+- 多样性锚点：{diversity_seed}
+- 历史输出（避免重复）：{history_summary}
 
 # Output Format (JSON)
 {
@@ -82,10 +118,24 @@ class CreativeAgent:
   ]
 }
 """
-        user_content = f"赛道方向列表：\n" + "\n".join(directions)
+        user_content = (
+            f"目标赛事：{competition or '未指定'}\n"
+            f"关键词：{keywords or '未提供'}\n"
+            f"学生画像：{student_profile or '未提供'}\n"
+            f"额外要求：{extra_requirements or '无'}\n"
+            f"赛道方向列表：\n" + "\n".join(directions)
+        )
         
         print(f"--- Node 2 Agent Thinking (Deep Mode) ---\nInput Directions: {len(directions)} directions")
-        response = self.client.generate_chat(system_prompt, user_content, temperature=0.9, enable_thinking=True) # Deep Thinking + High Temp
+        response = self.client.generate_chat(
+            system_prompt.format(
+                diversity_seed=", ".join(diversity_seed),
+                history_summary=history_summary,
+            ),
+            user_content,
+            temperature=1.0,
+            enable_thinking=True,
+        )
         
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
@@ -151,12 +201,13 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
             print(f"JSON Parse Error in Node 3: {e}\nRaw Response: {response}")
             return []
 
-    def generate_report(self, selected_ideas):
+    def generate_report(self, selected_ideas, keywords=None, student_profile=None, competition=None, extra_requirements=None, history_ideas=None):
         """
         Node 4: 方案细化 (Detailing)
         Input: list of selected ideas (str)
         Output: Full Markdown Report (str)
         """
+        history_summary = self._format_history(history_ideas)
         system_prompt = """
 # Role
 商业计划书撰写专家。
@@ -172,15 +223,37 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
 4. **解决方案 (Product)**: 具体是个APP还是什么？核心功能有哪3点？
 5. **技术栈 (Tech)**: 比如 "Python + Flutter + ChatGLM API"。
 6. **商业价值**: 怎么赚钱或产生社会影响力？
+- 必须显式体现用户关键词、学生画像和额外要求。
+- 不得与历史输出重复；如相似必须改写为全新方案。
+- 历史输出（避免重复）：{history_summary}
 
 # Output Format
 Direct Markdown. No JSON wrapping.
 Start with a title: "# 🚀 推荐项目方案"
 """
-        user_content = f"入选创意列表：\n" + "\n".join(selected_ideas)
+        user_content = (
+            f"目标赛事：{competition or '未指定'}\n"
+            f"关键词：{keywords or '未提供'}\n"
+            f"学生画像：{student_profile or '未提供'}\n"
+            f"额外要求：{extra_requirements or '无'}\n"
+            f"入选创意列表：\n" + "\n".join(selected_ideas)
+        )
         
         print(f"--- Node 4 Agent Thinking ---\nGenerating Report for {len(selected_ideas)} ideas")
         # Stream=False for now to keep logic simple in CLI, we can stream in route later
-        response = self.client.generate_chat(system_prompt, user_content, temperature=0.7)
+        response = self.client.generate_chat(
+            system_prompt.format(history_summary=history_summary),
+            user_content,
+            temperature=0.7,
+        )
         
         return response
+
+    def _pick_diversity_seed(self):
+        return random.sample(self.diversity_axes, k=3)
+
+    def _format_history(self, history_ideas):
+        if not history_ideas:
+            return "无"
+        trimmed = history_ideas[:10]
+        return "\n".join(f"- {idea}" for idea in trimmed)

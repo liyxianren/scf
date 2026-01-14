@@ -62,6 +62,9 @@ def generate_creative_project():
     data = request.json
     keywords = data.get('keywords')
     student_profile = data.get('studentProfile')
+    competition = data.get('competition')
+    extra_requirements = data.get('extraReq')
+    history_ideas = data.get('historyIdeas', [])
     
     if not keywords:
         return jsonify({'error': 'Keywords are required'}), 400
@@ -69,17 +72,37 @@ def generate_creative_project():
     agent = CreativeAgent()
     
     # Step 1: Input Analysis
-    directions = agent.analyze_input(keywords, student_profile)
+    directions = agent.analyze_input(
+        keywords,
+        student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+    )
     
     # Step 2: Brainstorming
-    ideas = agent.brainstorm(directions)
+    ideas = agent.brainstorm(
+        directions,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+    )
     
     # Step 3: Feasibility Check
     selected_ideas = agent.assess_feasibility(ideas)
     
     
     # Step 4: Detailing (Final Report)
-    report = agent.generate_report(selected_ideas)
+    report = agent.generate_report(
+        selected_ideas,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+    )
     
     return jsonify({'report': report})
 
@@ -117,7 +140,7 @@ def chat_refinement():
     response = client.generate_chat(system_prompt, user_message, temperature=0.8, enable_thinking=True)
     
     if response:
-        return jsonify({'response': response})
+        return jsonify({'reply': response})
     else:
         return jsonify({'error': 'Failed to generate response'}), 500
 
@@ -128,5 +151,4 @@ def delete_project(project_id):
     db.session.delete(project)
     db.session.commit()
     return jsonify({'message': 'Deleted successfully'})
-
 

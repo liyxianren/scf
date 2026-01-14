@@ -251,6 +251,41 @@
 </div>
 
 <script>
+    function loadIdeaHistory() {
+        try {
+            const raw = localStorage.getItem('creativeIdeaHistory');
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (err) {
+            console.warn('Failed to load history:', err);
+            return [];
+        }
+    }
+
+    function saveIdeaHistory(ideas) {
+        const trimmed = ideas.slice(0, 20);
+        localStorage.setItem('creativeIdeaHistory', JSON.stringify(trimmed));
+    }
+
+    function extractProjectNames(report) {
+        const ideas = [];
+        const lines = report.split('\n');
+        for (const line of lines) {
+            const nameMatch = line.match(/\*\*项目名称\*\*[:：]\s*(.+)/);
+            if (nameMatch) {
+                ideas.push(nameMatch[1].trim());
+                continue;
+            }
+            const headingMatch = line.match(/^##\s+(.+)/);
+            if (headingMatch && !headingMatch[1].includes('推荐项目方案')) {
+                ideas.push(headingMatch[1].trim());
+            }
+        }
+        return ideas;
+    }
+
+    window.ideaHistory = loadIdeaHistory();
+
     document.getElementById('creativeForm').addEventListener('submit', function (e) {
         e.preventDefault();
 
@@ -259,7 +294,8 @@
             competition: document.getElementById('competition').value,
             studentProfile: document.getElementById('studentProfile').value,
             keywords: document.getElementById('keywords').value,
-            extraReq: document.getElementById('extraReq').value
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory
         };
 
         // UI 状态更新
@@ -312,6 +348,11 @@
 
                     // 保存当前的报告内容作为 Context
                     window.currentReportContext = report;
+                    const newIdeas = extractProjectNames(report);
+                    if (newIdeas.length) {
+                        window.ideaHistory = [...newIdeas, ...window.ideaHistory].filter((value, index, self) => self.indexOf(value) === index);
+                        saveIdeaHistory(window.ideaHistory);
+                    }
                 }
             })
             .catch(err => {
@@ -464,7 +505,7 @@
                         chatHistory.scrollTop = chatHistory.scrollHeight;
                     }
                 } else {
-                    appendMessage('ai', "Error generating reply.");
+                    appendMessage('ai', data.error || "Error generating reply.");
                 }
             })
             .catch(err => {
