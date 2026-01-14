@@ -367,6 +367,32 @@
         return JSON.stringify(err);
     }
 
+    function streamTextResponse(response, onChunk) {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(text || response.statusText || 'Unexpected response');
+            });
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let done = false;
+
+        function read() {
+            return reader.read().then(({ value, done: readerDone }) => {
+                done = readerDone;
+                if (value) {
+                    onChunk(decoder.decode(value, { stream: !done }));
+                }
+                if (!done) {
+                    return read();
+                }
+            });
+        }
+
+        return read();
+    }
+
     document.getElementById('creativeForm').addEventListener('submit', function (e) {
         e.preventDefault();
 
@@ -388,21 +414,22 @@
         setLoadingState(true);
 
         // 调用后端 API
-        fetch('/company/creative/generate', {
+        fetch('/company/creative/generate/stream', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         })
-            .then(parseApiResponse)
-            .then(result => {
-                if (result.error) {
-                    outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
-                } else {
-                    const report = result.report;
-                    handleReportResult(report);
-                }
+            .then(response => {
+                let buffer = '';
+                const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+                return streamTextResponse(response, chunk => {
+                    buffer += chunk;
+                    outputContent.innerHTML = parser(buffer);
+                }).then(() => {
+                    handleReportResult(buffer);
+                });
             })
             .catch(err => {
                 outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;

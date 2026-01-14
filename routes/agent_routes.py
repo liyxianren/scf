@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context
 from models import db, Agent, CreativeProject
 from utils.ai_nodes import CreativeAgent
 
@@ -113,6 +113,61 @@ def generate_creative_project():
     )
     
     return jsonify({'report': report})
+
+@agent_bp.route('/creative/generate/stream', methods=['POST'])
+def generate_creative_project_stream():
+    """流式输出创意生成报告"""
+    data = request.json
+    keywords = data.get('keywords')
+    student_profile = data.get('studentProfile')
+    competition = data.get('competition')
+    extra_requirements = data.get('extraReq')
+    history_ideas = data.get('historyIdeas', [])
+    avoid_topics = data.get('avoidTopics', [])
+    feedback = data.get('feedback')
+
+    if not keywords:
+        return jsonify({'error': 'Keywords are required'}), 400
+
+    agent = CreativeAgent()
+
+    directions = agent.analyze_input(
+        keywords,
+        student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+    )
+    ideas = agent.brainstorm(
+        directions,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+    )
+    selected_ideas = agent.assess_feasibility(ideas)
+    report_stream = agent.generate_report(
+        selected_ideas,
+        keywords=keywords,
+        student_profile=student_profile,
+        competition=competition,
+        extra_requirements=extra_requirements,
+        history_ideas=history_ideas,
+        avoid_topics=avoid_topics,
+        feedback=feedback,
+        stream=True,
+    )
+
+    def generate():
+        for chunk in report_stream:
+            yield chunk
+
+    return Response(stream_with_context(generate()), mimetype='text/plain')
 
 @agent_bp.route('/creative/brainstorm', methods=['POST'])
 def brainstorm_cycle():

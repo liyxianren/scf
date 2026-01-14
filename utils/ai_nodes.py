@@ -238,6 +238,7 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
         history_ideas=None,
         avoid_topics=None,
         feedback=None,
+        stream=False,
     ):
         """
         Node 4: 方案细化 (Detailing)
@@ -280,17 +281,24 @@ Start with a title: "# 🚀 推荐项目方案"
         )
         
         print(f"--- Node 4 Agent Thinking ---\nGenerating Report for {len(selected_ideas)} ideas")
-        # Stream=False for now to keep logic simple in CLI, we can stream in route later
-        response = self.client.generate_chat(
-            system_prompt.format(
-                history_summary=history_summary,
-                avoid_summary=avoid_summary,
-            ),
+        formatted_prompt = system_prompt.format(
+            history_summary=history_summary,
+            avoid_summary=avoid_summary,
+        )
+        if stream:
+            return self.client.generate_chat_stream(
+                formatted_prompt,
+                user_content,
+                temperature=0.7,
+                enable_thinking=True,
+            )
+
+        return self.client.generate_chat(
+            formatted_prompt,
             user_content,
             temperature=0.7,
+            enable_thinking=True,
         )
-        
-        return response
 
     def _pick_diversity_seed(self):
         return random.sample(self.diversity_axes, k=3)
