@@ -168,9 +168,14 @@ def generate_creative_project_stream():
 
     def generate():
         for chunk in report_stream:
-            yield chunk
+            if chunk:
+                yield str(chunk)
 
-    return Response(stream_with_context(generate()), mimetype='text/plain')
+    headers = {
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+    }
+    return Response(stream_with_context(generate()), mimetype='text/plain', headers=headers)
 
 @agent_bp.route('/creative/brainstorm', methods=['POST'])
 def brainstorm_cycle():

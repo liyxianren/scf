@@ -374,6 +374,14 @@
             });
         }
 
+        if (!response.body) {
+            return response.text().then(text => {
+                if (text) {
+                    onChunk(text);
+                }
+            });
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let done = false;
