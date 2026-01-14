@@ -59,13 +59,13 @@ class CreativeAgent:
 - 输出必须是合法的 JSON 格式。
 
 # Output Format (JSON)
-{
+{{
   "directions": [
     "方向1 (工具类)：...",
     "方向2 (平台类)：...",
     "方向3 (硬件类)：..."
   ]
-}
+}}
 """
         user_content = (
             f"目标赛事：{competition or '未指定'}\n"
@@ -91,7 +91,7 @@ class CreativeAgent:
         try:
             # Handle potential markdown code blocks in response
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("directions", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 1: {e}\nRaw Response: {response}")
@@ -135,13 +135,13 @@ class CreativeAgent:
 - 历史输出（避免重复）：{history_summary}
 
 # Output Format (JSON)
-{
+{{
   "ideas": [
     "方向1-创意A: [名称] 描述...",
     "方向1-创意B: ...",
     ...
   ]
-}
+}}
 """
         user_content = (
             f"目标赛事：{competition or '未指定'}\n"
@@ -166,7 +166,7 @@ class CreativeAgent:
         
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("ideas", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 2: {e}\nRaw Response: {response}")
@@ -222,7 +222,7 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
         
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return data.get("selected_ideas", [])
         except Exception as e:
             print(f"JSON Parse Error in Node 3: {e}\nRaw Response: {response}")
@@ -238,6 +238,7 @@ SCF 公司的技术总监，负责评估高中生项目的落地可行性。
         history_ideas=None,
         avoid_topics=None,
         feedback=None,
+        stream=False,
     ):
         """
         Node 4: 方案细化 (Detailing)
@@ -280,17 +281,24 @@ Start with a title: "# 🚀 推荐项目方案"
         )
         
         print(f"--- Node 4 Agent Thinking ---\nGenerating Report for {len(selected_ideas)} ideas")
-        # Stream=False for now to keep logic simple in CLI, we can stream in route later
-        response = self.client.generate_chat(
-            system_prompt.format(
-                history_summary=history_summary,
-                avoid_summary=avoid_summary,
-            ),
+        formatted_prompt = system_prompt.format(
+            history_summary=history_summary,
+            avoid_summary=avoid_summary,
+        )
+        if stream:
+            return self.client.generate_chat_stream(
+                formatted_prompt,
+                user_content,
+                temperature=0.7,
+                enable_thinking=True,
+            )
+
+        return self.client.generate_chat(
+            formatted_prompt,
             user_content,
             temperature=0.7,
+            enable_thinking=True,
         )
-        
-        return response
 
     def _pick_diversity_seed(self):
         return random.sample(self.diversity_axes, k=3)
@@ -338,7 +346,7 @@ Start with a title: "# 🚀 推荐项目方案"
         )
         try:
             cleaned_response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(cleaned_response)
+            data = json.loads(self._sanitize_json(cleaned_response))
             return {
                 "summary": data.get("summary", ""),
                 "avoid_topics": data.get("avoid_topics", []),
@@ -346,3 +354,33 @@ Start with a title: "# 🚀 推荐项目方案"
         except Exception as e:
             print(f"JSON Parse Error in Summary: {e}\nRaw Response: {response}")
             return {"summary": "", "avoid_topics": []}
+
+    def _sanitize_json(self, raw_text):
+        if not raw_text:
+            return raw_text
+        sanitized = []
+        in_string = False
+        escape = False
+        for ch in raw_text:
+            if escape:
+                sanitized.append(ch)
+                escape = False
+                continue
+            if ch == "\\":
+                sanitized.append(ch)
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                sanitized.append(ch)
+                continue
+            if in_string and ch in ("\n", "\r", "\t"):
+                if ch == "\n":
+                    sanitized.append("\\n")
+                elif ch == "\r":
+                    sanitized.append("\\r")
+                else:
+                    sanitized.append("\\t")
+                continue
+            sanitized.append(ch)
+        return "".join(sanitized)
