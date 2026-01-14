@@ -326,6 +326,47 @@
         }
     }
 
+    function parseApiResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+
+        return response.text().then(text => {
+            let parsed = null;
+            if (text) {
+                try {
+                    parsed = JSON.parse(text);
+                } catch (err) {
+                    parsed = null;
+                }
+            }
+
+            if (!response.ok) {
+                if (parsed) {
+                    throw parsed;
+                }
+                const message = text || response.statusText || 'Unexpected response';
+                throw new Error(message);
+            }
+
+            if (parsed) {
+                return parsed;
+            }
+
+            if (contentType.includes('application/json')) {
+                throw new Error('Invalid JSON response');
+            }
+
+            throw new Error(text || response.statusText || 'Unexpected response');
+        });
+    }
+
+    function getErrorMessage(err) {
+        if (!err) return '未知错误';
+        if (typeof err === 'string') return err;
+        if (err.error) return err.error;
+        if (err.message) return err.message;
+        return JSON.stringify(err);
+    }
+
     document.getElementById('creativeForm').addEventListener('submit', function (e) {
         e.preventDefault();
 
@@ -354,7 +395,7 @@
             },
             body: JSON.stringify(data)
         })
-            .then(response => response.json())
+            .then(parseApiResponse)
             .then(result => {
                 if (result.error) {
                     outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
@@ -364,7 +405,7 @@
                 }
             })
             .catch(err => {
-                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;
             })
             .finally(() => {
                 setLoadingState(false);
@@ -393,7 +434,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         })
-            .then(response => response.json())
+            .then(parseApiResponse)
             .then(result => {
                 if (result.error) {
                     outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
@@ -408,7 +449,7 @@
                 renderBrainstormControls();
             })
             .catch(err => {
-                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;
             })
             .finally(() => {
                 setLoadingState(false);
@@ -462,7 +503,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         })
-            .then(response => response.json())
+            .then(parseApiResponse)
             .then(result => {
                 if (result.error) {
                     outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
@@ -478,7 +519,7 @@
                 if (feedbackInput) feedbackInput.value = '';
             })
             .catch(err => {
-                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${err}</p>`;
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;
             })
             .finally(() => {
                 setLoadingState(false);
@@ -530,11 +571,11 @@
                 tags: "AI Generated"
             })
         })
-            .then(res => res.json())
+            .then(parseApiResponse)
             .then(data => {
                 alert("✅ 项目已收藏到对应页面！");
             })
-            .catch(err => alert("保存失败: " + err));
+            .catch(err => alert("保存失败: " + getErrorMessage(err)));
     };
 
     // Modal & Chat Logic
@@ -603,7 +644,7 @@
                 context: window.currentReportContext || ""
             })
         })
-            .then(res => res.json())
+            .then(parseApiResponse)
             .then(data => {
                 if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
                 if (data.reply) {
@@ -631,7 +672,7 @@
             })
             .catch(err => {
                 if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
-                appendMessage('ai', `Error: ${err}`);
+                appendMessage('ai', `Error: ${getErrorMessage(err)}`);
             });
     }
 

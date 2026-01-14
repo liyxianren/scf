@@ -59,13 +59,13 @@ class CreativeAgent:
 - 输出必须是合法的 JSON 格式。
 
 # Output Format (JSON)
-{
+{{
   "directions": [
     "方向1 (工具类)：...",
     "方向2 (平台类)：...",
     "方向3 (硬件类)：..."
   ]
-}
+}}
 """
         user_content = (
             f"目标赛事：{competition or '未指定'}\n"
@@ -135,13 +135,13 @@ class CreativeAgent:
 - 历史输出（避免重复）：{history_summary}
 
 # Output Format (JSON)
-{
+{{
   "ideas": [
     "方向1-创意A: [名称] 描述...",
     "方向1-创意B: ...",
     ...
   ]
-}
+}}
 """
         user_content = (
             f"目标赛事：{competition or '未指定'}\n"
