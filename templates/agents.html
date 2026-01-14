@@ -9,9 +9,11 @@
         <p>探索我们基于 AI 驱动的自动化工作流 Agent，提升您的业务效率</p>
     </div>
 
-    <div class="lessons-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+    <div class="lessons-container"
+        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
         {% for agent in agents %}
-        <a href="/company/agents/{{ agent.id }}" class="lesson-card" style="text-decoration: none; color: inherit;">
+        <a href="{{ '/company/creative' if agent.name == 'Creative Copilot' else '/company/agents/' + agent.id|string }}"
+            class="lesson-card" style="text-decoration: none; color: inherit;">
             <div class="lesson-card-header">
                 <div class="lesson-chapter" style="display: flex; align-items: center; gap: 8px;">
                     <span class="material-icons">{{ agent.icon }}</span>
