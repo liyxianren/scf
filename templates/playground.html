@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}代码练习场 - {{ 'Python' if language == 'python' else 'C语言' }}学习平台{% endblock %}
+
+{% block content %}
+{% set lang = language|default('python') %}
+{% set lang_name = 'Python' if lang == 'python' else 'C语言' %}
+
+<div class="container playground-container">
+    <div class="page-header">
+        <h1>{{ lang_name }}代码练习场</h1>
+        <p>在这里自由编写和运行{{ lang_name }}代码</p>
+    </div>
+
+    <div class="editor-layout">
+        <div class="editor-section">
+            <div class="section-header">
+                <h3>代码编辑器</h3>
+                <button id="run-btn" class="btn btn-primary">{% if lang == 'c' %}编译运行{% else %}运行代码{% endif %}</button>
+            </div>
+            {% if lang == 'c' %}
+            <textarea id="code-editor">// 在这里编写C语言代码
+#include <stdio.h>
+
+int main() {
+    printf("Hello, C!\n");
+
+    // 试试输入
+    char name[50];
+    printf("请输入你的名字：");
+    scanf("%s", name);
+    printf("你好，%s！\n", name);
+
+    return 0;
+}</textarea>
+            {% else %}
+            <textarea id="code-editor"># 在这里编写Python代码
+print("Hello, Python!")
+
+# 试试其他代码
+name = input("请输入你的名字：")
+print(f"你好，{name}！")</textarea>
+            {% endif %}
+        </div>
+
+        <div class="output-section">
+            <div class="section-header">
+                <h3>输出结果</h3>
+                <button id="clear-output" class="btn btn-small">清空</button>
+            </div>
+            <pre id="output" class="output-area">点击"{% if lang == 'c' %}编译运行{% else %}运行代码{% endif %}"查看结果...
+{% if lang == 'c' %}如果代码中有 scanf()，会自动弹窗让你输入{% else %}如果代码中有 input()，会自动弹窗让你输入{% endif %}</pre>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    window.CURRENT_LANGUAGE = '{{ lang }}';
+</script>
+<script src="{{ url_for('static', filename='js/input-dialog.js') }}"></script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+{% endblock %}

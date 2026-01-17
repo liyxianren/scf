@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+
+{% block title %}创意收藏夹 - SCF{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header"
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div>
+            <a href="/company/creative"
+                style="text-decoration: none; color: #666; margin-bottom: 10px; display: block;">&larr; 返回生成器</a>
+            <h1 style="margin: 0;">🌟 创意方案收藏夹</h1>
+        </div>
+        <div
+            style="background: #eef2ff; color: var(--primary-color); padding: 5px 15px; border-radius: 20px; font-weight: bold;">
+            Total: {{ projects|length }}
+        </div>
+    </div>
+
+    {% if projects|length == 0 %}
+    <div style="text-align: center; padding: 100px; color: #999;">
+        <span class="material-icons" style="font-size: 64px; color: #eee; margin-bottom: 20px;">folder_open</span>
+        <p>暂无收藏方案，快去 <a href="/company/creative">生成一个</a> 吧！</p>
+    </div>
+    {% else %}
+    <div class="gallery-grid">
+        {% for project in projects %}
+        <div class="project-card" onclick="viewProject({{ project.id }})">
+            <div class="card-top">
+                <span class="material-icons"
+                    style="color: var(--primary-color); opacity: 0.8; font-size: 32px;">lightbulb</span>
+            </div>
+            <h3>{{ project.title }}</h3>
+            <p class="slogan">{{ project.tags if project.tags else 'AI Generated' }}</p>
+            <!-- Slogan field might be empty, showing tags -->
+
+            <div class="card-footer">
+                <span class="date">{{ project.created_at.strftime('%Y-%m-%d') }}</span>
+                <span class="action">点击查看 &rarr;</span>
+                <button class="delete-btn" onclick="deleteProject(event, {{ project.id }})" title="删除项目">
+                    <span class="material-icons">delete_outline</span>
+                </button>
+            </div>
+
+            <!-- Hidden Content for Modal -->
+            <textarea id="content-{{ project.id }}" style="display:none;">{{ project.full_content }}</textarea>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Detail Modal -->
+<div id="detailModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">方案详情</h3>
+            <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body markdown-body" id="modalBody">
+            <!-- Content goes here -->
+        </div>
+        <div class="modal-footer">
+            <button class="btn-primary" onclick="closeModal()">关闭</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .gallery-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 25px;
+    }
+
+    .project-card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+        border: 1px solid #eee;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .project-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 20px rgba(0, 0, 0, 0.08);
+        border-color: var(--primary-color);
+    }
+
+    .project-card h3 {
+        margin: 15px 0 10px 0;
+        font-size: 1.1rem;
+        color: #333;
+        line-height: 1.4;
+    }
+
+    .project-card .slogan {
+        color: #777;
+        font-size: 0.9rem;
+        flex: 1;
+        margin-bottom: 20px;
+    }
+
+    .card-footer {
+        border-top: 1px solid #f5f5f5;
+        padding-top: 15px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: #999;
+    }
+
+    .card-footer .action {
+        color: var(--primary-color);
+        font-weight: 500;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .project-card:hover .action {
+        opacity: 1;
+    }
+
+    /* Reuse Modal Styles from creative_agent.html */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(4px);
+        animation: fadeIn 0.2s;
+    }
+
+    .modal-content {
+        width: 80%;
+        height: 90%;
+        background: white;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        animation: slideUp 0.3s;
+    }
+
+    .modal-header {
+        padding: 20px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #fcfcfc;
+    }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 40px;
+        background: #fff;
+        max-width: 900px;
+        margin: 0 auto;
+        width: 100%;
+    }
+
+    .modal-footer {
+        padding: 15px;
+        border-top: 1px solid #eee;
+        display: flex;
+        justify-content: flex-end;
+        background: #fcfcfc;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #999;
+    }
+
+    .btn-primary {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideUp {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    .delete-btn {
+        background: none;
+        border: none;
+        color: #999;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 50%;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 10px;
+    }
+
+    .delete-btn:hover {
+        color: #ef4444;
+        background: #fee2e2;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
+<script>
+    const modal = document.getElementById('detailModal');
+    const modalBody = document.getElementById('modalBody');
+    const modalTitle = document.getElementById('modalTitle');
+
+    function viewProject(id) {
+        const content = document.getElementById('content-' + id).value;
+        const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+
+        modalBody.innerHTML = parser(content);
+        modal.style.display = 'flex';
+
+        // Try to get title from card h3
+        // modalTitle.innerText = ...
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    function deleteProject(event, id) {
+        event.stopPropagation();
+        if (!confirm('确定要删除这个收藏的项目吗？')) return;
+
+        fetch(`/company/projects/${id}`, {
+            method: 'DELETE'
+        })
+            .then(res => res.json())
+            .then(data => {
+                alert('删除成功');
+                window.location.reload();
+            })
+            .catch(err => alert('删除失败: ' + err));
+    }
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+</script>
+{% endblock %}

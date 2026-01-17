@@ -1,0 +1,1529 @@
+/* ========================================
+   Python学习平台 - 全局样式
+   ======================================== */
+
+/* 基础重置 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* 极简配色 - Apple/Notion 风格 */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f9fafb;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --hover-bg: #f3f4f6;
+
+    /* 语言品牌色 */
+    --python-color: #3776ab;
+    --python-yellow: #ffd43b;
+    --c-color: #00599c;
+
+    /* 交互色 */
+    --accent-color: #2563eb;
+    --primary-color: #2563eb;
+    --primary-gradient: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+
+    /* 功能色 */
+    --success-color: #10b981;
+    --success-gradient: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    --warning-color: #f59e0b;
+    --warning-gradient: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    --danger-color: #ef4444;
+    --danger-gradient: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+    --info-color: #6366f1;
+    --info-gradient: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+
+    /* 兼容旧变量 */
+    --dark-color: #111827;
+    --text-color: #374151;
+    --text-light: #6b7280;
+    --text-muted: #9ca3af;
+    --border-color: #e5e7eb;
+    --bg-color: #ffffff;
+    --card-bg: #ffffff;
+
+    /* 代码相关 */
+    --code-bg: #1f2937;
+    --code-text: #f3f4f6;
+
+    /* 阴影 - 极简风格 */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 20px -3px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 20px 40px -5px rgba(0, 0, 0, 0.1);
+    --shadow-card-hover: 0 12px 24px rgba(0, 0, 0, 0.08);
+
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    /* 动画 */
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.2s ease;
+    --transition-slow: 0.3s ease;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--bg-color);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ========================================
+   导航栏 - 极简风格
+   ======================================== */
+.navbar {
+    background: #ffffff;
+    border-bottom: 1px solid var(--border-color);
+    padding: 0;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 60px;
+}
+
+.nav-logo {
+    color: var(--text-primary);
+    font-size: 1.25rem;
+    font-weight: 700;
+    text-decoration: none;
+    letter-spacing: -0.02em;
+}
+
+.nav-logo::before {
+    display: none;
+}
+
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nav-menu {
+    list-style: none;
+    display: flex;
+    gap: 4px;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-base);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.nav-link:hover {
+    color: var(--text-primary);
+    background: var(--hover-bg);
+}
+
+.nav-link.active {
+    color: var(--text-primary);
+    background: var(--hover-bg);
+}
+
+/* 语言切换器 */
+.lang-switcher {
+    display: flex;
+    background: var(--hover-bg);
+    border-radius: 8px;
+    padding: 4px;
+}
+
+.lang-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    text-decoration: none;
+}
+
+.lang-btn:hover {
+    color: var(--text-primary);
+}
+
+.lang-btn.active {
+    background: #ffffff;
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* ========================================
+   主内容区
+   ======================================== */
+.main-content {
+    flex: 1;
+    padding: 30px 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* ========================================
+   首页样式
+   ======================================== */
+.hero {
+    text-align: center;
+    padding: 80px 40px;
+    background: var(--primary-gradient);
+    color: white;
+    border-radius: var(--radius-xl);
+    margin-bottom: 50px;
+    position: relative;
+    overflow: hidden;
+}
+
+.hero::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    opacity: 0.5;
+}
+
+.hero > * {
+    position: relative;
+    z-index: 1;
+}
+
+.hero h1 {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    font-weight: 700;
+}
+
+.hero-subtitle {
+    font-size: 1.3rem;
+    opacity: 0.95;
+    margin-bottom: 30px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.hero-actions {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* 特性卡片 */
+.features {
+    margin-bottom: 50px;
+}
+
+.features h2 {
+    text-align: center;
+    margin-bottom: 40px;
+    color: var(--dark-color);
+    font-size: 2rem;
+}
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+}
+
+.feature-card {
+    background: var(--card-bg);
+    padding: 32px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: all 0.3s;
+    border: 1px solid var(--border-color);
+}
+
+.feature-card:hover {
+    transform: translateY(-8px);
+    box-shadow: var(--shadow-xl);
+    border-color: var(--primary-color);
+}
+
+.feature-icon {
+    width: 60px;
+    height: 60px;
+    background: var(--primary-gradient);
+    color: white;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    margin-bottom: 20px;
+}
+
+.feature-card h3 {
+    color: var(--dark-color);
+    margin-bottom: 12px;
+    font-size: 1.25rem;
+}
+
+.feature-card p {
+    color: var(--text-light);
+    font-size: 0.95rem;
+    line-height: 1.7;
+}
+
+/* 快速入口 */
+.quick-actions {
+    text-align: center;
+    padding: 50px 0;
+}
+
+.quick-actions h2 {
+    margin-bottom: 30px;
+    color: var(--dark-color);
+    font-size: 1.8rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* ========================================
+   按钮样式
+   ======================================== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 28px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.3s;
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background: var(--primary-gradient);
+    color: white;
+    box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.btn-secondary {
+    background: var(--success-gradient);
+    color: white;
+    box-shadow: 0 4px 14px rgba(0, 184, 148, 0.4);
+}
+
+.btn-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 184, 148, 0.5);
+}
+
+.btn-outline {
+    background: transparent;
+    border: 2px solid var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-outline:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-white {
+    background: white;
+    color: var(--primary-color);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-white:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.btn-large {
+    padding: 16px 36px;
+    font-size: 1.1rem;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 0.875rem;
+}
+
+/* ========================================
+   页面标题
+   ======================================== */
+.page-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.page-header h1 {
+    color: var(--dark-color);
+    font-size: 2.2rem;
+    margin-bottom: 12px;
+}
+
+.page-header p {
+    color: var(--text-light);
+    font-size: 1.1rem;
+}
+
+/* ========================================
+   课程列表
+   ======================================== */
+.lessons-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 24px;
+}
+
+.lesson-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    box-shadow: var(--shadow-md);
+    transition: all 0.3s;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.lesson-card:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-xl);
+    border-color: var(--primary-color);
+}
+
+.lesson-card-header {
+    background: var(--primary-gradient);
+    padding: 24px;
+    color: white;
+}
+
+.lesson-chapter {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.lesson-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.lesson-card-body {
+    padding: 20px 24px;
+    flex: 1;
+}
+
+.lesson-desc {
+    color: var(--text-light);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+
+.lesson-meta {
+    display: flex;
+    gap: 16px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.lesson-meta span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.lesson-card-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.start-btn {
+    color: var(--primary-color);
+    font-weight: 500;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ========================================
+   练习题列表
+   ======================================== */
+.exercises-filter {
+    margin-bottom: 30px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    padding: 10px 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 50px;
+    color: var(--text-color);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.filter-btn:hover, .filter-btn.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.exercises-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+}
+
+.exercise-card {
+    display: block;
+    background: var(--card-bg);
+    padding: 24px;
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    box-shadow: var(--shadow-md);
+    transition: all 0.3s;
+    border: 1px solid var(--border-color);
+}
+
+.exercise-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-xl);
+    border-color: var(--primary-color);
+}
+
+.exercise-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.exercise-title {
+    color: var(--dark-color);
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.difficulty-badge {
+    padding: 4px 12px;
+    border-radius: 50px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.difficulty-1 {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.difficulty-2 {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.difficulty-3 {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.exercise-desc {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 16px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.exercise-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.exercise-chapter {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.exercise-arrow {
+    color: var(--primary-color);
+    font-size: 1.2rem;
+}
+
+/* ========================================
+   代码编辑器（Playground）
+   ======================================== */
+.playground-container {
+    max-width: 100%;
+}
+
+.editor-layout {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 24px;
+    min-height: calc(100vh - 200px);
+}
+
+.editor-section,
+.io-section {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: var(--dark-color);
+    color: white;
+}
+
+.section-header h3 {
+    font-size: 1rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.CodeMirror {
+    height: 100% !important;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    flex: 1;
+}
+
+.input-section {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.input-section textarea,
+#stdin-input {
+    width: 100%;
+    height: 100px;
+    padding: 16px;
+    border: none;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 14px;
+    resize: vertical;
+    outline: none;
+    background: #f8fafc;
+}
+
+.output-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.output-area {
+    flex: 1;
+    padding: 16px;
+    margin: 0;
+    min-height: 200px;
+    overflow: auto;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 14px;
+    background: var(--code-bg);
+    color: var(--code-text);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.output-area.error {
+    color: #f85149;
+}
+
+/* ========================================
+   练习题详情
+   ======================================== */
+.exercise-detail-container {
+    max-width: 100%;
+}
+
+.exercise-info {
+    background: var(--card-bg);
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    margin-bottom: 24px;
+}
+
+.exercise-info h1 {
+    color: var(--dark-color);
+    margin-bottom: 16px;
+    font-size: 1.5rem;
+}
+
+.exercise-info .markdown-content {
+    color: var(--text-color);
+    line-height: 1.8;
+}
+
+.exercise-editor {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.result-section,
+.hint-section,
+.solution-section {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+
+.result-content {
+    padding: 0;
+}
+
+/* 代码运行结果 */
+.code-output-section {
+    margin-bottom: 16px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--code-bg);
+}
+
+.code-output-header {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.code-output-content {
+    padding: 16px;
+    margin: 0;
+    color: #a5f3fc;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 40px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.code-output-content .code-error {
+    color: #f87171;
+    display: block;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-output-content .code-empty {
+    color: #64748b;
+    font-style: italic;
+}
+
+/* 测试用例标题 */
+.test-results-header {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.test-result {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.test-result:last-child {
+    border-bottom: none;
+}
+
+.test-result.passed {
+    background: #ecfdf5;
+}
+
+.test-result.failed {
+    background: #fef2f2;
+}
+
+.test-icon {
+    font-size: 1.4rem;
+}
+
+.test-info {
+    flex: 1;
+}
+
+.test-description {
+    font-weight: 600;
+    color: var(--dark-color);
+    margin-bottom: 4px;
+}
+
+.test-detail {
+    font-size: 0.85rem;
+    color: var(--text-light);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.result-summary {
+    padding: 16px 20px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.result-summary.success {
+    background: var(--success-color);
+    color: white;
+}
+
+.result-summary.partial {
+    background: var(--warning-color);
+    color: white;
+}
+
+#hint-content {
+    padding: 20px;
+    color: var(--text-color);
+    line-height: 1.7;
+}
+
+#solution-content {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 20px;
+    margin: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    white-space: pre-wrap;
+}
+
+.exercise-nav {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+/* ========================================
+   Markdown内容样式
+   ======================================== */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+    color: var(--dark-color);
+    margin: 1.5rem 0 1rem;
+}
+
+.markdown-content h2 {
+    font-size: 1.4rem;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.markdown-content h3 {
+    font-size: 1.2rem;
+}
+
+.markdown-content p {
+    margin-bottom: 16px;
+}
+
+.markdown-content pre {
+    background: var(--code-bg);
+    padding: 20px;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    margin: 20px 0;
+}
+
+.markdown-content code {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.9rem;
+}
+
+.markdown-content p code,
+.markdown-content li code {
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 4px;
+    color: #e11d48;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+    margin: 16px 0;
+    padding-left: 24px;
+}
+
+.markdown-content li {
+    margin-bottom: 8px;
+}
+
+.markdown-content blockquote {
+    border-left: 4px solid var(--primary-color);
+    padding: 16px 20px;
+    margin: 20px 0;
+    background: #f0f9ff;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    color: #0c4a6e;
+}
+
+.markdown-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.markdown-content th,
+.markdown-content td {
+    border: 1px solid var(--border-color);
+    padding: 12px 16px;
+    text-align: left;
+}
+
+.markdown-content th {
+    background: var(--primary-gradient);
+    color: white;
+    font-weight: 500;
+}
+
+.markdown-content tr:nth-child(even) {
+    background: #f8fafc;
+}
+
+/* ========================================
+   加载状态和消息
+   ======================================== */
+.loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-light);
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.empty-message,
+.error-message {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-light);
+}
+
+.error-message {
+    color: var(--danger-color);
+}
+
+/* ========================================
+   页脚 - 极简风格
+   ======================================== */
+.footer {
+    background: #ffffff;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 24px 0;
+    text-align: center;
+    font-size: 14px;
+    margin-top: auto;
+}
+
+.footer-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+.footer a {
+    color: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+}
+
+.footer a:hover {
+    color: white;
+}
+
+/* ========================================
+   响应式设计
+   ======================================== */
+@media (max-width: 1024px) {
+    .editor-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .io-section {
+        min-height: 400px;
+    }
+}
+
+@media (max-width: 768px) {
+    .nav-container {
+        padding: 0 16px;
+    }
+
+    .nav-menu {
+        gap: 4px;
+    }
+
+    .nav-link {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+
+    .hero {
+        padding: 50px 24px;
+    }
+
+    .hero h1 {
+        font-size: 2rem;
+    }
+
+    .hero-subtitle {
+        font-size: 1rem;
+    }
+
+    .container {
+        padding: 0 16px;
+    }
+
+    .lessons-container,
+    .exercises-container {
+        grid-template-columns: 1fr;
+    }
+
+    .page-header h1 {
+        font-size: 1.8rem;
+    }
+
+    .btn-large {
+        padding: 14px 28px;
+        font-size: 1rem;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+
+/* ========================================
+   动画关键帧
+   ======================================== */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+    0%, 100% { box-shadow: 0 0 5px rgba(14, 165, 233, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(14, 165, 233, 0.6); }
+}
+
+/* ========================================
+   入场动画类
+   ======================================== */
+.animate-fadeIn { animation: fadeIn 0.6s ease forwards; }
+.animate-fadeInUp { animation: fadeInUp 0.6s ease forwards; }
+.animate-fadeInDown { animation: fadeInDown 0.6s ease forwards; }
+.animate-slideInLeft { animation: slideInLeft 0.6s ease forwards; }
+.animate-slideInRight { animation: slideInRight 0.6s ease forwards; }
+.animate-scaleIn { animation: scaleIn 0.4s ease forwards; }
+
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.4s; }
+.delay-5 { animation-delay: 0.5s; }
+
+/* ========================================
+   增强卡片效果
+   ======================================== */
+.lesson-card,
+.exercise-card,
+.feature-card {
+    position: relative;
+    overflow: hidden;
+}
+
+/* 卡片光泽效果 */
+.lesson-card::before,
+.exercise-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.2),
+        transparent
+    );
+    transition: left 0.6s ease;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.lesson-card:hover::before,
+.exercise-card:hover::before {
+    left: 100%;
+}
+
+/* 特性卡片悬停效果增强 */
+.feature-card {
+    transform: translateY(0);
+    transition: all var(--transition-base);
+}
+
+.feature-card:hover {
+    transform: translateY(-12px);
+    box-shadow: var(--shadow-card-hover);
+}
+
+.feature-card:hover .feature-icon {
+    animation: pulse 0.6s ease;
+}
+
+/* ========================================
+   按钮涟漪效果
+   ======================================== */
+.btn {
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition-base);
+}
+
+.btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.6s ease, height 0.6s ease;
+}
+
+.btn:active::after {
+    width: 300px;
+    height: 300px;
+}
+
+/* 按钮悬停发光效果 */
+.btn-primary:hover {
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+}
+
+.btn-secondary:hover {
+    box-shadow: 0 8px 25px rgba(0, 184, 148, 0.5);
+}
+
+/* ========================================
+   导航栏增强
+   ======================================== */
+.nav-link {
+    position: relative;
+    transition: all var(--transition-base);
+}
+
+.nav-link::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    width: 0;
+    height: 2px;
+    background: var(--primary-light);
+    transition: all var(--transition-base);
+    transform: translateX(-50%);
+    border-radius: 2px;
+}
+
+.nav-link:hover::after {
+    width: 70%;
+}
+
+.nav-link.active::after {
+    width: 80%;
+    background: white;
+}
+
+/* ========================================
+   Hero区域增强动画
+   ======================================== */
+.hero {
+    animation: fadeIn 0.8s ease;
+}
+
+.hero h1 {
+    animation: fadeInDown 0.8s ease;
+}
+
+.hero-subtitle {
+    animation: fadeInUp 0.8s ease 0.2s both;
+}
+
+.hero-actions {
+    animation: fadeInUp 0.8s ease 0.4s both;
+}
+
+/* Hero背景动态效果 */
+.hero::after {
+    content: "";
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+    animation: float 6s ease-in-out infinite;
+    pointer-events: none;
+}
+
+/* ========================================
+   页面标题增强
+   ======================================== */
+.page-header {
+    animation: fadeInUp 0.6s ease;
+}
+
+.page-header h1 {
+    position: relative;
+    display: inline-block;
+}
+
+.page-header h1::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 4px;
+    background: var(--primary-gradient);
+    border-radius: 2px;
+}
+
+/* ========================================
+   代码块增强
+   ======================================== */
+.markdown-content pre {
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
+}
+
+.markdown-content pre::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--primary-gradient);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* 行内代码增强 */
+.markdown-content p code,
+.markdown-content li code {
+    background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%);
+    border: 1px solid #fecaca;
+    font-weight: 500;
+}
+
+/* ========================================
+   练习题难度标签增强
+   ======================================== */
+.difficulty-1 {
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    color: #065f46;
+    font-weight: 600;
+    border: 1px solid #6ee7b7;
+}
+
+.difficulty-2 {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    color: #92400e;
+    font-weight: 600;
+    border: 1px solid #fcd34d;
+}
+
+.difficulty-3 {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+    color: #991b1b;
+    font-weight: 600;
+    border: 1px solid #f87171;
+}
+
+/* ========================================
+   测试结果增强
+   ======================================== */
+.test-result.passed {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    border-left: 4px solid var(--success-color);
+}
+
+.test-result.failed {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-left: 4px solid var(--danger-color);
+}
+
+.result-summary.success {
+    background: var(--success-gradient);
+    animation: pulse 0.5s ease;
+}
+
+/* ========================================
+   输出区域增强
+   ======================================== */
+.output-area {
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.output-area::before {
+    content: '输出';
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* ========================================
+   滚动条美化
+   ======================================== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, var(--primary-color), var(--primary-dark));
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-dark);
+}
+
+/* ========================================
+   选中文本样式
+   ======================================== */
+::selection {
+    background: rgba(102, 126, 234, 0.3);
+    color: var(--dark-color);
+}
+
+/* ========================================
+   加载状态增强
+   ======================================== */
+.loading-spinner {
+    background: linear-gradient(135deg, transparent 0%, transparent 40%, var(--primary-color) 40%, var(--primary-color) 60%, transparent 60%);
+    background-size: 100% 100%;
+}
+
+/* ========================================
+   表格增强
+   ======================================== */
+.markdown-content tr {
+    transition: background var(--transition-fast);
+}
+
+.markdown-content tr:hover {
+    background: rgba(102, 126, 234, 0.05) !important;
+}
+
+/* ========================================
+   引用块增强
+   ======================================== */
+.markdown-content blockquote {
+    position: relative;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-left: 4px solid var(--primary-color);
+}
+
+.markdown-content blockquote::before {
+    content: '"';
+    position: absolute;
+    top: -10px;
+    left: 10px;
+    font-size: 3rem;
+    color: rgba(102, 126, 234, 0.2);
+    font-family: Georgia, serif;
+}
