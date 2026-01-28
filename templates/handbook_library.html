@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+
+{% block title %}工程手册库 - SCF Agent Hub{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .library-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+
+    .library-header h1 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .filter-tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .filter-tab {
+        padding: 8px 16px;
+        border: 1px solid #e0e0e0;
+        border-radius: 20px;
+        background: white;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+    }
+
+    .filter-tab:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
+
+    .filter-tab.active {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+    }
+
+    .handbook-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 20px;
+    }
+
+    .handbook-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #eee;
+        position: relative;
+        transition: all 0.2s;
+    }
+
+    .handbook-card:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
+    }
+
+    .handbook-card.favorited {
+        border-color: #ffc107;
+    }
+
+    .status-badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .status-pending {
+        background: #fff3cd;
+        color: #856404;
+    }
+
+    .status-generating {
+        background: #cce5ff;
+        color: #004085;
+        animation: pulse 1.5s infinite;
+    }
+
+    .status-completed {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-failed {
+        background: #f8d7da;
+        color: #721c24;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+
+    .handbook-card h3 {
+        margin: 0 0 8px 0;
+        padding-right: 80px;
+    }
+
+    .handbook-card .meta {
+        font-size: 0.85rem;
+        color: #999;
+        margin-bottom: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .system-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 14px;
+    }
+
+    .system-tag {
+        padding: 2px 8px;
+        border-radius: 12px;
+        background: #eef2ff;
+        color: #4338ca;
+        font-size: 0.75rem;
+    }
+
+    .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        background: white;
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
+
+    .action-btn.danger:hover {
+        border-color: #dc3545;
+        color: #dc3545;
+    }
+
+    .action-btn.favorite {
+        color: #ffc107;
+    }
+
+    .action-btn.favorite.active {
+        background: #fff3cd;
+        border-color: #ffc107;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 80px 20px;
+        color: #999;
+    }
+
+    .empty-state .material-icons {
+        font-size: 64px;
+        color: #e0e0e0;
+        margin-bottom: 15px;
+    }
+
+    .toast {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        z-index: 2000;
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px;">
+    <div class="library-header">
+        <h1>
+            <span class="material-icons" style="color: var(--primary-color);">menu_book</span>
+            工程手册库
+        </h1>
+        <a href="/company/handbook/generator" class="action-btn" style="text-decoration: none;">
+            <span class="material-icons" style="font-size: 16px;">add</span>
+            新建手册
+        </a>
+    </div>
+
+    <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">全部</button>
+        <button class="filter-tab" data-filter="favorited">收藏</button>
+        <button class="filter-tab" data-filter="pending">待生成</button>
+        <button class="filter-tab" data-filter="generating">生成中</button>
+        <button class="filter-tab" data-filter="completed">已完成</button>
+        <button class="filter-tab" data-filter="failed">失败</button>
+    </div>
+
+    <div class="handbook-grid" id="handbookGrid">
+        <div class="empty-state">
+            <span class="material-icons">hourglass_empty</span>
+            <p>正在加载...</p>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allHandbooks = [];
+    let currentFilter = 'all';
+    let pollingInterval = null;
+
+    const statusText = {
+        'pending': '待生成',
+        'generating': '生成中',
+        'completed': '已完成',
+        'failed': '失败'
+    };
+
+    function parseSystems(raw) {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    async function loadHandbooks() {
+        try {
+            const response = await fetch('/company/handbook/api/handbooks');
+            const data = await response.json();
+            allHandbooks = data;
+            renderHandbooks();
+            updatePolling();
+        } catch (error) {
+            console.error('Failed to load handbooks', error);
+        }
+    }
+
+    function renderHandbooks() {
+        const grid = document.getElementById('handbookGrid');
+        let filtered = allHandbooks;
+
+        if (currentFilter === 'favorited') {
+            filtered = allHandbooks.filter(item => item.is_favorited);
+        } else if (currentFilter !== 'all') {
+            filtered = allHandbooks.filter(item => item.status === currentFilter);
+        }
+
+        if (filtered.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <span class="material-icons">folder_open</span>
+                    <p>暂无工程手册</p>
+                </div>
+            `;
+            return;
+        }
+
+        grid.innerHTML = filtered.map(handbook => {
+            const createdAt = handbook.created_at ? new Date(handbook.created_at).toLocaleDateString('zh-CN') : '';
+            const systems = parseSystems(handbook.target_systems);
+            const systemTags = systems.map(sys => `<span class="system-tag">${sys}</span>`).join('');
+            const author = handbook.author_name ? `作者: ${handbook.author_name}` : '作者未填写';
+
+            return `
+                <div class="handbook-card ${handbook.is_favorited ? 'favorited' : ''}">
+                    <span class="status-badge status-${handbook.status}">${statusText[handbook.status] || handbook.status}</span>
+                    <h3>${handbook.project_name_cn}</h3>
+                    <div class="meta">
+                        <span>${author}</span>
+                        <span>创建于 ${createdAt}</span>
+                    </div>
+                    <div class="system-tags">${systemTags}</div>
+                    <div class="actions">
+                        <button class="action-btn" onclick="viewHandbook(${handbook.id})">
+                            <span class="material-icons">visibility</span> 查看
+                        </button>
+                        ${handbook.status === 'failed' ? `
+                            <button class="action-btn" onclick="regenerateHandbook(${handbook.id})">
+                                <span class="material-icons">refresh</span> 重试
+                            </button>
+                        ` : ''}
+                        <button class="action-btn favorite ${handbook.is_favorited ? 'active' : ''}" onclick="toggleFavorite(${handbook.id})">
+                            <span class="material-icons">${handbook.is_favorited ? 'star' : 'star_border'}</span>
+                        </button>
+                        <button class="action-btn danger" onclick="deleteHandbook(${handbook.id})">
+                            <span class="material-icons">delete_outline</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function updatePolling() {
+        const hasPending = allHandbooks.some(item => item.status === 'pending' || item.status === 'generating');
+        if (hasPending && !pollingInterval) {
+            pollingInterval = setInterval(loadHandbooks, 5000);
+        } else if (!hasPending && pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+    }
+
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        tab.addEventListener('click', function () {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            currentFilter = this.dataset.filter;
+            renderHandbooks();
+        });
+    });
+
+    window.viewHandbook = function(id) {
+        window.location.href = `/company/handbook/library/${id}`;
+    };
+
+    window.toggleFavorite = async function(id) {
+        try {
+            const response = await fetch(`/company/handbook/api/handbooks/${id}/favorite`, { method: 'POST' });
+            const result = await response.json();
+            showToast(result.message || '操作完成');
+            loadHandbooks();
+        } catch (error) {
+            showToast('操作失败');
+        }
+    };
+
+    window.deleteHandbook = async function(id) {
+        if (!confirm('确定要删除该工程手册吗？')) return;
+        try {
+            await fetch(`/company/handbook/api/handbooks/${id}`, { method: 'DELETE' });
+            showToast('删除成功');
+            loadHandbooks();
+        } catch (error) {
+            showToast('删除失败');
+        }
+    };
+
+    window.regenerateHandbook = async function(id) {
+        try {
+            const response = await fetch(`/company/handbook/api/handbooks/${id}/generate`, { method: 'POST' });
+            const result = await response.json();
+            showToast(result.message || '已重新生成');
+            loadHandbooks();
+        } catch (error) {
+            showToast('重新生成失败');
+        }
+    };
+
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.style.display = 'block';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 3000);
+    }
+
+    document.addEventListener('DOMContentLoaded', loadHandbooks);
+</script>
+{% endblock %}

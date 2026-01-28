@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Code Learn - 编程学习平台{% endblock %}
+
+{% block content %}
+<div class="home-container">
+    <!-- Hero 区域 -->
+    <section class="home-hero">
+        <h1>学习编程，从这里开始</h1>
+        <p>选择一门语言，开始你的编程之旅</p>
+    </section>
+
+    <!-- 语言选择卡片 -->
+    <section class="language-select">
+        <a href="/python/lessons" class="lang-card python">
+            <div class="lang-icon">Py</div>
+            <div class="lang-content">
+                <h2>Python</h2>
+                <p>简洁易学，7章课程，40+练习题</p>
+            </div>
+            <span class="lang-arrow">→</span>
+        </a>
+
+        <a href="/vibe/lessons" class="lang-card vibe">
+            <div class="lang-icon">VC</div>
+            <div class="lang-content">
+                <h2>Vibe Coding</h2>
+                <p>AI编程与创作实践，17章课程</p>
+            </div>
+            <span class="lang-arrow">→</span>
+        </a>
+
+        <a href="/c/lessons" class="lang-card c-lang">
+            <div class="lang-icon">C</div>
+            <div class="lang-content">
+                <h2>C语言</h2>
+                <p>贴近底层，8章课程，14+练习题</p>
+            </div>
+            <span class="lang-arrow">→</span>
+        </a>
+    </section>
+</div>
+
+<style>
+/* 首页容器 */
+.home-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* Hero 区域 - 极简风格 */
+.home-hero {
+    text-align: center;
+    padding: 100px 20px 60px;
+}
+
+.home-hero h1 {
+    font-size: 2.75rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+}
+
+.home-hero p {
+    font-size: 1.25rem;
+    color: #6b7280;
+    font-weight: 400;
+}
+
+/* 语言选择区域 */
+.language-select {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+    padding-bottom: 100px;
+}
+
+/* 语言卡片 */
+.lang-card {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 32px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.lang-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.06);
+}
+
+.lang-card.python:hover {
+    border-color: #3776ab;
+}
+
+.lang-card.c-lang:hover {
+    border-color: #00599c;
+}
+
+.lang-card.vibe:hover {
+    border-color: #0ea5e9;
+}
+
+/* 语言图标 */
+.lang-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #ffffff;
+    flex-shrink: 0;
+}
+
+.python .lang-icon {
+    background: linear-gradient(135deg, #3776ab, #306998);
+}
+
+.c-lang .lang-icon {
+    background: linear-gradient(135deg, #00599c, #004482);
+}
+
+.vibe .lang-icon {
+    background: linear-gradient(135deg, #0ea5e9, #22c55e);
+}
+
+/* 卡片内容 */
+.lang-content {
+    flex: 1;
+}
+
+.lang-content h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #111827;
+    margin-bottom: 4px;
+}
+
+.lang-content p {
+    font-size: 0.9rem;
+    color: #6b7280;
+    margin: 0;
+}
+
+/* 箭头 */
+.lang-arrow {
+    font-size: 1.25rem;
+    color: #9ca3af;
+    transition: all 0.2s ease;
+}
+
+.lang-card:hover .lang-arrow {
+    color: #111827;
+    transform: translateX(4px);
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+    .home-hero {
+        padding: 60px 16px 40px;
+    }
+
+    .home-hero h1 {
+        font-size: 2rem;
+    }
+
+    .home-hero p {
+        font-size: 1rem;
+    }
+
+    .language-select {
+        grid-template-columns: 1fr;
+        gap: 16px;
+        padding-bottom: 60px;
+    }
+
+    .lang-card {
+        padding: 24px;
+    }
+
+    .lang-icon {
+        width: 48px;
+        height: 48px;
+        font-size: 1rem;
+    }
+}
+</style>
+{% endblock %}

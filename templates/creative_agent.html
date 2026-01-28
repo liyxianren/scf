@@ -1,0 +1,1021 @@
+{% extends "base.html" %}
+
+{% block title %}创意项目生成器 - SCF AI Copilot{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+            <a href="/company/agents" style="text-decoration: none; color: var(--text-secondary);">&larr; 返回大厅</a>
+            <a href="/company/plans"
+                style="text-decoration: none; color: var(--primary-color); margin-left: auto; display: flex; align-items: center; gap: 5px;">
+                <span class="material-icons" style="font-size: 18px;">description</span> 计划书
+            </a>
+            <a href="/company/projects"
+                style="text-decoration: none; color: var(--primary-color); display: flex; align-items: center; gap: 5px;">
+                <span class="material-icons" style="font-size: 18px;">stars</span> 我的收藏
+            </a>
+        </div>
+        <h1>创意项目生成器 (Creative Generator)</h1>
+        <p>基于 ChatGLM 大模型，辅助生成高可行性、有创意的商赛项目提案</p>
+    </div>
+
+    <div class="row" style="display: flex; gap: 30px; flex-wrap: wrap;">
+        <!-- 左侧输入区 -->
+        <div class="col-md-5" style="flex: 1; min-width: 300px;">
+            <div class="card"
+                style="background: white; border-radius: 12px; padding: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <form id="creativeForm">
+                    <!-- Model Selector REMOVED - Now using dual-model by default -->
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="competition" style="display: block; margin-bottom: 8px; font-weight: 500;">目标赛事
+                            (Target Competition)</label>
+                        <select id="competition" class="form-control"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                            <option value="Diamond Challenge">Diamond Challenge (钻石挑战赛)</option>
+                            <option value="CTB">CTB (全球创新研究大挑战)</option>
+                            <option value="USAD">USAD (美国学术十项全能)</option>
+                            <option value="Yau Science Award">丘成桐中学科学奖</option>
+                            <option value="Other">其他/通用商业类</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="studentProfile" style="display: block; margin-bottom: 8px; font-weight: 500;">学生画像
+                            (Student Profile)</label>
+                        <textarea id="studentProfile" rows="3" placeholder="例如：擅长编程的环保主义者，喜欢生物学，有些社恐..."
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="keywords" style="display: block; margin-bottom: 8px; font-weight: 500;">核心关键词
+                            (Keywords)</label>
+                        <input type="text" id="keywords" placeholder="例如：环保 + APP + AI + 垃圾分类"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 25px;">
+                        <label for="extraReq" style="display: block; margin-bottom: 8px; font-weight: 500;">额外要求 (Extra
+                            Requirements)</label>
+                        <textarea id="extraReq" rows="2" placeholder="例如：必须包含硬件原型，或者是纯公益性质..."
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary"
+                        style="width: 100%; padding: 12px; background: var(--primary-color); color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background 0.2s;">
+                        <span class="material-icons"
+                            style="vertical-align: middle; font-size: 18px; margin-right: 5px;">auto_awesome</span>
+                        开始生成创意
+                    </button>
+                    <button type="button" id="brainstormStartBtn" class="btn btn-outline"
+                        style="width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; font-size: 16px; cursor: pointer;">
+                        <span class="material-icons"
+                            style="vertical-align: middle; font-size: 18px; margin-right: 5px;">psychology</span>
+                        开启头脑风暴
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 右侧结果区 -->
+        <div class="col-md-7" style="flex: 1.5; min-width: 300px;">
+            <div class="card"
+                style="background: white; border-radius: 12px; padding: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 500px;">
+                <div id="outputHeader"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 1.2rem;">生成的项目提案</h3>
+                </div>
+
+                <!-- Thinking Process Card -->
+                <div id="processCard"
+                    style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px; display: none; border: 1px solid #e9ecef;">
+                    <div
+                        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h4
+                            style="margin: 0; font-size: 0.95rem; color: #495057; display: flex; align-items: center; gap: 8px;">
+                            <div class="loading-spinner" id="processSpinner"
+                                style="width: 14px; height: 14px; border-width: 2px;"></div>
+                            AI 思考过程 (Thinking Process)
+                        </h4>
+                        <span id="processTime" style="font-size: 0.8em; color: #888;">0s</span>
+                    </div>
+                    <div id="processLog"
+                        style="font-family: 'Consolas', monospace; font-size: 0.85rem; color: #666; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+                        <!-- Status logs go here -->
+                    </div>
+                </div>
+
+                <div id="outputContent" class="markdown-body" style="line-height: 1.6; color: #333;">
+                    <div style="text-align: center; color: #999; margin-top: 100px;">
+                        <span class="material-icons" style="font-size: 48px; color: #eee;">light_mode</span>
+                        <p>请在左侧填写信息，点击生成按钮获取创意方案</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Old chat section removed -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+    }
+
+    .markdown-body ul {
+        padding-left: 20px;
+    }
+
+    .markdown-body blockquote {
+        border-left: 4px solid #eee;
+        padding-left: 15px;
+        color: #666;
+        margin: 0;
+    }
+
+    .btn-outline {
+        background: white;
+        border: 1px solid var(--primary-color);
+        color: var(--primary-color);
+        padding: 5px 15px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 0.9em;
+        transition: all 0.2s;
+    }
+
+    .btn-outline:hover {
+        background: var(--primary-color);
+        color: white;
+    }
+</style>
+<style>
+    /* Modal Styles */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(4px);
+        animation: fadeIn 0.2s;
+    }
+
+    .modal-content {
+        width: 85%;
+        height: 85%;
+        background: white;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        animation: slideUp 0.3s;
+    }
+
+    .modal-header {
+        padding: 20px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #fcfcfc;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: #333;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #999;
+    }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        background: #fff;
+    }
+
+    .modal-footer {
+        padding: 15px;
+        border-top: 1px solid #eee;
+        display: flex;
+        gap: 10px;
+        background: #fcfcfc;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideUp {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<!-- 引入 Markdown 渲染库 (UMD版本，确保兼容性) -->
+<script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
+
+<!-- Chat Modal Structure -->
+<div id="chatModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">💬 方案优化与讨论</h3>
+            <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="chatHistory">
+            <div style="color: #888; text-align: center; font-style: italic; margin-top: 100px;">
+                正在连接 AI 顾问...
+            </div>
+        </div>
+        <div class="modal-footer">
+            <input type="text" id="chatInput" class="form-control" placeholder="输入您的想法..."
+                style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+            <button id="sendChatBtn" class="btn-primary"
+                style="padding: 10px 25px; border: none; border-radius: 8px;">发送</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Notification -->
+<div id="toast"
+    style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 15px 25px; border-radius: 10px; z-index: 2000; display: none; max-width: 500px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+</div>
+
+<script>
+    function loadIdeaHistory() {
+        try {
+            const raw = localStorage.getItem('creativeIdeaHistory');
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (err) {
+            console.warn('Failed to load history:', err);
+            return [];
+        }
+    }
+
+    function saveIdeaHistory(ideas) {
+        const trimmed = ideas.slice(0, 20);
+        localStorage.setItem('creativeIdeaHistory', JSON.stringify(trimmed));
+    }
+
+    function extractProjectNames(report) {
+        const ideas = [];
+        const lines = report.split('\n');
+        for (const line of lines) {
+            const nameMatch = line.match(/\*\*项目名称\*\*[:：]\s*(.+)/);
+            if (nameMatch) {
+                ideas.push(nameMatch[1].trim());
+                continue;
+            }
+            const headingMatch = line.match(/^##\s+(.+)/);
+            if (headingMatch && !headingMatch[1].includes('推荐项目方案')) {
+                ideas.push(headingMatch[1].trim());
+            }
+        }
+        return ideas;
+    }
+
+    window.ideaHistory = loadIdeaHistory();
+    window.brainstormState = {
+        report: '',
+        avoidTopics: [],
+        summary: ''
+    };
+
+    // Model Selector Handler
+    document.querySelectorAll('.model-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            // Update hidden input
+            document.getElementById('modelProvider').value = this.dataset.model;
+
+            // Update button styles
+            document.querySelectorAll('.model-btn').forEach(b => {
+                b.classList.remove('active');
+                b.style.background = '#f5f5f5';
+                b.style.color = '#333';
+            });
+            this.classList.add('active');
+            this.style.background = 'var(--primary-color)';
+            this.style.color = 'white';
+        });
+    });
+    window.processTimer = null;
+
+    function setProcessState(isLoading) {
+        const processCard = document.getElementById('processCard');
+        const processLog = document.getElementById('processLog');
+        const processSpinner = document.getElementById('processSpinner');
+        const outputContent = document.getElementById('outputContent');
+        const submitBtn = document.querySelector('#creativeForm button[type="submit"]');
+        const brainstormBtn = document.getElementById('brainstormStartBtn');
+
+        if (isLoading) {
+            processCard.style.display = 'block';
+            processLog.innerHTML = ''; // Clear previous logs
+            processSpinner.style.display = 'block';
+            outputContent.innerHTML = ''; // Clear previous report
+
+            // Clear Thinking Content
+            const thinkingContainer = document.getElementById('thinkingContent');
+            if (thinkingContainer) thinkingContainer.remove();
+
+            // Start Timer
+            let startTime = Date.now();
+            const timeSpan = document.getElementById('processTime');
+            timeSpan.innerText = '0s';
+            if (window.processTimer) clearInterval(window.processTimer);
+            window.processTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                timeSpan.innerText = elapsed + 's';
+            }, 1000);
+
+        } else {
+            processSpinner.style.display = 'none'; // Stop spinner
+            if (window.processTimer) clearInterval(window.processTimer);
+
+            // Auto collapse or just leave it? Let's leave it visible but maybe indicate done.
+            addProcessLog("✅ 生成完成！", "success");
+        }
+
+        submitBtn.disabled = isLoading;
+        if (brainstormBtn) brainstormBtn.disabled = isLoading;
+    }
+
+    function addProcessLog(message, type = "info") {
+        const processLog = document.getElementById('processLog');
+        const entry = document.createElement('div');
+        entry.style.display = 'flex';
+        entry.style.alignItems = 'center';
+        entry.style.gap = '8px';
+
+        let icon = '👉';
+        let color = '#666';
+
+        if (message.includes('Node 1') || message.includes('分析')) icon = '🔍';
+        if (message.includes('Node 2') || message.includes('头脑风暴')) icon = '🧠';
+        if (message.includes('Node 3') || message.includes('评估')) icon = '⚖️';
+        if (message.includes('Node 4') || message.includes('撰写')) icon = '📝';
+        if (type === 'error') { icon = '❌'; color = 'red'; }
+        if (type === 'success') { icon = '✅'; color = 'green'; }
+
+        entry.innerHTML = `<span style="font-size:1.1em">${icon}</span> <span style="color:${color}">${message}</span>`;
+        processLog.appendChild(entry);
+        processLog.scrollTop = processLog.scrollHeight;
+    }
+
+    function handleReportResult(report) {
+        const outputContent = document.getElementById('outputContent');
+        const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+        outputContent.innerHTML = parser(report);
+
+        const actionArea = document.getElementById('actionArea');
+        if (actionArea) actionArea.style.display = 'block';
+        else createActionArea();
+
+        window.currentReportContext = report;
+        const newIdeas = extractProjectNames(report);
+        if (newIdeas.length) {
+            window.ideaHistory = [...newIdeas, ...window.ideaHistory].filter((value, index, self) => self.indexOf(value) === index);
+            saveIdeaHistory(window.ideaHistory);
+        }
+    }
+
+    function parseApiResponse(response) {
+        // Standard JSON handler for non-streaming endpoints
+        return response.json().then(data => {
+            if (!response.ok) {
+                throw data;
+            }
+            return data;
+        });
+    }
+
+    function getErrorMessage(err) {
+        if (!err) return '未知错误';
+        if (typeof err === 'string') return err;
+        if (err.error) return err.error;
+        if (err.message) return err.message;
+        return JSON.stringify(err);
+    }
+
+    // NDJSON Stream Reader
+    async function readNDJSONStream(response, onEvent) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+
+                // Keep the last incomplete line in the buffer
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const event = JSON.parse(line);
+                        onEvent(event);
+                    } catch (e) {
+                        console.warn("Failed to parse JSON line:", line, e);
+                    }
+                }
+            }
+            // Process any remaining buffer
+            if (buffer.trim()) {
+                try {
+                    const event = JSON.parse(buffer);
+                    onEvent(event);
+                } catch (e) { console.warn("Final buffer parse error", e); }
+            }
+
+        } catch (err) {
+            console.error("Stream reading error:", err);
+            onEvent({ type: "error", message: "Stream interrupted." });
+        }
+    }
+
+    document.getElementById('creativeForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        // 获取表单数据
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory
+        };
+
+        // UI 状态更新: Clear previous outputs
+        const outputContent = document.getElementById('outputContent');
+        const actionArea = document.getElementById('actionArea');
+        if (actionArea) actionArea.style.display = 'none';
+        outputContent.innerHTML = '';
+
+        // --- Stage 1: Dual Full Pipeline (Fast, No Thinking) ---
+        setProcessState(true);
+        addProcessLog("🚀 启动双模型全流程：ChatGLM + DeepSeek 各自分析需求并生成创意...", "info");
+
+        try {
+            const response = await fetch('/company/creative/stage1', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await parseApiResponse(response);
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Render Stage 1 Results (12 Project Cards)
+            renderProjectCards(result.projects, data);
+            addProcessLog("✅ 共生成 12 个项目创意，请选择感兴趣的项目。", "success");
+
+        } catch (err) {
+            addProcessLog("请求失败: " + getErrorMessage(err), "error");
+            outputContent.innerHTML = `<p style="color: red;">出错: ${getErrorMessage(err)}</p>`;
+        } finally {
+            setProcessState(false);
+        }
+    });
+
+    function renderProjectCards(projectsMap, requestData) {
+        const outputContent = document.getElementById('outputContent');
+
+        const chatglmProjects = projectsMap.chatglm || [];
+        const deepseekProjects = projectsMap.deepseek || [];
+
+        // Store all projects for selection
+        window.currentProjects = [
+            ...chatglmProjects.map((p, i) => ({ ...p, id: `glm-${i}`, source: 'ChatGLM' })),
+            ...deepseekProjects.map((p, i) => ({ ...p, id: `ds-${i}`, source: 'DeepSeek' }))
+        ];
+
+        // Helper to render a single card
+        const renderCard = (project, index, source, colorScheme) => {
+            const bgColor = colorScheme === 'glm' ? '#e6f7ff' : '#fffbe6';
+            const borderColor = colorScheme === 'glm' ? '#91d5ff' : '#ffe58f';
+            const labelColor = colorScheme === 'glm' ? '#1890ff' : '#faad14';
+            const id = `${colorScheme}-${index}`;
+
+            return `
+                <div class="project-card" data-id="${id}" onclick="toggleProjectSelection('${id}')"
+                     style="background: white; border: 2px solid ${borderColor}; border-radius: 12px; padding: 16px; cursor: pointer; transition: all 0.2s; position: relative;">
+                    <input type="checkbox" id="check-${id}" style="position: absolute; top: 12px; right: 12px; width: 18px; height: 18px; pointer-events: none;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <span style="background: ${labelColor}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75em;">${source}</span>
+                    </div>
+                    <h4 style="margin: 0 0 5px 0; font-size: 1.1em; color: #333;">${project.name || 'Unknown'}</h4>
+                    <p style="margin: 0 0 10px 0; color: #666; font-size: 0.9em; font-style: italic;">"${project.slogan || ''}"</p>
+                    <div style="font-size: 0.85em; color: #555; line-height: 1.5;">
+                        <p style="margin: 5px 0;"><strong>💡 痛点:</strong> ${project.pain_point || 'N/A'}</p>
+                        <p style="margin: 5px 0;"><strong>🔧 方案:</strong> ${project.solution || 'N/A'}</p>
+                        <p style="margin: 5px 0;"><strong>⚙️ 技术:</strong> <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 4px;">${project.tech_stack || 'N/A'}</code></p>
+                    </div>
+                </div>
+            `;
+        };
+
+        let html = `
+            <style>
+                .project-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .project-card.selected { border-color: var(--primary-color) !important; box-shadow: 0 0 0 3px rgba(24,144,255,0.2); }
+                .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+            </style>
+
+            <h3 style="text-align: center; margin-bottom: 10px;">🧠 双模型创意展厅 (共 ${window.currentProjects.length} 个项目)</h3>
+            <p style="text-align: center; color: #666; font-size: 0.9em; margin-bottom: 25px;">点击卡片选择感兴趣的项目，然后生成详细计划书。</p>
+
+            <h4 style="color: #0050b3; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
+                <span class="material-icons" style="color: #1890ff;">smart_toy</span> ChatGLM 创意组 (${chatglmProjects.length} 个)
+            </h4>
+            <div class="project-grid" style="margin-bottom: 30px;">
+                ${chatglmProjects.map((p, i) => renderCard(p, i, 'ChatGLM', 'glm')).join('')}
+            </div>
+
+            <h4 style="color: #874d00; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
+                <span class="material-icons" style="color: #faad14;">psychology</span> DeepSeek 创意组 (${deepseekProjects.length} 个)
+            </h4>
+            <div class="project-grid" style="margin-bottom: 30px;">
+                ${deepseekProjects.map((p, i) => renderCard(p, i, 'DeepSeek', 'ds')).join('')}
+            </div>
+
+            <div style="margin-top: 30px; text-align: center; padding: 25px; border-top: 1px solid #eee; background: #fafafa; border-radius: 8px;">
+                <div style="margin-bottom: 15px;">
+                    已选择 <span id="selectedCount" style="font-weight: bold; color: var(--primary-color); font-size: 1.2em;">0</span> 个项目
+                </div>
+                <button id="generatePlansBtn" class="btn-primary" onclick="generatePlans()" disabled
+                    style="padding: 14px 50px; font-size: 1.1em; border-radius: 30px; opacity: 0.5; cursor: not-allowed;">
+                    ✨ 生成项目计划书 (每个项目独立生成)
+                </button>
+                <p style="margin-top: 10px; font-size: 0.85em; color: #999;">将使用 DeepSeek-R1 深度思考模式为每个选中项目生成详细计划书</p>
+            </div>
+        `;
+
+        outputContent.innerHTML = html;
+
+        // Store request data for plan generation
+        window.stage1RequestData = requestData;
+    }
+
+    window.toggleProjectSelection = function (id) {
+        const card = document.querySelector(`.project-card[data-id="${id}"]`);
+        const checkbox = document.getElementById(`check-${id}`);
+
+        if (card && checkbox) {
+            checkbox.checked = !checkbox.checked;
+            card.classList.toggle('selected', checkbox.checked);
+            updateProjectSelectionState();
+        }
+    };
+
+    function updateProjectSelectionState() {
+        const checkboxes = document.querySelectorAll('input[type="checkbox"][id^="check-"]:checked');
+        const count = checkboxes.length;
+
+        const btn = document.getElementById('generatePlansBtn');
+        const countSpan = document.getElementById('selectedCount');
+
+        if (countSpan) countSpan.innerText = count;
+
+        if (btn) {
+            if (count > 0) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            } else {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            }
+        }
+    }
+
+    window.generatePlans = async function () {
+        const btn = document.getElementById('generatePlansBtn');
+        if (btn.disabled) return;
+
+        // Collect selected projects
+        const selectedProjects = [];
+        document.querySelectorAll('input[type="checkbox"][id^="check-"]:checked').forEach(cb => {
+            const id = cb.id.replace('check-', '');
+            const project = window.currentProjects.find(p => p.id === id);
+            if (project) selectedProjects.push(project);
+        });
+
+        if (selectedProjects.length === 0) {
+            alert('请先选择至少一个项目！');
+            return;
+        }
+
+        // Show loading
+        btn.disabled = true;
+        btn.innerText = '⏳ 提交中...';
+
+        const data = {
+            ...window.stage1RequestData,
+            selectedProjects: selectedProjects
+        };
+
+        try {
+            const response = await fetch('/company/creative/generate_plans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await parseApiResponse(response);
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Show success toast - don't redirect, allow user to continue
+            showToast(`🚀 ${result.message}，可前往 <a href="/company/plans" style="color: white; text-decoration: underline;">计划书页面</a> 查看进度`, 8000);
+
+            // Reset button
+            btn.disabled = false;
+            btn.innerText = '✨ 生成项目计划书 (每个项目独立生成)';
+
+        } catch (err) {
+            alert('提交失败: ' + getErrorMessage(err));
+            btn.disabled = false;
+            btn.innerText = '✨ 生成项目计划书 (每个项目独立生成)';
+        }
+    };
+
+    // Brainstorm logic (kept mostly same but could also be streamed if backend upgraded)
+    // For now, brainstorm is still blocking monolithic? No, let's leave it as is for now unless user asked.
+    // User request was general "Process display". Brainstorm endpoint is separate. 
+    // Wait, the backend change ONLY affected /creative/generate/stream. 
+    // The previous brainstorm logic was synchronous.
+
+    document.getElementById('brainstormStartBtn') && document.getElementById('brainstormStartBtn').addEventListener('click', () => {
+        const outputContent = document.getElementById('outputContent');
+        const actionArea = document.getElementById('actionArea');
+        outputContent.innerHTML = '';
+        if (actionArea) actionArea.style.display = 'none';
+
+        // Show simplified loading without the detailed log since brainstorm isn't streamed yet
+        // OR reuse the process card but manually add logs?
+        setProcessState(true);
+        addProcessLog("正在启动头脑风暴 (非流式)...");
+
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory,
+            avoidTopics: window.brainstormState.avoidTopics,
+            previousReport: window.brainstormState.report
+        };
+
+        fetch('/company/creative/brainstorm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+            .then(parseApiResponse)
+            .then(result => {
+                if (result.error) {
+                    addProcessLog("Error: " + result.error, "error");
+                    outputContent.innerHTML = `<p style="color: red;">生成出错: ${result.error}</p>`;
+                    return;
+                }
+                window.brainstormState = {
+                    report: result.report || '',
+                    summary: result.summary || '',
+                    avoidTopics: result.avoidTopics || []
+                };
+                handleReportResult(result.report);
+                renderBrainstormControls();
+                addProcessLog("头脑风暴完成！", "success");
+            })
+            .catch(err => {
+                addProcessLog("Net Error: " + getErrorMessage(err), "error");
+                outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;
+            })
+            .finally(() => {
+                setProcessState(false);
+            });
+    });
+
+    function renderBrainstormControls() {
+        const container = document.getElementById('outputContent').parentNode;
+        let div = document.getElementById('brainstormControls');
+        if (!div) {
+            div = document.createElement('div');
+            div.id = 'brainstormControls';
+            div.style.marginTop = '20px';
+            div.style.paddingTop = '20px';
+            div.style.borderTop = '1px solid #eee';
+            container.appendChild(div);
+        }
+
+        div.innerHTML = `
+            <h4 style="margin-bottom: 10px;">🧠 继续头脑风暴</h4>
+            <textarea id="brainstormFeedback" rows="2" placeholder="可选：输入你的修改建议（比如不喜欢的方向/想要的改动）"
+                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+            <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
+                <button class="btn-outline" onclick="runBrainstormCycle()">再次头脑风暴</button>
+                <span style="color: #999; font-size: 0.85em;">将自动避开上一轮总结的重复方向</span>
+            </div>
+        `;
+    }
+
+    window.runBrainstormCycle = async function () {
+        const outputContent = document.getElementById('outputContent');
+        const feedbackInput = document.getElementById('brainstormFeedback');
+        const feedback = feedbackInput ? feedbackInput.value.trim() : '';
+
+        outputContent.innerHTML = '';
+        setProcessState(true);
+
+        const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+        let fullReport = '';
+
+        const data = {
+            competition: document.getElementById('competition').value,
+            studentProfile: document.getElementById('studentProfile').value,
+            keywords: document.getElementById('keywords').value,
+            extraReq: document.getElementById('extraReq').value,
+            historyIdeas: window.ideaHistory,
+            avoidTopics: window.brainstormState.avoidTopics,
+            previousReport: window.brainstormState.report,
+            feedback: feedback,
+            modelProvider: document.getElementById('modelProvider').value
+        };
+
+        try {
+            const response = await fetch('/company/creative/brainstorm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            await readNDJSONStream(response, (event) => {
+                if (event.type === 'status') {
+                    addProcessLog(event.message);
+                } else if (event.type === 'delta') {
+                    fullReport += event.content;
+                    outputContent.innerHTML = parser(fullReport);
+                } else if (event.type === 'error') {
+                    addProcessLog(event.message, 'error');
+                } else if (event.type === 'complete') {
+                    // Update brainstorm state with metadata
+                    window.brainstormState = {
+                        report: fullReport,
+                        summary: event.summary || '',
+                        avoidTopics: event.avoidTopics || []
+                    };
+                }
+            });
+
+            handleReportResult(fullReport);
+            renderBrainstormControls();
+            if (feedbackInput) feedbackInput.value = '';
+
+        } catch (err) {
+            addProcessLog("Net Error: " + getErrorMessage(err), "error");
+            outputContent.innerHTML = `<p style="color: red;">网络请求出错: ${getErrorMessage(err)}</p>`;
+        } finally {
+            setProcessState(false);
+        }
+    };
+
+    function createActionArea() {
+        const container = document.getElementById('outputContent').parentNode;
+        let div = document.getElementById('actionArea');
+        if (!div) {
+            div = document.createElement('div');
+            div.id = 'actionArea';
+            div.style.marginTop = '20px';
+            div.style.paddingTop = '20px';
+            div.style.borderTop = '1px solid #eee';
+            container.appendChild(div);
+        }
+
+        div.innerHTML = `
+            <h4 style="margin-bottom: 15px;">🚀 下一步操作</h4>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <button class="btn-outline" onclick="openOptimization(1)">优化方案 1 (工具类)</button>
+                <button class="btn-outline" onclick="openOptimization(2)">优化方案 2 (平台类)</button>
+                <button class="btn-outline" onclick="openOptimization(3)">优化方案 3 (硬件类)</button>
+                <button class="btn-outline" style="border-color: #666; color: #666;" onclick="openOptimization(0)">💬 自由讨论</button>
+                <div style="flex: 1;"></div>
+                <button class="btn-primary" onclick="saveProject()" style="padding: 6px 15px; border-radius: 20px; font-size: 0.9em; display: flex; align-items: center; gap: 5px;">
+                    <span class="material-icons" style="font-size: 16px;">favorite</span> 收藏方案
+                </button>
+            </div>
+        `;
+    }
+
+    // Save Project Logic
+    window.saveProject = function () {
+        const content = window.currentReportContext;
+        if (!content) { alert("没有可保存的内容！"); return; }
+
+        // Simple extraction of Title
+        const titleMatch = content.match(/#\s*(.+)/) || content.match(/\*\*(.+)\*\*/);
+        const title = titleMatch ? titleMatch[1].replace(/[:：]/g, '').trim() : "AI 创意项目";
+
+        fetch('/company/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title,
+                content: content,
+                tags: "AI Generated"
+            })
+        })
+            .then(parseApiResponse)
+            .then(data => {
+                alert("✅ 项目已收藏到对应页面！");
+            })
+            .catch(err => alert("保存失败: " + getErrorMessage(err)));
+    };
+
+    // Modal & Chat Logic
+    const chatModal = document.getElementById('chatModal');
+    const chatHistory = document.getElementById('chatHistory');
+    const chatInput = document.getElementById('chatInput');
+    const sendChatBtn = document.getElementById('sendChatBtn');
+
+    function openModal() {
+        chatModal.style.display = 'flex';
+        chatInput.focus();
+    }
+
+    function closeModal() {
+        chatModal.style.display = 'none';
+    }
+
+    // Close when clicking outside
+    chatModal.addEventListener('click', (e) => {
+        if (e.target === chatModal) closeModal();
+    });
+
+    function appendMessage(role, text) {
+        const msgDiv = document.createElement('div');
+        msgDiv.style.margin = "10px 0";
+        msgDiv.style.padding = "12px 16px";
+        msgDiv.style.borderRadius = "12px";
+        msgDiv.style.maxWidth = "85%";
+        msgDiv.style.lineHeight = "1.5";
+
+        if (role === 'user') {
+            msgDiv.style.background = "#e3f2fd";
+            msgDiv.style.marginLeft = "auto";
+            msgDiv.style.color = "#000";
+            msgDiv.innerHTML = `<strong>You:</strong> ${text}`;
+        } else {
+            msgDiv.style.background = "#f4f6f8";
+            msgDiv.style.marginRight = "auto";
+            const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+            msgDiv.innerHTML = parser(text); // AI text is markdown
+        }
+
+        chatHistory.appendChild(msgDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    function sendChat(message) {
+        if (!message) return;
+
+        appendMessage('user', message);
+        chatInput.value = '';
+
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'chatLoading';
+        loadingDiv.innerText = "AI 正在思考中...";
+        loadingDiv.style.padding = "12px";
+        loadingDiv.style.color = "#999";
+        chatHistory.appendChild(loadingDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+
+        fetch('/company/creative/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: message,
+                context: window.currentReportContext || ""
+            })
+        })
+            .then(parseApiResponse)
+            .then(data => {
+                if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
+                if (data.reply) {
+                    appendMessage('ai', data.reply);
+
+                    // Update Context if reply looks like a new report (Auto-Update Logic)
+                    // Heuristic: Length > 200 and contains Headers
+                    if (data.reply.length > 200 && (data.reply.includes("# ") || data.reply.includes("### "))) {
+                        console.log("Updating context with new report...");
+                        window.currentReportContext = data.reply;
+
+                        // Add a mini notification in chat
+                        const updateDiv = document.createElement('div');
+                        updateDiv.style.textAlign = 'center';
+                        updateDiv.style.fontSize = '0.8em';
+                        updateDiv.style.color = '#10b981';
+                        updateDiv.style.margin = '10px 0';
+                        updateDiv.innerHTML = '💾 系统检测到新方案，点击主界面的“收藏”即可保存此版本。';
+                        chatHistory.appendChild(updateDiv);
+                        chatHistory.scrollTop = chatHistory.scrollHeight;
+                    }
+                } else {
+                    appendMessage('ai', data.error || "Error generating reply.");
+                }
+            })
+            .catch(err => {
+                if (document.getElementById('chatLoading')) document.getElementById('chatLoading').remove();
+                appendMessage('ai', `Error: ${getErrorMessage(err)}`);
+            });
+    }
+
+    // Trigger Optimization
+    window.openOptimization = function (idx) {
+        openModal();
+        // Clear history if it's a fresh session or just append separator? 
+        // Let's clear for better focus if user switches context, or keep it?
+        // User might want to compare. Let's keep history but add a divider or system note.
+
+        let msg = "";
+        if (idx === 0) {
+            document.getElementById('modalTitle').innerText = "💬 自由讨论模式";
+            // Don't auto send, just ready
+            chatHistory.innerHTML = '<div style="text-align:center; color:#999; margin: 20px;">已进入自由讨论模式，请直接提问。</div>';
+        } else {
+            document.getElementById('modalTitle').innerText = `🚀 正在优化：方案 ${idx}`;
+            chatHistory.innerHTML = ''; // Start fresh for specific optimization
+            msg = `我对方案 ${idx} 很感兴趣。请担任技术顾问，详细列出它的落地执行步骤（Roadmap），并分析潜在的技术难点（Tech Challenges）。`;
+            sendChat(msg);
+        }
+    };
+
+    sendChatBtn.addEventListener('click', () => sendChat(chatInput.value));
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendChat(chatInput.value);
+    });
+
+    // Toast notification function
+    function showToast(message, duration = 3000) {
+        const toast = document.getElementById('toast');
+        toast.innerHTML = message;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', duration);
+    }
+</script>
+{% endblock %}

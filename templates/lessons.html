@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}教程列表 - {{ 'Python' if language == 'python' else 'C语言' if language == 'c' else 'Vibe Coding' }}学习平台{% endblock %}
+
+{% block content %}
+{% set lang = language|default('python') %}
+{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+{% set lang_prefix = '/' + lang %}
+
+<div class="container">
+    <div class="page-header">
+        <h1>{{ lang_name }} 教程</h1>
+        <p>系统学习{{ lang_name }}编程，从入门到精通，每章都配有详细讲解和练习题</p>
+    </div>
+
+    <div class="lessons-container" id="lessons-list">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <div>正在加载课程...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const LANG = '{{ lang }}';
+const LANG_PREFIX = '{{ lang_prefix }}';
+
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/api/lessons?language=' + LANG)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('lessons-list');
+            if (data.success && data.data.length > 0) {
+                container.innerHTML = data.data.map(lesson => `
+                    <a href="${LANG_PREFIX}/lessons/${lesson.id}" class="lesson-card">
+                        <div class="lesson-card-header">
+                            <div class="lesson-chapter">第 ${lesson.chapter_num} 章</div>
+                            <h3 class="lesson-title">${lesson.title}</h3>
+                        </div>
+                        <div class="lesson-card-body">
+                            <p class="lesson-desc">${lesson.description || '暂无描述'}</p>
+                        </div>
+                        <div class="lesson-card-footer">
+                            <span class="start-btn">开始学习 →</span>
+                        </div>
+                    </a>
+                `).join('');
+            } else {
+                container.innerHTML = '<p class="empty-message">暂无教程内容</p>';
+            }
+        })
+        .catch(error => {
+            document.getElementById('lessons-list').innerHTML =
+                '<p class="error-message">加载失败，请刷新重试</p>';
+        });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}编程学习平台{% endblock %}</title>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+    <!-- 代码高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <!-- 自定义样式 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body>
+    {% set lang = language|default('python') %}
+    {% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+    {% set lang_prefix = '/' + lang %}
+
+    <nav class="navbar">
+        <!-- Debug: Request Path = [{{ request.path }}] -->
+        <div class="nav-container">
+            {% if request.path.startswith('/company') or request.path.startswith('/projects') %}
+            <!-- Agent 导航 -->
+            <a href="/company/agents" class="nav-logo">SCF Agent Hub</a>
+            <div class="nav-links">
+                <a href="/company/creative" class="nav-link">创意助手</a>
+                <a href="/company/plans" class="nav-link">计划书</a>
+                <a href="/company/handbook/library" class="nav-link">工程手册</a>
+                <a href="/" class="nav-link" style="opacity: 0.7; font-size: 0.9em;">返回首页</a>
+            </div>
+            {% else %}
+            <!-- Code Learn 导航 -->
+            <a href="/" class="nav-logo">Code Learn</a>
+
+            <!-- 导航链接 -->
+            <div class="nav-links">
+                <a href="{{ lang_prefix }}/lessons" class="nav-link">教程</a>
+                <a href="{{ lang_prefix }}/playground" class="nav-link">练习场</a>
+                <a href="{{ lang_prefix }}/exercises" class="nav-link">题库</a>
+                <a href="/" class="nav-link nav-link-home">返回首页</a>
+            </div>
+
+            <!-- 语言切换器 -->
+            <div class="lang-switcher">
+                <a href="/python/lessons" class="lang-btn {% if lang == 'python' %}active{% endif %}">Python</a>
+                <a href="/c/lessons" class="lang-btn {% if lang == 'c' %}active{% endif %}">C</a>
+                <a href="/vibe/lessons" class="lang-btn {% if lang == 'vibe' %}active{% endif %}">Vibe</a>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <div class="footer-container">
+            <p>编程学习平台 - 帮助学生学习 Python 和 C 语言编程</p>
+        </div>
+    </footer>
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+    <!-- 代码高亮 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/c.min.js"></script>
+
+    <!-- 全局语言变量 -->
+    <script>
+        window.CURRENT_LANGUAGE = '{{ lang }}';
+    </script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

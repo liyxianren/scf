@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+
+{% block title %}工程手册生成器 - SCF Agent Hub{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        margin-bottom: 24px;
+    }
+
+    .page-header h1 {
+        margin: 0;
+        font-size: 1.6rem;
+    }
+
+    .page-header p {
+        margin-top: 6px;
+        color: var(--text-secondary);
+    }
+
+    .generator-grid {
+        display: grid;
+        grid-template-columns: minmax(320px, 1.1fr) minmax(280px, 0.9fr);
+        gap: 24px;
+    }
+
+    .card {
+        background: #fff;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #eee;
+    }
+
+    .form-group {
+        margin-bottom: 16px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 0.95rem;
+        resize: vertical;
+    }
+
+    .checkbox-group {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.9rem;
+    }
+
+    .btn-primary {
+        width: 100%;
+        padding: 12px;
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .status-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: #f8f9fb;
+        border-radius: 8px;
+        border: 1px solid #eee;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        min-height: 44px;
+    }
+
+    .helper-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 12px;
+    }
+
+    .helper-item {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .helper-item span.material-icons {
+        font-size: 20px;
+        color: var(--primary-color);
+    }
+
+    @media (max-width: 960px) {
+        .generator-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <div>
+            <a href="/company/handbook/library" class="nav-link" style="padding-left: 0;">&larr; 返回手册库</a>
+            <h1>工程手册生成器</h1>
+            <p>支持美国/英国/港新体系，全中文自动草稿生成</p>
+        </div>
+    </div>
+
+    <div class="generator-grid">
+        <div class="card">
+            <form id="handbookForm">
+                <div class="form-group">
+                    <label for="projectNameCn">项目中文名</label>
+                    <input type="text" id="projectNameCn" placeholder="请输入项目中文名" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="projectNameEn">项目英文名 (可选)</label>
+                    <input type="text" id="projectNameEn" placeholder="请输入项目英文名">
+                </div>
+
+                <div class="form-group">
+                    <label for="authorName">作者/学生姓名</label>
+                    <input type="text" id="authorName" placeholder="例如：张三">
+                </div>
+
+                <div class="form-group">
+                    <label for="completionDate">完成日期</label>
+                    <input type="date" id="completionDate">
+                </div>
+
+                <div class="form-group">
+                    <label for="version">版本号</label>
+                    <input type="text" id="version" value="v1.0.0">
+                </div>
+
+                <div class="form-group">
+                    <label>目标申请体系</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="system" value="US" checked> 美国</label>
+                        <label><input type="checkbox" name="system" value="UK"> 英国</label>
+                        <label><input type="checkbox" name="system" value="HK-SG"> 港新</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="projectDescription">项目说明 (必填)</label>
+                    <textarea id="projectDescription" rows="6" placeholder="请粘贴项目说明、背景与目标等内容" required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="sourceCodeUrl">源码链接 (可选)</label>
+                    <input type="text" id="sourceCodeUrl" placeholder="GitHub 或仓库链接">
+                </div>
+
+                <div class="form-group">
+                    <label for="sourceCodeText">代码内容 (可选)</label>
+                    <textarea id="sourceCodeText" rows="4" placeholder="粘贴核心代码片段或关键模块"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="materialsText">过程材料 (可选)</label>
+                    <textarea id="materialsText" rows="4" placeholder="粘贴测试数据、迭代记录、截图说明等"></textarea>
+                </div>
+
+                <button class="btn-primary" type="submit" id="submitBtn">
+                    <span class="material-icons" style="vertical-align: middle; font-size: 18px; margin-right: 6px;">auto_awesome</span>
+                    提交并生成
+                </button>
+                <div id="statusBox" class="status-box">请填写项目材料并提交。</div>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top: 0;">提交提示</h3>
+            <ul class="helper-list">
+                <li class="helper-item">
+                    <span class="material-icons">description</span>
+                    <div>项目说明建议不少于 500 字，包含背景、目标、功能与成果。</div>
+                </li>
+                <li class="helper-item">
+                    <span class="material-icons">code</span>
+                    <div>代码可选，粘贴核心模块即可，系统会自动归档。</div>
+                </li>
+                <li class="helper-item">
+                    <span class="material-icons">verified</span>
+                    <div>生成后请人工审核与补充证据链，保证专业度。</div>
+                </li>
+                <li class="helper-item">
+                    <span class="material-icons">timeline</span>
+                    <div>生成过程为后台任务，可在手册库查看状态。</div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const form = document.getElementById('handbookForm');
+    const statusBox = document.getElementById('statusBox');
+    const submitBtn = document.getElementById('submitBtn');
+
+    function setStatus(message, isError) {
+        statusBox.textContent = message;
+        statusBox.style.color = isError ? '#b91c1c' : 'var(--text-secondary)';
+        statusBox.style.borderColor = isError ? '#fecaca' : '#eee';
+        statusBox.style.background = isError ? '#fef2f2' : '#f8f9fb';
+    }
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        submitBtn.disabled = true;
+        setStatus('正在提交材料，请稍候...');
+
+        const systems = Array.from(document.querySelectorAll('input[name="system"]:checked'))
+            .map(input => input.value);
+
+        const payload = {
+            project_name_cn: document.getElementById('projectNameCn').value.trim(),
+            project_name_en: document.getElementById('projectNameEn').value.trim(),
+            author_name: document.getElementById('authorName').value.trim(),
+            completion_date: document.getElementById('completionDate').value,
+            version: document.getElementById('version').value.trim(),
+            target_systems: systems,
+            project_description: document.getElementById('projectDescription').value.trim(),
+            source_code_url: document.getElementById('sourceCodeUrl').value.trim(),
+            source_code_text: document.getElementById('sourceCodeText').value.trim(),
+            process_materials_text: document.getElementById('materialsText').value.trim()
+        };
+
+        if (!payload.project_name_cn) {
+            setStatus('请填写项目中文名。', true);
+            submitBtn.disabled = false;
+            return;
+        }
+
+        if (!payload.project_description) {
+            setStatus('请填写项目说明。', true);
+            submitBtn.disabled = false;
+            return;
+        }
+
+        if (!payload.target_systems.length) {
+            setStatus('请选择目标申请体系。', true);
+            submitBtn.disabled = false;
+            return;
+        }
+
+        try {
+            const response = await fetch('/company/handbook/api/handbooks/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+
+            if (!response.ok) {
+                setStatus(result.error || '提交失败，请检查输入。', true);
+                submitBtn.disabled = false;
+                return;
+            }
+
+            setStatus('材料已保存，正在启动生成任务...');
+            const generateResponse = await fetch(`/company/handbook/api/handbooks/${result.id}/generate`, { method: 'POST' });
+            if (!generateResponse.ok) {
+                setStatus('启动生成失败，请稍后在手册库重试。', true);
+                submitBtn.disabled = false;
+                return;
+            }
+            window.location.href = `/company/handbook/library/${result.id}`;
+        } catch (error) {
+            setStatus('提交失败，请稍后重试。', true);
+            submitBtn.disabled = false;
+        }
+    });
+</script>
+{% endblock %}
