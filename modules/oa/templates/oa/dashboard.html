@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+{% block title %}OA 内部系统 - SCF Hub{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .oa-page { max-width: 1100px; margin: 0 auto; padding: 30px 20px; }
+    .oa-header { margin-bottom: 32px; }
+    .oa-header h1 { font-size: 1.8rem; font-weight: 700; color: #1a1a2e; margin: 0 0 6px 0; }
+    .oa-header p { color: #6b7280; font-size: 0.95rem; margin: 0; }
+
+    .oa-stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 32px;
+    }
+    .oa-stat-card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        border: 1px solid #e5e7eb;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .oa-stat-card .stat-number {
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: #2563eb;
+        display: block;
+    }
+    .oa-stat-card .stat-label {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 4px;
+    }
+
+    .oa-nav-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        margin-bottom: 36px;
+    }
+    .oa-nav-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 36px 24px;
+        background: white;
+        border-radius: 14px;
+        border: 1px solid #e5e7eb;
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .oa-nav-card:hover {
+        border-color: #2563eb;
+        box-shadow: 0 4px 16px rgba(37,99,235,0.12);
+        transform: translateY(-2px);
+    }
+    .oa-nav-card .material-icons { font-size: 2.4rem; color: #2563eb; }
+    .oa-nav-card h3 { font-size: 1.15rem; font-weight: 600; margin: 0; }
+    .oa-nav-card p { font-size: 0.85rem; color: #6b7280; margin: 0; }
+
+    .oa-section { margin-bottom: 32px; }
+    .oa-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+    }
+    .oa-section-header h2 {
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .oa-section-header h2 .material-icons { font-size: 1.3rem; color: #2563eb; }
+
+    .schedule-item {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 14px 18px;
+        background: white;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        margin-bottom: 8px;
+    }
+    .schedule-item .time-badge {
+        background: #eff6ff;
+        color: #2563eb;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .schedule-item .info { flex: 1; }
+    .schedule-item .info .course { font-weight: 500; font-size: 0.95rem; }
+    .schedule-item .info .meta { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
+    .empty-msg { color: #9ca3af; text-align: center; padding: 32px; font-size: 0.9rem; }
+
+    .import-section {
+        background: #f9fafb;
+        border: 2px dashed #d1d5db;
+        border-radius: 12px;
+        padding: 24px;
+        text-align: center;
+    }
+    .import-section p { color: #6b7280; font-size: 0.9rem; margin: 0 0 12px 0; }
+    .import-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 20px;
+        background: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .import-btn:hover { background: #1d4ed8; }
+    .import-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    #importFile { display: none; }
+    .import-result { margin-top: 12px; font-size: 0.85rem; }
+    .import-result.success { color: #059669; }
+    .import-result.error { color: #dc2626; }
+
+    @media (max-width: 640px) {
+        .oa-stats-row { grid-template-columns: 1fr; }
+        .oa-nav-grid { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oa-page">
+    <div class="oa-header">
+        <h1>内部办公系统</h1>
+        <p>课程排课管理 & 待办事项追踪</p>
+    </div>
+
+    <div class="oa-stats-row">
+        <div class="oa-stat-card">
+            <span class="stat-number" id="todayCount">-</span>
+            <span class="stat-label">今日课程</span>
+        </div>
+        <div class="oa-stat-card">
+            <span class="stat-number" id="pendingTodos">-</span>
+            <span class="stat-label">待办事项</span>
+        </div>
+        <div class="oa-stat-card">
+            <span class="stat-number" id="weekCount">-</span>
+            <span class="stat-label">本周课时</span>
+        </div>
+    </div>
+
+    <div class="oa-nav-grid">
+        <a class="oa-nav-card" href="/oa/schedule">
+            <span class="material-icons">calendar_month</span>
+            <h3>课程排课表</h3>
+            <p>按周查看和管理课程安排</p>
+        </a>
+        <a class="oa-nav-card" href="/oa/todos">
+            <span class="material-icons">checklist</span>
+            <h3>待办事项</h3>
+            <p>任务追踪与完成管理</p>
+        </a>
+        <a class="oa-nav-card" href="/oa/painpoints">
+            <span class="material-icons">lightbulb</span>
+            <h3>痛点提交</h3>
+            <p>描述工作问题，AI 分析解决方案</p>
+        </a>
+    </div>
+
+    <div class="oa-section">
+        <div class="oa-section-header">
+            <h2><span class="material-icons">today</span> 今日课程</h2>
+        </div>
+        <div id="todaySchedule">
+            <div class="empty-msg">加载中...</div>
+        </div>
+    </div>
+
+    <div class="oa-section">
+        <div class="oa-section-header">
+            <h2><span class="material-icons">upload_file</span> 导入 Excel 课表</h2>
+        </div>
+        <div class="import-section">
+            <p>上传 2026年总课表.xlsx 将自动解析并导入课程和待办数据</p>
+            <input type="file" id="importFile" accept=".xlsx,.xls">
+            <button class="import-btn" id="importBtn" onclick="document.getElementById('importFile').click()">
+                <span class="material-icons" style="font-size:1.1rem;">cloud_upload</span>
+                选择 Excel 文件
+            </button>
+            <div id="importResult" class="import-result"></div>
+        </div>
+    </div>
+</div>
+
+{% include 'oa/_chat_sidebar.html' %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function loadDashboard() {
+    try {
+        const res = await fetch('/oa/api/dashboard-stats');
+        const json = await res.json();
+        if (!json.success) return;
+
+        const d = json.data;
+        document.getElementById('todayCount').textContent = d.today_count;
+        document.getElementById('pendingTodos').textContent = d.pending_todos;
+        document.getElementById('weekCount').textContent = d.week_count;
+
+        const container = document.getElementById('todaySchedule');
+        if (d.today_schedules.length === 0) {
+            container.innerHTML = '<div class="empty-msg">今日暂无课程安排</div>';
+            return;
+        }
+
+        container.innerHTML = d.today_schedules.map(s => `
+            <div class="schedule-item">
+                <span class="time-badge">${s.time_start} - ${s.time_end}</span>
+                <div class="info">
+                    <div class="course">${s.course_name}</div>
+                    <div class="meta">${s.teacher}${s.students ? ' · ' + s.students : ''}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('加载仪表盘失败:', e);
+    }
+}
+
+document.getElementById('importFile').addEventListener('change', async function() {
+    const file = this.files[0];
+    if (!file) return;
+
+    const btn = document.getElementById('importBtn');
+    const result = document.getElementById('importResult');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="material-icons" style="font-size:1.1rem;">hourglass_top</span> 导入中...';
+    result.textContent = '';
+    result.className = 'import-result';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/oa/api/import-excel', { method: 'POST', body: formData });
+        const json = await res.json();
+
+        if (json.success) {
+            result.textContent = `导入成功: ${json.data.schedules_count} 条课程, ${json.data.todos_count} 条待办`;
+            result.className = 'import-result success';
+            loadDashboard();
+        } else {
+            result.textContent = json.error || '导入失败';
+            result.className = 'import-result error';
+        }
+    } catch (e) {
+        result.textContent = '网络错误: ' + e.message;
+        result.className = 'import-result error';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons" style="font-size:1.1rem;">cloud_upload</span> 选择 Excel 文件';
+        this.value = '';
+    }
+});
+
+loadDashboard();
+
+// ===== AI Chat (shared sidebar) =====
+let chatHistory = [];
+let pendingProposal = null;
+let chatSending = false;
+
+const TOOL_LABELS = {
+    get_today_info: '获取日期信息',
+    query_schedules: '查询课程',
+    find_available_slots: '查找空闲时段',
+    propose_create_schedules: '生成排课方案',
+    propose_delete_schedules: '生成删除方案',
+    propose_update_schedules: '生成修改方案',
+    query_todos: '查询待办',
+    propose_create_todos: '生成待办创建方案',
+    propose_delete_todos: '生成待办删除方案',
+    propose_update_todos: '生成待办修改方案',
+};
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toggleChat() {
+    const panel = document.getElementById('chatPanel');
+    const toggle = document.getElementById('chatToggle');
+    const active = panel.classList.toggle('active');
+    toggle.style.display = active ? 'none' : 'flex';
+    if (active) document.getElementById('chatInput').focus();
+}
+
+function appendChatMsg(role, content) {
+    const el = document.getElementById('chatMessages');
+    const welcome = document.getElementById('chatWelcome');
+    if (welcome) welcome.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = `chat-msg ${role}`;
+    if (role === 'assistant') {
+        div.innerHTML = formatAssistantMsg(content);
+    } else {
+        div.textContent = content;
+    }
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+    return div;
+}
+
+function formatAssistantMsg(text) {
+    if (!text) return '';
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!text) return '';
+    // Strip markdown tables (already rendered in proposal card)
+    text = text.replace(/^\|.+\|$/gm, '').trim();
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) return '';
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.8rem;">$1</code>');
+    html = html.replace(/\n/g, '<br>');
+    return html;
+}
+
+function removeLastThinking() {
+    document.querySelectorAll('#chatMessages .thinking-msg').forEach(m => m.remove());
+}
+function showThinking(text) {
+    removeLastThinking();
+    const el = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = 'chat-msg thinking-msg';
+    div.textContent = text;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+function quickSend(text) {
+    document.getElementById('chatInput').value = text;
+    sendChatMessage();
+}
+
+function quickTemplate(text) {
+    const input = document.getElementById('chatInput');
+    input.value = text;
+    input.focus();
+    const idx = text.indexOf('___');
+    if (idx >= 0) input.setSelectionRange(idx, idx + 3);
+}
+
+async function sendChatMessage() {
+    if (chatSending) return;
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    if (!message) return;
+
+    chatSending = true;
+    input.value = '';
+    input.style.height = 'auto';
+    document.getElementById('chatSendBtn').disabled = true;
+    appendChatMsg('user', message);
+    showThinking('思考中…');
+
+    try {
+        const res = await fetch('/oa/api/schedule-agent/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message, history: chatHistory })
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try { handleChatEvent(JSON.parse(line)); } catch(e) {}
+            }
+        }
+        if (buffer.trim()) {
+            try { handleChatEvent(JSON.parse(buffer)); } catch(e) {}
+        }
+    } catch(e) {
+        removeLastThinking();
+        appendChatMsg('system-msg', '网络错误，请重试');
+    } finally {
+        chatSending = false;
+        document.getElementById('chatSendBtn').disabled = false;
+        input.focus();
+    }
+}
+
+function handleChatEvent(event) {
+    switch(event.type) {
+        case 'thinking':
+            showThinking(typeof event.data === 'string' ? event.data : '思考中…');
+            break;
+        case 'tool_call': {
+            const name = event.data?.name || '';
+            showThinking('正在' + (TOOL_LABELS[name] || name) + '…');
+            break;
+        }
+        case 'response':
+            removeLastThinking();
+            if (event.content) appendChatMsg('assistant', event.content);
+            if (event.messages) chatHistory = event.messages;
+            if (event.proposal) showProposal(event.proposal);
+            break;
+        case 'error':
+            removeLastThinking();
+            appendChatMsg('system-msg', '错误: ' + (event.content || '未知错误'));
+            break;
+    }
+}
+
+function showProposal(proposal) {
+    pendingProposal = proposal;
+    const el = document.getElementById('chatMessages');
+    const card = document.createElement('div');
+    card.className = 'chat-proposal-card';
+    card.id = 'proposalCard';
+
+    let detailHtml = '';
+    const pLabel = {1:'紧急',2:'一般',3:'低'};
+    if (proposal.action === 'create' && proposal.schedules) {
+        detailHtml = `<table><tr><th>日期</th><th>时间</th><th>教师</th><th>课程</th></tr>`;
+        proposal.schedules.slice(0,20).forEach(s => {
+            detailHtml += `<tr><td>${s.date}</td><td>${s.time_start}-${s.time_end}</td><td>${escapeHtml(s.teacher)}</td><td>${escapeHtml(s.course_name)}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'delete' && proposal.schedules) {
+        detailHtml = `<table><tr><th>ID</th><th>日期</th><th>课程</th></tr>`;
+        proposal.schedules.forEach(s => {
+            detailHtml += `<tr><td>${s.id}</td><td>${s.date}</td><td>${escapeHtml(s.course_name)}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'create_todos' && proposal.todos) {
+        detailHtml = `<table><tr><th>标题</th><th>负责人</th><th>截止</th><th>优先级</th></tr>`;
+        proposal.todos.slice(0,20).forEach(t => {
+            const people = Array.isArray(t.responsible_people) ? t.responsible_people.join(', ') : '';
+            detailHtml += `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(people)}</td><td>${t.due_date||'-'}</td><td>${pLabel[t.priority]||'一般'}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'delete_todos' && proposal.todos) {
+        detailHtml = `<table><tr><th>ID</th><th>标题</th><th>负责人</th></tr>`;
+        proposal.todos.forEach(t => {
+            detailHtml += `<tr><td>${t.id}</td><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.responsible_person||'')}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'update_todos') {
+        detailHtml = `<div>将修改 ${proposal.total} 条待办</div>`;
+    }
+
+    let conflictHtml = '';
+    if (proposal.conflicts && proposal.conflicts.length > 0) {
+        conflictHtml = `<div style="color:#dc2626;font-size:0.78rem;margin-bottom:6px;">⚠ ${proposal.conflicts.length} 个冲突</div>`;
+    }
+
+    card.innerHTML = `
+        <div class="proposal-summary">${escapeHtml(proposal.summary || '方案')}</div>
+        ${conflictHtml}
+        <div class="proposal-detail">${detailHtml}</div>
+        <div class="chat-proposal-actions">
+            <button class="confirm-btn" onclick="confirmProposal()">确认执行</button>
+            <button class="reject-btn" onclick="rejectProposal()">取消</button>
+        </div>`;
+    el.appendChild(card);
+    el.scrollTop = el.scrollHeight;
+}
+
+async function confirmProposal() {
+    if (!pendingProposal) return;
+    const card = document.getElementById('proposalCard');
+    try {
+        const res = await fetch('/oa/api/schedule-agent/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(pendingProposal)
+        });
+        const json = await res.json();
+        if (json.success) {
+            appendChatMsg('system-msg', json.message);
+            loadDashboard();
+        } else {
+            appendChatMsg('system-msg', '执行失败: ' + (json.error || '未知错误'));
+        }
+    } catch(e) {
+        appendChatMsg('system-msg', '网络错误');
+    }
+    if (card) card.remove();
+    pendingProposal = null;
+}
+
+function rejectProposal() {
+    const card = document.getElementById('proposalCard');
+    if (card) card.remove();
+    pendingProposal = null;
+    chatHistory.push({role: 'user', content: '取消，不执行这个方案。'});
+    appendChatMsg('system-msg', '方案已取消');
+}
+</script>
+{% endblock %}

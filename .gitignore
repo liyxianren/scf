@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.log
+.env
+.env.*
+/data/handbooks/
+/data/*.db
+flask.log
+.claude/

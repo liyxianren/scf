@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% block title %}待办事项 - OA系统{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:1080px;margin:0 auto;padding:28px 20px 40px}.back-link{display:inline-flex;align-items:center;gap:4px;color:#6b7280;text-decoration:none;font-size:.88rem;margin-bottom:14px}.back-link:hover{color:#2563eb}.todos-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px}.todos-header h1{margin:0;display:flex;align-items:center;gap:10px;font-size:1.8rem;color:#111827}.todos-header h1 .material-icons{color:#2563eb}.todos-subtitle{margin:8px 0 0;color:#6b7280;font-size:.95rem}.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:.92rem;font-weight:700;cursor:pointer;box-shadow:0 10px 22px rgba(37,99,235,.18)}.toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;margin-bottom:20px}.legend{display:flex;flex-wrap:wrap;gap:10px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f8fafc}.legend-pill,.filter-tab,.meta-pill,.assignee-chip,.staff-chip{display:inline-flex;align-items:center}.legend-pill{gap:8px;padding:7px 12px;border-radius:999px;font-size:.84rem;font-weight:700}.legend-pill:before{content:"";width:10px;height:10px;border-radius:50%}.legend-red{background:#fee2e2;color:#991b1b}.legend-red:before{background:#dc2626}.legend-blue{background:#dbeafe;color:#1d4ed8}.legend-blue:before{background:#2563eb}.legend-green{background:#dcfce7;color:#166534}.legend-green:before{background:#16a34a}.filters{display:flex;gap:8px;flex-wrap:wrap}.filter-tab{padding:10px 16px;border:1px solid #dbe3f0;border-radius:999px;background:#fff;color:#6b7280;cursor:pointer}.filter-tab.active{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;font-weight:700}.filter-count{margin-left:6px;padding:2px 7px;border-radius:999px;background:rgba(148,163,184,.18);font-size:.76rem}.quick-add{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-bottom:20px}.quick-add input,.form-group input,.form-group textarea,.form-group select{width:100%;padding:11px 13px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;box-sizing:border-box}.quick-add input:focus,.form-group input:focus,.form-group textarea:focus,.form-group select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.12)}.quick-add button{width:48px;border:none;border-radius:12px;background:#2563eb;color:#fff;cursor:pointer}.todo-list{display:grid;gap:14px}.todo-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;padding:18px;background:#fff;border:1px solid #e5e7eb;border-left:8px solid #cbd5e1;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.04)}.todo-item.priority-1{border-left-color:#dc2626;background:linear-gradient(135deg,rgba(254,242,242,.92),#fff 38%)}.todo-item.priority-2{border-left-color:#2563eb;background:linear-gradient(135deg,rgba(239,246,255,.95),#fff 40%)}.todo-item.priority-3{border-left-color:#16a34a;background:linear-gradient(135deg,rgba(240,253,244,.96),#fff 40%)}.todo-item.completed{opacity:.72}.todo-item.completed .todo-title{text-decoration:line-through;color:#94a3b8}.todo-checkbox{width:24px;height:24px;border:2px solid #94a3b8;border-radius:50%;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-top:4px}.todo-checkbox.checked{background:#2563eb;border-color:#2563eb;box-shadow:0 0 0 6px rgba(37,99,235,.1)}.todo-checkbox.checked:after{content:"";width:7px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px}.todo-content{min-width:0;cursor:pointer}.todo-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px}.todo-title{margin:0;font-size:1.04rem;line-height:1.45;font-weight:800;color:#111827;word-break:break-word}.preview-row{display:grid;grid-template-columns:56px minmax(0,1fr);gap:10px;margin-top:8px}.preview-label{font-size:.78rem;font-weight:800;color:#64748b;text-transform:uppercase;padding-top:2px}.preview-value{font-size:.92rem;line-height:1.6;color:#334155;word-break:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.preview-empty{color:#94a3b8;font-style:italic}.todo-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.meta-pill{gap:6px;padding:7px 11px;border-radius:999px;font-size:.8rem;font-weight:700;background:rgba(255,255,255,.86);border:1px solid rgba(148,163,184,.2);color:#475569}.meta-pill .material-icons,.assignee-chip .material-icons{font-size:.95rem}.priority-pill-1{background:#fee2e2;border-color:#fecaca;color:#991b1b}.priority-pill-2{background:#dbeafe;border-color:#bfdbfe;color:#1d4ed8}.priority-pill-3{background:#dcfce7;border-color:#bbf7d0;color:#166534}.assignees{display:flex;flex-wrap:wrap;gap:8px}.assignee-chip{gap:5px;padding:6px 10px;border-radius:999px;background:rgba(15,23,42,.05);font-size:.8rem;font-weight:700;color:#1f2937;border:1px solid rgba(148,163,184,.18)}.assignee-chip .material-icons{color:#2563eb}.todo-actions{display:flex;flex-direction:column;gap:6px}.todo-actions button{width:36px;height:36px;border:none;border-radius:10px;background:rgba(255,255,255,.85);color:#64748b;cursor:pointer}.todo-actions .delete-action:hover{background:#fee2e2;color:#dc2626}.empty-msg{text-align:center;padding:54px 20px;border:1px dashed #cbd5e1;border-radius:18px;background:#f8fafc;color:#94a3b8}.modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1000;justify-content:center;align-items:center;padding:20px}.modal-overlay.active{display:flex}.modal-content{width:760px;max-width:100%;max-height:92vh;overflow-y:auto;background:#fff;border-radius:22px;box-shadow:0 26px 80px rgba(15,23,42,.26)}.modal-header{display:flex;justify-content:space-between;align-items:center;padding:24px 26px 14px;border-bottom:1px solid #eef2f7}.modal-header h3{margin:0;font-size:1.22rem;color:#111827}.close-btn{border:none;background:none;color:#94a3b8;font-size:1.6rem;cursor:pointer}.modal-body{padding:20px 26px 26px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.form-group.full{grid-column:1/-1}.form-group label{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;color:#374151;font-size:.85rem;font-weight:800}.label-hint{color:#94a3b8;font-size:.76rem;font-weight:500}.selected-staff{display:flex;flex-wrap:wrap;gap:8px;min-height:42px;padding:10px 12px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc}.selected-staff.empty:before{content:"可不填写，也可以选择多个负责人";color:#94a3b8;font-size:.88rem}.staff-chip{gap:6px;padding:6px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:.82rem;font-weight:800}.staff-chip button{border:none;background:none;color:inherit;cursor:pointer;padding:0;line-height:1}.staff-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:8px}.staff-option{padding:10px 12px;border:1px solid #dbe3f0;border-radius:12px;background:#f8fafc;color:#475569;font-size:.88rem;font-weight:700;cursor:pointer}.staff-option.active{border-color:#2563eb;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 10px 20px rgba(37,99,235,.18)}.modal-actions{display:flex;gap:12px;margin-top:20px}.modal-actions .btn-primary{flex:1;justify-content:center}.btn-danger{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border:none;border-radius:12px;background:#fee2e2;color:#dc2626;font-size:.92rem;font-weight:800;cursor:pointer}.toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}.toast.show{display:block}@media (max-width:860px){.toolbar{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}}@media (max-width:640px){.oa-page{padding-inline:14px}.todos-header{flex-direction:column}.todo-item{grid-template-columns:auto minmax(0,1fr)}.todo-actions{grid-column:2;flex-direction:row;justify-content:flex-end}.todo-head{flex-direction:column}.preview-row{grid-template-columns:1fr;gap:4px}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+  <a href="/oa/" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回 OA</a>
+  <div class="todos-header">
+    <div>
+      <h1><span class="material-icons">checklist</span> 待办事项</h1>
+      <p class="todos-subtitle">优先级颜色更明显，列表直接显示描述、备注和多个负责人。</p>
+    </div>
+    <button class="btn-primary" onclick="openTodoModal()"><span class="material-icons" style="font-size:1.1rem;">add</span> 新建待办</button>
+  </div>
+  <div class="toolbar">
+    <div class="legend">
+      <span class="legend-pill legend-red">紧急事项</span>
+      <span class="legend-pill legend-blue">一般事项</span>
+      <span class="legend-pill legend-green">低优先级事项</span>
+    </div>
+    <div class="filters" id="filterTabs">
+      <button class="filter-tab active" data-filter="all">全部 <span class="filter-count" id="countAll">0</span></button>
+      <button class="filter-tab" data-filter="pending">待完成 <span class="filter-count" id="countPending">0</span></button>
+      <button class="filter-tab" data-filter="completed">已完成 <span class="filter-count" id="countCompleted">0</span></button>
+    </div>
+  </div>
+  <div class="quick-add">
+    <input id="quickAddInput" placeholder="快速添加待办标题..." onkeydown="if(event.key==='Enter')quickAdd()">
+    <button onclick="quickAdd()" aria-label="快速添加"><span class="material-icons">add</span></button>
+  </div>
+  <div id="todoList" class="todo-list"><div class="empty-msg">加载中...</div></div>
+</div>
+<div id="todoModal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-header"><h3 id="todoModalTitle">新建待办</h3><button class="close-btn" onclick="closeTodoModal()">&times;</button></div>
+    <div class="modal-body">
+      <form id="todoForm" onsubmit="saveTodo(event)">
+        <div class="form-grid">
+          <div class="form-group full"><label><span>标题</span><span class="label-hint">必填</span></label><input type="text" id="todoTitle" required placeholder="例如：跟进家长回访"></div>
+          <div class="form-group full"><label><span>描述</span><span class="label-hint">会直接显示在列表里</span></label><textarea id="todoDesc" rows="3" placeholder="补充背景、目标或执行动作"></textarea></div>
+          <div class="form-group full">
+            <label><span>负责人</span><span class="label-hint">可不填，可选多个</span></label>
+            <div id="selectedStaff" class="selected-staff empty"></div>
+            <div id="staffPicker" class="staff-picker">{% for person in staff_options %}<button type="button" class="staff-option" data-person="{{ person }}">{{ person }}</button>{% endfor %}</div>
+          </div>
+          <div class="form-group"><label><span>截止日期</span><span class="label-hint">选填</span></label><input type="date" id="todoDueDate"></div>
+          <div class="form-group"><label><span>优先级</span><span class="label-hint">红 / 蓝 / 绿</span></label><select id="todoPriority"><option value="1">紧急 / 红色</option><option value="2" selected>一般 / 蓝色</option><option value="3">低优先级 / 绿色</option></select></div>
+          <div class="form-group full"><label><span>备注</span><span class="label-hint">适合写执行细节和提醒</span></label><textarea id="todoNotes" rows="3" placeholder="例如：等老师确认时间，再统一通知"></textarea></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-danger" id="todoDeleteBtn" style="display:none;" onclick="deleteTodo()"><span class="material-icons" style="font-size:1rem;">delete</span> 删除</button>
+          <button type="submit" class="btn-primary"><span class="material-icons" style="font-size:1rem;">save</span> 保存待办</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+{% include 'oa/_chat_sidebar.html' %}
+{% endblock %}
+{% block extra_js %}
+<script>
+const STAFF_OPTIONS={{ staff_options|tojson }},PRIORITY_META={1:{label:'紧急',cls:'priority-1',pill:'priority-pill-1'},2:{label:'一般',cls:'priority-2',pill:'priority-pill-2'},3:{label:'低优先级',cls:'priority-3',pill:'priority-pill-3'}};let allTodos=[],currentFilter='all',editingTodoId=null,selectedResponsiblePeople=[];
+document.getElementById('filterTabs').addEventListener('click',e=>{const tab=e.target.closest('.filter-tab');if(!tab)return;document.querySelectorAll('.filter-tab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');currentFilter=tab.dataset.filter;renderTodos();});
+document.getElementById('staffPicker').addEventListener('click',e=>{const btn=e.target.closest('.staff-option');if(btn)toggleResponsiblePerson(btn.dataset.person);});
+function escapeHtml(v){if(!v)return'';const d=document.createElement('div');d.textContent=v;return d.innerHTML;}
+function escapeJs(v){return String(v).replaceAll('\\','\\\\').replaceAll("'","\\'");}
+function splitResponsiblePeople(v){if(!v)return[];return String(v).replaceAll('，',',').replaceAll('、',',').replaceAll(';',',').replaceAll('；',',').split(',').map(x=>x.trim()).filter(Boolean);}
+function getResponsiblePeople(todo){return Array.isArray(todo.responsible_people)&&todo.responsible_people.length?todo.responsible_people:splitResponsiblePeople(todo.responsible_person||'');}
+function previewRow(label,value){return `<div class="preview-row"><div class="preview-label">${label}</div><div class="preview-value ${value?'':'preview-empty'}">${value?escapeHtml(value):`暂无${label}`}</div></div>`;}
+function sortTodos(items){return [...items].sort((a,b)=>{if(a.is_completed!==b.is_completed)return a.is_completed?1:-1;if((a.priority||2)!==(b.priority||2))return (a.priority||2)-(b.priority||2);if((a.due_date||'')!==(b.due_date||''))return (a.due_date||'9999-12-31').localeCompare(b.due_date||'9999-12-31');return (b.updated_at||'').localeCompare(a.updated_at||'');});}
+function updateCounts(){document.getElementById('countAll').textContent=allTodos.length;document.getElementById('countPending').textContent=allTodos.filter(t=>!t.is_completed).length;document.getElementById('countCompleted').textContent=allTodos.filter(t=>t.is_completed).length;}
+function renderTodos(){const box=document.getElementById('todoList');let filtered=allTodos;if(currentFilter==='pending')filtered=allTodos.filter(t=>!t.is_completed);else if(currentFilter==='completed')filtered=allTodos.filter(t=>t.is_completed);filtered=sortTodos(filtered);if(!filtered.length){box.innerHTML=`<div class="empty-msg">${currentFilter==='completed'?'还没有已完成的待办':currentFilter==='pending'?'当前没有待完成事项':'当前没有待办事项'}</div>`;return;}box.innerHTML=filtered.map(t=>{const p=PRIORITY_META[t.priority]||PRIORITY_META[2],people=getResponsiblePeople(t);return `<div class="todo-item ${p.cls} ${t.is_completed?'completed':''}"><div class="todo-checkbox ${t.is_completed?'checked':''}" onclick="toggleTodo(${t.id})"></div><div class="todo-content" onclick="openEditTodo(${t.id})"><div class="todo-head"><h3 class="todo-title">${escapeHtml(t.title)}</h3><span class="meta-pill ${p.pill}"><span class="material-icons">flag</span>${p.label}</span></div>${previewRow('描述',t.description)}${previewRow('备注',t.notes)}<div class="todo-meta">${t.due_date?`<span class="meta-pill"><span class="material-icons">event</span>${escapeHtml(t.due_date)}</span>`:''}${people.length?`<div class="assignees">${people.map(x=>`<span class="assignee-chip"><span class="material-icons">person</span>${escapeHtml(x)}</span>`).join('')}</div>`:`<span class="meta-pill"><span class="material-icons">person_off</span>未指定负责人</span>`}</div></div><div class="todo-actions"><button onclick="openEditTodo(${t.id})" title="编辑"><span class="material-icons" style="font-size:1.1rem;">edit</span></button><button class="delete-action" onclick="deleteTodoById(${t.id})" title="删除"><span class="material-icons" style="font-size:1.1rem;">delete</span></button></div></div>`;}).join('');}
+async function loadTodos(){try{const res=await fetch('/oa/api/todos');const json=await res.json();if(json.success){allTodos=json.data;updateCounts();renderTodos();}else showToast(json.error||'加载待办失败');}catch(e){showToast('加载待办失败');}}
+async function toggleTodo(id){try{const res=await fetch(`/oa/api/todos/${id}/toggle`,{method:'POST'});const json=await res.json();if(json.success){const idx=allTodos.findIndex(t=>t.id===id);if(idx!==-1)allTodos[idx]=json.data;updateCounts();renderTodos();}else showToast(json.error||'操作失败');}catch(e){showToast('操作失败');}}
+async function quickAdd(){const input=document.getElementById('quickAddInput'),title=input.value.trim();if(!title)return;try{const res=await fetch('/oa/api/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});const json=await res.json();if(json.success){input.value='';allTodos.unshift(json.data);updateCounts();renderTodos();showToast('已添加待办');}else showToast(json.error||'添加失败');}catch(e){showToast('添加失败');}}
+function renderSelectedStaff(){const box=document.getElementById('selectedStaff');box.classList.toggle('empty',selectedResponsiblePeople.length===0);box.innerHTML=selectedResponsiblePeople.map(x=>`<span class="staff-chip">${escapeHtml(x)}<button type="button" onclick="removeResponsiblePerson('${escapeJs(x)}')">&times;</button></span>`).join('');document.querySelectorAll('.staff-option').forEach(btn=>btn.classList.toggle('active',selectedResponsiblePeople.includes(btn.dataset.person)));}
+function resetResponsiblePeople(people=[]){selectedResponsiblePeople=[...new Set(people)];renderSelectedStaff();}
+function toggleResponsiblePerson(person){selectedResponsiblePeople=selectedResponsiblePeople.includes(person)?selectedResponsiblePeople.filter(x=>x!==person):[...selectedResponsiblePeople,person];renderSelectedStaff();}
+function removeResponsiblePerson(person){selectedResponsiblePeople=selectedResponsiblePeople.filter(x=>x!==person);renderSelectedStaff();}
+function openTodoModal(){editingTodoId=null;document.getElementById('todoModalTitle').textContent='新建待办';document.getElementById('todoDeleteBtn').style.display='none';document.getElementById('todoForm').reset();document.getElementById('todoPriority').value='2';resetResponsiblePeople([]);document.getElementById('todoModal').classList.add('active');}
+async function openEditTodo(id){try{const res=await fetch(`/oa/api/todos/${id}`);const json=await res.json();if(!json.success)return showToast(json.error||'加载失败');const t=json.data;editingTodoId=id;document.getElementById('todoModalTitle').textContent='编辑待办';document.getElementById('todoDeleteBtn').style.display='inline-flex';document.getElementById('todoTitle').value=t.title||'';document.getElementById('todoDesc').value=t.description||'';document.getElementById('todoDueDate').value=t.due_date||'';document.getElementById('todoPriority').value=t.priority||2;document.getElementById('todoNotes').value=t.notes||'';resetResponsiblePeople(getResponsiblePeople(t));document.getElementById('todoModal').classList.add('active');}catch(e){showToast('加载失败');}}
+function closeTodoModal(){document.getElementById('todoModal').classList.remove('active');}
+async function saveTodo(event){event.preventDefault();const payload={title:document.getElementById('todoTitle').value.trim(),description:document.getElementById('todoDesc').value.trim(),responsible_people:selectedResponsiblePeople,due_date:document.getElementById('todoDueDate').value||null,priority:parseInt(document.getElementById('todoPriority').value,10),notes:document.getElementById('todoNotes').value.trim()};const url=editingTodoId?`/oa/api/todos/${editingTodoId}`:'/oa/api/todos',method=editingTodoId?'PUT':'POST';try{const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const json=await res.json();if(json.success){closeTodoModal();showToast(editingTodoId?'已更新待办':'已添加待办');await loadTodos();}else showToast(json.error||'保存失败');}catch(e){showToast('网络错误');}}
+async function deleteTodo(){if(!editingTodoId||!confirm('确定要删除这条待办吗？'))return;await deleteTodoById(editingTodoId,false);closeTodoModal();}
+async function deleteTodoById(id,needConfirm=true){if(needConfirm&&!confirm('确定要删除这条待办吗？'))return;try{const res=await fetch(`/oa/api/todos/${id}`,{method:'DELETE'});const json=await res.json();if(json.success){showToast('已删除待办');await loadTodos();}else showToast(json.error||'删除失败');}catch(e){showToast('删除失败');}}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove('show'),2500);}
+resetResponsiblePeople([]);loadTodos();
+
+// ===== AI Chat (shared sidebar) =====
+let chatHistory = [];
+let pendingProposal = null;
+let chatSending = false;
+
+const TOOL_LABELS = {
+    get_today_info: '获取日期信息',
+    query_schedules: '查询课程',
+    find_available_slots: '查找空闲时段',
+    propose_create_schedules: '生成排课方案',
+    propose_delete_schedules: '生成删除方案',
+    propose_update_schedules: '生成修改方案',
+    query_todos: '查询待办',
+    propose_create_todos: '生成待办创建方案',
+    propose_delete_todos: '生成待办删除方案',
+    propose_update_todos: '生成待办修改方案',
+};
+
+function toggleChat() {
+    const panel = document.getElementById('chatPanel');
+    const toggle = document.getElementById('chatToggle');
+    const active = panel.classList.toggle('active');
+    toggle.style.display = active ? 'none' : 'flex';
+    if (active) document.getElementById('chatInput').focus();
+}
+
+function appendChatMsg(role, content) {
+    const el = document.getElementById('chatMessages');
+    const welcome = document.getElementById('chatWelcome');
+    if (welcome) welcome.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = `chat-msg ${role}`;
+    if (role === 'assistant') {
+        div.innerHTML = formatAIMsg(content);
+    } else {
+        div.textContent = content;
+    }
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+    return div;
+}
+
+function formatAIMsg(text) {
+    if (!text) return '';
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!text) return '';
+    // Strip markdown tables (already rendered in proposal card)
+    text = text.replace(/^\|.+\|$/gm, '').trim();
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) return '';
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.8rem;">$1</code>');
+    html = html.replace(/\n/g, '<br>');
+    return html;
+}
+
+function removeLastThinking() {
+    document.querySelectorAll('#chatMessages .thinking-msg').forEach(m => m.remove());
+}
+function showThinking(text) {
+    removeLastThinking();
+    const el = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = 'chat-msg thinking-msg';
+    div.textContent = text;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+function quickSend(text) {
+    document.getElementById('chatInput').value = text;
+    sendChatMessage();
+}
+
+function quickTemplate(text) {
+    const input = document.getElementById('chatInput');
+    input.value = text;
+    input.focus();
+    const idx = text.indexOf('___');
+    if (idx >= 0) input.setSelectionRange(idx, idx + 3);
+}
+
+async function sendChatMessage() {
+    if (chatSending) return;
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    if (!message) return;
+
+    chatSending = true;
+    input.value = '';
+    input.style.height = 'auto';
+    document.getElementById('chatSendBtn').disabled = true;
+    appendChatMsg('user', message);
+    showThinking('思考中…');
+
+    try {
+        const res = await fetch('/oa/api/schedule-agent/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message, history: chatHistory })
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try { handleChatEvent(JSON.parse(line)); } catch(e) {}
+            }
+        }
+        if (buffer.trim()) {
+            try { handleChatEvent(JSON.parse(buffer)); } catch(e) {}
+        }
+    } catch(e) {
+        removeLastThinking();
+        appendChatMsg('system-msg', '网络错误，请重试');
+    } finally {
+        chatSending = false;
+        document.getElementById('chatSendBtn').disabled = false;
+        input.focus();
+    }
+}
+
+function handleChatEvent(event) {
+    switch(event.type) {
+        case 'thinking':
+            showThinking(typeof event.data === 'string' ? event.data : '思考中…');
+            break;
+        case 'tool_call': {
+            const name = event.data?.name || '';
+            showThinking('正在' + (TOOL_LABELS[name] || name) + '…');
+            break;
+        }
+        case 'response':
+            removeLastThinking();
+            if (event.content) appendChatMsg('assistant', event.content);
+            if (event.messages) chatHistory = event.messages;
+            if (event.proposal) showChatProposal(event.proposal);
+            break;
+        case 'error':
+            removeLastThinking();
+            appendChatMsg('system-msg', '错误: ' + (event.content || '未知错误'));
+            break;
+    }
+}
+
+function showChatProposal(proposal) {
+    pendingProposal = proposal;
+    const el = document.getElementById('chatMessages');
+    const card = document.createElement('div');
+    card.className = 'chat-proposal-card';
+    card.id = 'proposalCard';
+
+    let detailHtml = '';
+    const pLabel = {1:'紧急',2:'一般',3:'低'};
+    if (proposal.action === 'create' && proposal.schedules) {
+        detailHtml = `<table><tr><th>日期</th><th>时间</th><th>教师</th><th>课程</th></tr>`;
+        proposal.schedules.slice(0,20).forEach(s => {
+            detailHtml += `<tr><td>${s.date}</td><td>${s.time_start}-${s.time_end}</td><td>${escapeHtml(s.teacher)}</td><td>${escapeHtml(s.course_name)}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'create_todos' && proposal.todos) {
+        detailHtml = `<table><tr><th>标题</th><th>负责人</th><th>截止</th><th>优先级</th></tr>`;
+        proposal.todos.slice(0,20).forEach(t => {
+            const people = Array.isArray(t.responsible_people) ? t.responsible_people.join(', ') : '';
+            detailHtml += `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(people)}</td><td>${t.due_date||'-'}</td><td>${pLabel[t.priority]||'一般'}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'delete_todos' && proposal.todos) {
+        detailHtml = `<table><tr><th>ID</th><th>标题</th><th>负责人</th></tr>`;
+        proposal.todos.forEach(t => {
+            detailHtml += `<tr><td>${t.id}</td><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.responsible_person||'')}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'update_todos') {
+        detailHtml = `<div>将修改 ${proposal.total} 条待办</div>`;
+    } else if (proposal.action === 'delete' && proposal.schedules) {
+        detailHtml = `<table><tr><th>ID</th><th>日期</th><th>课程</th></tr>`;
+        proposal.schedules.forEach(s => {
+            detailHtml += `<tr><td>${s.id}</td><td>${s.date}</td><td>${escapeHtml(s.course_name)}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    }
+
+    let conflictHtml = '';
+    if (proposal.conflicts && proposal.conflicts.length > 0) {
+        conflictHtml = `<div style="color:#dc2626;font-size:0.78rem;margin-bottom:6px;">⚠ ${proposal.conflicts.length} 个冲突</div>`;
+    }
+
+    card.innerHTML = `
+        <div class="proposal-summary">${escapeHtml(proposal.summary || '方案')}</div>
+        ${conflictHtml}
+        <div class="proposal-detail">${detailHtml}</div>
+        <div class="chat-proposal-actions">
+            <button class="confirm-btn" onclick="confirmChatProposal()">确认执行</button>
+            <button class="reject-btn" onclick="rejectChatProposal()">取消</button>
+        </div>`;
+    el.appendChild(card);
+    el.scrollTop = el.scrollHeight;
+}
+
+async function confirmChatProposal() {
+    if (!pendingProposal) return;
+    const card = document.getElementById('proposalCard');
+    try {
+        const res = await fetch('/oa/api/schedule-agent/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(pendingProposal)
+        });
+        const json = await res.json();
+        if (json.success) {
+            appendChatMsg('system-msg', json.message);
+            const act = pendingProposal.action;
+            if (act === 'create_todos' || act === 'delete_todos' || act === 'update_todos') {
+                loadTodos();
+            }
+        } else {
+            appendChatMsg('system-msg', '执行失败: ' + (json.error || '未知错误'));
+        }
+    } catch(e) {
+        appendChatMsg('system-msg', '网络错误');
+    }
+    if (card) card.remove();
+    pendingProposal = null;
+}
+
+function rejectChatProposal() {
+    const card = document.getElementById('proposalCard');
+    if (card) card.remove();
+    pendingProposal = null;
+    chatHistory.push({role: 'user', content: '取消，不执行这个方案。'});
+    appendChatMsg('system-msg', '方案已取消');
+}
+</script>
+{% endblock %}

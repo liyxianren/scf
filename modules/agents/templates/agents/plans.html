@@ -1,0 +1,516 @@
+{% extends "base.html" %}
+
+{% block title %}项目计划书 - SCF AI Copilot{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .plans-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+    }
+
+    .plans-header h1 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .filter-tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+
+    .filter-tab {
+        padding: 8px 16px;
+        border: 1px solid #e0e0e0;
+        border-radius: 20px;
+        background: white;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+    }
+
+    .filter-tab:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
+
+    .filter-tab.active {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+    }
+
+    .plans-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 20px;
+    }
+
+    .plan-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #eee;
+        transition: all 0.2s;
+        position: relative;
+    }
+
+    .plan-card:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
+    }
+
+    .plan-card.favorited {
+        border-color: #ffc107;
+    }
+
+    .plan-card .status-badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .status-pending {
+        background: #fff3cd;
+        color: #856404;
+    }
+
+    .status-generating {
+        background: #cce5ff;
+        color: #004085;
+        animation: pulse 1.5s infinite;
+    }
+
+    .status-completed {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-failed {
+        background: #f8d7da;
+        color: #721c24;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+
+    .plan-card h3 {
+        margin: 0 0 8px 0;
+        font-size: 1.1rem;
+        padding-right: 80px;
+    }
+
+    .plan-card .slogan {
+        color: #666;
+        font-size: 0.9rem;
+        margin-bottom: 15px;
+        font-style: italic;
+    }
+
+    .plan-card .meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8rem;
+        color: #999;
+        margin-bottom: 15px;
+    }
+
+    .plan-card .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .plan-card .action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        background: white;
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all 0.2s;
+    }
+
+    .plan-card .action-btn:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
+
+    .plan-card .action-btn.danger:hover {
+        border-color: #dc3545;
+        color: #dc3545;
+    }
+
+    .plan-card .action-btn.favorite {
+        color: #ffc107;
+    }
+
+    .plan-card .action-btn.favorite.active {
+        background: #fff3cd;
+        border-color: #ffc107;
+    }
+
+    .plan-card .action-btn .material-icons {
+        font-size: 16px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 80px 20px;
+        color: #999;
+    }
+
+    .empty-state .material-icons {
+        font-size: 64px;
+        color: #e0e0e0;
+        margin-bottom: 15px;
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(4px);
+    }
+
+    .modal-content {
+        width: 85%;
+        max-width: 900px;
+        height: 85%;
+        background: white;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-header {
+        padding: 20px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+    }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 30px;
+    }
+
+    .modal-body .markdown-body {
+        line-height: 1.7;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #999;
+    }
+
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        margin-bottom: 20px;
+        font-size: 0.9rem;
+    }
+
+    .back-link:hover {
+        color: var(--primary-color);
+    }
+
+    .toast {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        z-index: 2000;
+        display: none;
+        animation: slideUp 0.3s;
+    }
+
+    @keyframes slideUp {
+        from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+        to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px;">
+    <a href="/company/creative" class="back-link">
+        <span class="material-icons" style="font-size: 18px;">arrow_back</span>
+        返回创意生成器
+    </a>
+
+    <div class="plans-header">
+        <h1>
+            <span class="material-icons" style="color: var(--primary-color);">description</span>
+            项目计划书
+        </h1>
+        <div id="planCount" style="color: #666;"></div>
+    </div>
+
+    <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">全部</button>
+        <button class="filter-tab" data-filter="favorited">⭐ 收藏</button>
+        <button class="filter-tab" data-filter="pending">待生成</button>
+        <button class="filter-tab" data-filter="completed">已完成</button>
+        <button class="filter-tab" data-filter="failed">失败</button>
+    </div>
+
+    <div class="plans-grid" id="plansGrid">
+        <div class="empty-state">
+            <span class="material-icons">hourglass_empty</span>
+            <p>正在加载...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modal -->
+<div id="detailModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">计划书详情</h3>
+            <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modalBody" class="markdown-body"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
+<script>
+    const parser = (typeof marked.parse === 'function') ? marked.parse : marked;
+    let allPlans = [];
+    let currentFilter = 'all';
+    let pollingInterval = null;
+
+    // Status text mapping
+    const statusText = {
+        'pending': '待生成',
+        'generating': '生成中...',
+        'completed': '已完成',
+        'failed': '失败'
+    };
+
+    // Load plans from API
+    async function loadPlans() {
+        try {
+            const response = await fetch('/company/api/plans');
+            const plans = await response.json();
+            allPlans = plans;
+            renderPlans();
+            updatePolling();
+        } catch (err) {
+            console.error('Failed to load plans:', err);
+        }
+    }
+
+    // Render plans based on current filter
+    function renderPlans() {
+        const grid = document.getElementById('plansGrid');
+        const countEl = document.getElementById('planCount');
+        
+        let filtered = allPlans;
+        if (currentFilter === 'favorited') {
+            filtered = allPlans.filter(p => p.is_favorited);
+        } else if (currentFilter !== 'all') {
+            filtered = allPlans.filter(p => p.status === currentFilter);
+        }
+
+        countEl.innerText = `共 ${filtered.length} 个计划书`;
+
+        if (filtered.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <span class="material-icons">folder_open</span>
+                    <p>暂无计划书</p>
+                </div>
+            `;
+            return;
+        }
+
+        grid.innerHTML = filtered.map(plan => {
+            const createdAt = new Date(plan.created_at).toLocaleDateString('zh-CN');
+            const expiresAt = plan.expires_at ? new Date(plan.expires_at).toLocaleDateString('zh-CN') : '永久';
+            
+            return `
+                <div class="plan-card ${plan.is_favorited ? 'favorited' : ''}" data-id="${plan.id}">
+                    <span class="status-badge status-${plan.status}">${statusText[plan.status]}</span>
+                    <h3>${plan.project_name}</h3>
+                    ${plan.slogan ? `<p class="slogan">"${plan.slogan}"</p>` : ''}
+                    <div class="meta">
+                        <span>创建于 ${createdAt}</span>
+                        <span>${plan.is_favorited ? '已收藏' : '过期: ' + expiresAt}</span>
+                    </div>
+                    <div class="actions">
+                        ${plan.status === 'completed' ? `
+                            <button class="action-btn" onclick="viewPlan(${plan.id})">
+                                <span class="material-icons">visibility</span> 查看
+                            </button>
+                            <button class="action-btn" onclick="downloadPlan(${plan.id})">
+                                <span class="material-icons">download</span> 下载
+                            </button>
+                        ` : ''}
+                        ${plan.status === 'failed' ? `
+                            <button class="action-btn" onclick="regeneratePlan(${plan.id})">
+                                <span class="material-icons">refresh</span> 重试
+                            </button>
+                        ` : ''}
+                        <button class="action-btn favorite ${plan.is_favorited ? 'active' : ''}" onclick="toggleFavorite(${plan.id})">
+                            <span class="material-icons">${plan.is_favorited ? 'star' : 'star_border'}</span>
+                        </button>
+                        <button class="action-btn danger" onclick="deletePlan(${plan.id})">
+                            <span class="material-icons">delete_outline</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Update polling based on pending/generating plans
+    function updatePolling() {
+        const hasPending = allPlans.some(p => p.status === 'pending' || p.status === 'generating');
+        
+        if (hasPending && !pollingInterval) {
+            pollingInterval = setInterval(loadPlans, 5000);
+        } else if (!hasPending && pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+    }
+
+    // Filter tabs
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            currentFilter = this.dataset.filter;
+            renderPlans();
+        });
+    });
+
+    // View plan details
+    window.viewPlan = async function(id) {
+        const plan = allPlans.find(p => p.id === id);
+        if (!plan || !plan.content) {
+            showToast('计划书内容不可用');
+            return;
+        }
+
+        document.getElementById('modalTitle').innerText = plan.project_name + ' - 计划书';
+        document.getElementById('modalBody').innerHTML = parser(plan.content);
+        document.getElementById('detailModal').style.display = 'flex';
+    };
+
+    // Close modal
+    window.closeModal = function() {
+        document.getElementById('detailModal').style.display = 'none';
+    };
+
+    // Download plan
+    window.downloadPlan = function(id) {
+        window.location.href = `/company/api/plans/${id}/download`;
+    };
+
+    // Toggle favorite
+    window.toggleFavorite = async function(id) {
+        try {
+            const response = await fetch(`/company/api/plans/${id}/favorite`, { method: 'POST' });
+            const result = await response.json();
+            showToast(result.message);
+            loadPlans();
+        } catch (err) {
+            showToast('操作失败');
+        }
+    };
+
+    // Delete plan
+    window.deletePlan = async function(id) {
+        if (!confirm('确定要删除这个计划书吗？')) return;
+
+        try {
+            await fetch(`/company/api/plans/${id}`, { method: 'DELETE' });
+            showToast('删除成功');
+            loadPlans();
+        } catch (err) {
+            showToast('删除失败');
+        }
+    };
+
+    // Regenerate plan
+    window.regeneratePlan = async function(id) {
+        try {
+            const response = await fetch(`/company/api/plans/${id}/regenerate`, { method: 'POST' });
+            const result = await response.json();
+            showToast(result.message);
+            loadPlans();
+        } catch (err) {
+            showToast('重新生成失败');
+        }
+    };
+
+    // Show toast
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.innerText = message;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 3000);
+    }
+
+    // Modal click outside to close
+    document.getElementById('detailModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', loadPlans);
+</script>
+{% endblock %}

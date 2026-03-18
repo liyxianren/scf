@@ -1,0 +1,1425 @@
+{% extends "base.html" %}
+{% block title %}课程排课表 - OA系统{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .oa-page { max-width: 1600px; margin: 0 auto; padding: 24px 20px; }
+
+    .back-link {
+        display: inline-flex; align-items: center; gap: 4px;
+        color: #6b7280; text-decoration: none; font-size: 0.85rem; margin-bottom: 12px;
+    }
+    .back-link:hover { color: #2563eb; }
+
+    .schedule-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 20px;
+    }
+    .schedule-header h1 {
+        font-size: 1.5rem; font-weight: 700; margin: 0;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .schedule-header h1 .material-icons { color: #2563eb; }
+
+    .btn-primary {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 8px 18px; background: #2563eb; color: white;
+        border: none; border-radius: 8px; font-size: 0.9rem;
+        cursor: pointer; transition: background 0.2s;
+    }
+    .btn-primary:hover { background: #1d4ed8; }
+
+    .schedule-nav {
+        display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+    }
+    .nav-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px; border-radius: 8px;
+        border: 1px solid #d1d5db; background: white; cursor: pointer;
+        transition: all 0.15s;
+    }
+    .nav-btn:hover { border-color: #2563eb; color: #2563eb; }
+    .nav-btn.text { width: auto; padding: 0 14px; font-size: 0.85rem; }
+    #currentWeek { font-size: 1.15rem; font-weight: 600; margin: 0; min-width: 240px; text-align: center; }
+
+    /* === Week Layout === */
+    .week-layout {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 20px;
+        min-height: 600px;
+    }
+
+    /* === Sidebar === */
+    .sidebar {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 20px 16px;
+        height: fit-content;
+        position: sticky;
+        top: 20px;
+    }
+    .sidebar-section { margin-bottom: 20px; }
+    .sidebar-section:last-child { margin-bottom: 0; }
+    .sidebar-title {
+        font-size: 0.8rem; font-weight: 600; color: #6b7280;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        margin-bottom: 10px; padding-bottom: 6px;
+        border-bottom: 1px solid #f3f4f6;
+    }
+    .stat-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+        margin-bottom: 4px;
+    }
+    .stat-item {
+        background: #f9fafb; border-radius: 8px; padding: 10px;
+        text-align: center;
+    }
+    .stat-number { font-size: 1.4rem; font-weight: 700; color: #2563eb; }
+    .stat-label { font-size: 0.72rem; color: #6b7280; margin-top: 2px; }
+
+    .sidebar-course {
+        display: flex; gap: 10px; align-items: flex-start;
+        padding: 8px; border-radius: 8px; margin-bottom: 6px;
+        cursor: pointer; transition: background 0.15s;
+    }
+    .sidebar-course:hover { background: #f3f4f6; }
+    .sidebar-course .sc-time {
+        font-size: 0.78rem; font-weight: 600; color: #2563eb;
+        white-space: nowrap; min-width: 40px;
+    }
+    .sidebar-course .sc-info { flex: 1; min-width: 0; }
+    .sidebar-course .sc-name {
+        font-size: 0.82rem; font-weight: 500; color: #1f2937;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sidebar-course .sc-sub {
+        font-size: 0.72rem; color: #6b7280; margin-top: 1px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sidebar-empty { font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 12px 0; }
+
+    /* === Week Grid === */
+    .week-grid-container {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .week-header {
+        display: grid;
+        grid-template-columns: 56px repeat(7, 1fr);
+        border-bottom: 2px solid #e5e7eb;
+        background: #f9fafb;
+    }
+    .week-header-corner {
+        padding: 12px 4px;
+    }
+    .week-header-cell {
+        padding: 10px 4px;
+        text-align: center;
+        border-left: 1px solid #e5e7eb;
+    }
+    .week-header-cell .wh-day {
+        font-size: 0.75rem; color: #6b7280; font-weight: 500;
+    }
+    .week-header-cell .wh-date {
+        font-size: 1.1rem; font-weight: 700; color: #1f2937;
+        margin-top: 2px;
+    }
+    .week-header-cell.today {
+        background: #eff6ff;
+    }
+    .week-header-cell.today .wh-date {
+        background: #2563eb; color: white;
+        display: inline-block; width: 30px; height: 30px; line-height: 30px;
+        border-radius: 50%; text-align: center;
+    }
+
+    .week-body {
+        display: grid;
+        grid-template-columns: 56px repeat(7, 1fr);
+        position: relative;
+    }
+
+    .time-column {
+        border-right: 1px solid #e5e7eb;
+    }
+    .time-label {
+        height: 60px;
+        display: flex; align-items: flex-start; justify-content: center;
+        font-size: 0.72rem; color: #9ca3af; font-weight: 500;
+        padding-top: 0; position: relative; top: -8px;
+    }
+
+    .day-column {
+        position: relative;
+        border-left: 1px solid #e5e7eb;
+    }
+    .day-column:first-of-type { border-left: none; }
+
+    .hour-line {
+        position: absolute; left: 0; right: 0;
+        border-top: 1px solid #f3f4f6;
+    }
+    .hour-line.half { border-top: 1px dashed #f3f4f6; }
+
+    /* === Course Blocks === */
+    .course-block {
+        position: absolute; left: 3px; right: 3px;
+        border-radius: 6px; padding: 4px 6px;
+        cursor: pointer; overflow: hidden;
+        font-size: 0.75rem; line-height: 1.3;
+        z-index: 2; transition: box-shadow 0.15s;
+        border-left: 3px solid;
+    }
+    .course-block:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        z-index: 3;
+    }
+    .course-block .cb-name { font-weight: 600; }
+    .course-block .cb-time { font-size: 0.68rem; opacity: 0.8; }
+    .course-block .cb-teacher { font-size: 0.7rem; margin-top: 1px; }
+    .course-block .cb-students { font-size: 0.68rem; opacity: 0.7; margin-top: 1px; }
+
+    /* Color system */
+    .course-block.blue { background: #dbeafe; color: #1e40af; border-color: #3b82f6; }
+    .course-block.green { background: #dcfce7; color: #166534; border-color: #22c55e; }
+    .course-block.purple { background: #f3e8ff; color: #7c3aed; border-color: #8b5cf6; }
+    .course-block.orange { background: #fed7aa; color: #9a3412; border-color: #f97316; }
+    .course-block.red { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
+    .course-block.teal { background: #ccfbf1; color: #115e59; border-color: #14b8a6; }
+
+    /* === Modal === */
+    .modal-overlay {
+        display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.4); z-index: 1000;
+        justify-content: center; align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-content {
+        background: white; border-radius: 16px; width: 560px; max-width: 92vw;
+        max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    }
+    .modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 20px 24px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+    .modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    .close-btn {
+        background: none; border: none; font-size: 1.5rem;
+        color: #9ca3af; cursor: pointer; line-height: 1;
+    }
+    .close-btn:hover { color: #374151; }
+    .modal-body { padding: 16px 24px 24px; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+        display: block; font-size: 0.82rem; font-weight: 500;
+        color: #374151; margin-bottom: 4px;
+    }
+    .form-group input, .form-group textarea, .form-group select {
+        width: 100%; padding: 8px 12px; border: 1px solid #d1d5db;
+        border-radius: 8px; font-size: 0.9rem; transition: border-color 0.15s;
+        box-sizing: border-box;
+    }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+        outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .color-picker { display: flex; gap: 8px; margin-top: 4px; }
+    .color-option {
+        width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+        border: 2px solid transparent; transition: all 0.15s;
+    }
+    .color-option:hover { transform: scale(1.15); }
+    .color-option.selected { border-color: #374151; box-shadow: 0 0 0 2px white inset; }
+    .color-option.blue { background: #3b82f6; }
+    .color-option.green { background: #22c55e; }
+    .color-option.purple { background: #8b5cf6; }
+    .color-option.orange { background: #f97316; }
+    .color-option.red { background: #ef4444; }
+    .color-option.teal { background: #14b8a6; }
+
+    .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .modal-actions .btn-primary { flex: 1; justify-content: center; padding: 10px; }
+    .btn-danger {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 10px 16px; background: #fee2e2; color: #dc2626;
+        border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer;
+    }
+    .btn-danger:hover { background: #fecaca; }
+
+    .toast {
+        display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+        background: #1f2937; color: white; padding: 10px 24px; border-radius: 8px;
+        font-size: 0.9rem; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* === Day Column: cursor hint during idle === */
+    .day-column { cursor: crosshair; user-select: none; }
+
+    /* === Drag Selection Rect === */
+    .drag-selection-rect {
+        position: absolute;
+        left: 3px; right: 3px;
+        background: rgba(249, 115, 22, 0.13);
+        border: 2px dashed #f97316;
+        border-radius: 6px;
+        pointer-events: none;
+        z-index: 5;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 3px;
+        min-height: 4px;
+    }
+    .drag-time-label {
+        font-size: 0.7rem; font-weight: 700;
+        color: #ea580c;
+        background: rgba(255,247,237,0.92);
+        padding: 1px 6px; border-radius: 4px;
+        white-space: nowrap;
+    }
+
+    /* === Quick Note Popup === */
+    .quick-note-popup {
+        position: fixed;
+        z-index: 1100;
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.18);
+        border: 1px solid #e5e7eb;
+        width: 280px;
+        padding: 14px 16px 12px;
+        animation: qnFadeIn 0.12s ease;
+    }
+    @keyframes qnFadeIn {
+        from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .qn-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .qn-title {
+        font-size: 0.83rem; font-weight: 700; color: #1f2937;
+        display: flex; align-items: center; gap: 5px;
+    }
+    .qn-title .material-icons { font-size: 1rem; color: #f97316; }
+    .qn-date-tag {
+        font-size: 0.73rem; background: #fff7ed; color: #ea580c;
+        padding: 2px 8px; border-radius: 20px; font-weight: 500;
+        border: 1px solid #fed7aa;
+    }
+    /* Time row */
+    .qn-time-row {
+        display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+    }
+    .qn-time-input {
+        flex: 1; padding: 7px 8px;
+        border: 1.5px solid #d1d5db;
+        border-radius: 8px; font-size: 0.88rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        box-sizing: border-box;
+    }
+    .qn-time-input:focus {
+        outline: none; border-color: #f97316;
+        box-shadow: 0 0 0 3px rgba(249,115,22,0.12);
+    }
+    .qn-time-sep { color: #9ca3af; font-weight: 600; font-size: 1rem; flex-shrink: 0; }
+    /* Content input */
+    .qn-input {
+        width: 100%; padding: 9px 11px;
+        border: 1.5px solid #d1d5db;
+        border-radius: 9px; font-size: 0.92rem;
+        box-sizing: border-box;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        color: #1f2937;
+    }
+    .qn-input:focus {
+        outline: none; border-color: #f97316;
+        box-shadow: 0 0 0 3px rgba(249,115,22,0.12);
+    }
+    .qn-actions {
+        display: flex; gap: 8px; margin-top: 10px;
+    }
+    .qn-btn-save {
+        flex: 1; padding: 8px 0;
+        background: #f97316; color: white;
+        border: none; border-radius: 8px;
+        font-size: 0.86rem; font-weight: 600;
+        cursor: pointer; transition: background 0.15s;
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+    }
+    .qn-btn-save:hover { background: #ea6c00; }
+    .qn-btn-cancel {
+        padding: 8px 14px;
+        background: #f3f4f6; color: #6b7280;
+        border: none; border-radius: 8px;
+        font-size: 0.86rem; cursor: pointer; transition: background 0.15s;
+    }
+    .qn-btn-cancel:hover { background: #e5e7eb; }
+    .qn-full-form-link {
+        display: block; text-align: center; margin-top: 9px;
+        font-size: 0.73rem; color: #9ca3af;
+        cursor: pointer; text-decoration: none;
+        transition: color 0.15s;
+    }
+    .qn-full-form-link:hover { color: #2563eb; }
+    .qn-divider {
+        border: none; border-top: 1px solid #f3f4f6; margin: 9px 0 0;
+    }
+
+    @media (max-width: 900px) {
+        .week-layout { grid-template-columns: 1fr; }
+        .sidebar { position: static; }
+        .chat-panel { width: calc(100vw - 16px); right: 8px; bottom: 8px; height: 70vh; }
+    }
+    @media (max-width: 768px) {
+        .modal-content { width: 95vw; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oa-page">
+    <a href="/oa/" class="back-link">
+        <span class="material-icons" style="font-size:18px;">arrow_back</span> 返回 OA
+    </a>
+
+    <div class="schedule-header">
+        <h1><span class="material-icons">calendar_month</span> 课程排课表</h1>
+        <button class="btn-primary" onclick="openAddModal()">
+            <span class="material-icons" style="font-size:1.1rem;">add</span> 添加课程
+        </button>
+    </div>
+
+    <div class="schedule-nav">
+        <button class="nav-btn" onclick="prevWeek()"><span class="material-icons">chevron_left</span></button>
+        <h2 id="currentWeek"></h2>
+        <button class="nav-btn" onclick="nextWeek()"><span class="material-icons">chevron_right</span></button>
+        <button class="nav-btn text" onclick="goToday()">今天</button>
+    </div>
+
+    <div class="week-layout">
+        <aside class="sidebar" id="sidebar"></aside>
+        <div class="week-grid-container" style="overflow-y:auto; max-height:calc(100vh - 220px);">
+            <div class="week-header" id="weekHeader" style="position:sticky;top:0;z-index:4;"></div>
+            <div class="week-body" id="weekBody"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Course Modal -->
+<div id="courseModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="courseModalTitle">添加课程</h3>
+            <button class="close-btn" onclick="closeCourseModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="courseForm" onsubmit="saveCourse(event)">
+                <div class="form-group">
+                    <label>日期</label>
+                    <input type="date" id="courseDate" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>开始时间</label>
+                        <input type="time" id="courseTimeStart" required>
+                    </div>
+                    <div class="form-group">
+                        <label>结束时间</label>
+                        <input type="time" id="courseTimeEnd" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>授课教师</label>
+                    <input type="text" id="courseTeacher" list="teacherList" required placeholder="输入教师姓名">
+                    <datalist id="teacherList"></datalist>
+                </div>
+                <div class="form-group">
+                    <label>课程 / 项目名称</label>
+                    <input type="text" id="courseName" required placeholder="输入课程或项目名称">
+                </div>
+                <div class="form-group">
+                    <label>学生</label>
+                    <input type="text" id="courseStudents" placeholder="用顿号或逗号分隔">
+                </div>
+                <div class="form-group">
+                    <label>上课地点</label>
+                    <input type="text" id="courseLocation" placeholder="可选">
+                </div>
+                <div class="form-group">
+                    <label>颜色标签</label>
+                    <div class="color-picker" id="colorPicker">
+                        <span class="color-option blue selected" data-color="blue"></span>
+                        <span class="color-option green" data-color="green"></span>
+                        <span class="color-option purple" data-color="purple"></span>
+                        <span class="color-option orange" data-color="orange"></span>
+                        <span class="color-option red" data-color="red"></span>
+                        <span class="color-option teal" data-color="teal"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <textarea id="courseNotes" rows="2" placeholder="可选"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-danger" id="deleteBtn" style="display:none;" onclick="deleteCourse()">
+                        <span class="material-icons" style="font-size:1rem;">delete</span> 删除
+                    </button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- Quick Note Popup -->
+<div id="quickNotePopup" class="quick-note-popup" style="display:none;" onmousedown="event.stopPropagation()">
+    <div class="qn-header">
+        <span class="qn-title">
+            <span class="material-icons">bolt</span> 快速备注
+        </span>
+        <span class="qn-date-tag" id="qnDateLabel"></span>
+    </div>
+    <!-- Time range row (pre-filled from drag, still editable) -->
+    <div class="qn-time-row">
+        <input type="time" id="qnTimeStart" class="qn-time-input" step="900">
+        <span class="qn-time-sep">—</span>
+        <input type="time" id="qnTimeEnd" class="qn-time-input" step="900">
+    </div>
+    <!-- Note content -->
+    <input
+        type="text"
+        id="quickNoteInput"
+        class="qn-input"
+        placeholder="备注内容，如：拍摄、开会、录制..."
+        onkeydown="handleQnKeydown(event)"
+        autocomplete="off"
+    >
+    <div class="qn-actions">
+        <button class="qn-btn-save" onclick="saveQuickNote()">
+            <span class="material-icons" style="font-size:0.95rem;">add</span> 添加
+        </button>
+        <button class="qn-btn-cancel" onclick="closeQuickNote()">取消</button>
+    </div>
+    <hr class="qn-divider">
+    <a class="qn-full-form-link" onclick="openFullFormFromQuickNote()">展开完整表单 →</a>
+</div>
+
+{% include 'oa/_chat_sidebar.html' %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ===== Constants =====
+const GRID_START_HOUR = 8;
+const GRID_END_HOUR = 21;
+const HOUR_HEIGHT = 60;
+const TOTAL_HOURS = GRID_END_HOUR - GRID_START_HOUR;
+const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+// ===== State =====
+let weekStart = getWeekStart(new Date());
+let editingId = null;
+let scheduleData = [];
+let selectedColor = 'blue';
+
+// ===== Helpers =====
+function getWeekStart(d) {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = day === 0 ? -6 : 1 - day; // Monday = 0 offset
+    date.setDate(date.getDate() + diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
+function formatDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function getWeekDays() {
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        days.push(d);
+    }
+    return days;
+}
+
+function isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() &&
+           a.getMonth() === b.getMonth() &&
+           a.getDate() === b.getDate();
+}
+
+// ===== Data Loading =====
+let dataDateRange = null;
+
+async function loadDateRange() {
+    try {
+        const res = await fetch('/oa/api/schedules/date-range');
+        const json = await res.json();
+        if (json.success) dataDateRange = json.data;
+    } catch(e) {}
+}
+
+async function loadSchedules() {
+    try {
+        const days = getWeekDays();
+        const start = formatDate(days[0]);
+        const end = formatDate(days[6]);
+        const res = await fetch(`/oa/api/schedules/by-date?start=${start}&end=${end}`);
+        const json = await res.json();
+        if (json.success) {
+            scheduleData = json.data;
+            renderWeekView();
+            renderSidebar();
+        }
+    } catch (e) {
+        console.error('加载课程失败:', e);
+    }
+}
+
+async function loadTeachers() {
+    try {
+        const res = await fetch('/oa/api/schedules/teachers');
+        const json = await res.json();
+        if (json.success) {
+            const dl = document.getElementById('teacherList');
+            dl.innerHTML = json.data.map(t => `<option value="${t}">`).join('');
+        }
+    } catch(e) {}
+}
+
+// ===== Week Navigation =====
+function updateWeekLabel() {
+    const days = getWeekDays();
+    const s = days[0], e = days[6];
+    const sameMonth = s.getMonth() === e.getMonth();
+    const sameYear = s.getFullYear() === e.getFullYear();
+
+    let label;
+    if (sameMonth) {
+        label = `${s.getFullYear()}年${s.getMonth()+1}月${s.getDate()}日 - ${e.getDate()}日`;
+    } else if (sameYear) {
+        label = `${s.getFullYear()}年${s.getMonth()+1}月${s.getDate()}日 - ${e.getMonth()+1}月${e.getDate()}日`;
+    } else {
+        label = `${s.getFullYear()}年${s.getMonth()+1}月${s.getDate()}日 - ${e.getFullYear()}年${e.getMonth()+1}月${e.getDate()}日`;
+    }
+    document.getElementById('currentWeek').textContent = label;
+}
+
+function prevWeek() {
+    weekStart.setDate(weekStart.getDate() - 7);
+    loadSchedules();
+}
+
+function nextWeek() {
+    weekStart.setDate(weekStart.getDate() + 7);
+    loadSchedules();
+}
+
+function goToday() {
+    weekStart = getWeekStart(new Date());
+    loadSchedules();
+}
+
+// ===== Render Week View =====
+function renderWeekView() {
+    updateWeekLabel();
+    const days = getWeekDays();
+    const today = new Date();
+
+    // --- Header ---
+    const header = document.getElementById('weekHeader');
+    let headerHtml = '<div class="week-header-corner"></div>';
+    days.forEach((d, i) => {
+        const isToday = isSameDay(d, today);
+        headerHtml += `
+            <div class="week-header-cell ${isToday ? 'today' : ''}">
+                <div class="wh-day">${DAY_NAMES[i]}</div>
+                <div class="wh-date">${d.getDate()}</div>
+            </div>`;
+    });
+    header.innerHTML = headerHtml;
+
+    // --- Body ---
+    const body = document.getElementById('weekBody');
+    const gridHeight = TOTAL_HOURS * HOUR_HEIGHT;
+
+    // Time column
+    let timeHtml = '<div class="time-column" style="position:relative;">';
+    for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) {
+        const top = (h - GRID_START_HOUR) * HOUR_HEIGHT;
+        timeHtml += `<div class="time-label" style="position:absolute;top:${top}px;left:0;right:0;height:${HOUR_HEIGHT}px;">${String(h).padStart(2,'0')}:00</div>`;
+    }
+    timeHtml += '</div>';
+
+    // Day columns
+    let dayHtml = '';
+    days.forEach((d, i) => {
+        const dateStr = formatDate(d);
+        const isToday = isSameDay(d, today);
+        const dayCourses = scheduleData.filter(s => s.date === dateStr);
+
+        let colHtml = `<div class="day-column" style="position:relative;height:${gridHeight}px;"
+            onmousedown="handleDayMousedown(event,'${dateStr}')">`;
+
+        // Hour lines
+        for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) {
+            const top = (h - GRID_START_HOUR) * HOUR_HEIGHT;
+            colHtml += `<div class="hour-line" style="top:${top}px;"></div>`;
+        }
+
+        // Course blocks
+        dayCourses.forEach(c => {
+            const pos = getBlockPosition(c.time_start, c.time_end);
+            const color = c.color_tag || 'blue';
+            const showStudents = pos.height > 55;
+            const teacherDisplay = c.teacher && c.teacher !== '—' ? c.teacher : '';
+            colHtml += `
+                <div class="course-block ${color}" style="top:${pos.top}px;height:${pos.height}px;cursor:pointer;"
+                     onmousedown="event.stopPropagation()"
+                     onclick="openEditModal(${c.id})"
+                     title="${c.time_start}-${c.time_end} ${c.course_name}${teacherDisplay ? '\n'+teacherDisplay : ''}${c.students ? '\n'+c.students : ''}">
+                    <div class="cb-name">${escapeHtml(c.course_name)}</div>
+                    <div class="cb-time">${c.time_start}-${c.time_end}</div>
+                    ${teacherDisplay ? `<div class="cb-teacher">${escapeHtml(teacherDisplay)}</div>` : ''}
+                    ${showStudents && c.students ? `<div class="cb-students">${escapeHtml(c.students)}</div>` : ''}
+                </div>`;
+        });
+
+        colHtml += '</div>';
+        dayHtml += colHtml;
+    });
+
+    body.innerHTML = timeHtml + dayHtml;
+}
+
+function getBlockPosition(timeStart, timeEnd) {
+    const [sh, sm] = timeStart.split(':').map(Number);
+    const [eh, em] = timeEnd.split(':').map(Number);
+    const startOffset = (sh - GRID_START_HOUR) + sm / 60;
+    const endOffset = (eh - GRID_START_HOUR) + em / 60;
+    const top = startOffset * HOUR_HEIGHT;
+    const height = (endOffset - startOffset) * HOUR_HEIGHT;
+    return { top: Math.max(top, 0), height: Math.max(height, 24) };
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ===== Render Sidebar =====
+function renderSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayStr = formatDate(today);
+    const tomorrowStr = formatDate(tomorrow);
+
+    const todayCourses = scheduleData.filter(s => s.date === todayStr).sort((a,b) => a.time_start.localeCompare(b.time_start));
+    const tomorrowCourses = scheduleData.filter(s => s.date === tomorrowStr).sort((a,b) => a.time_start.localeCompare(b.time_start));
+
+    // Unique teachers
+    const teachers = new Set(scheduleData.map(s => s.teacher));
+
+    let html = '';
+
+    // Stats
+    html += `
+        <div class="sidebar-section">
+            <div class="sidebar-title">本周概览</div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-number">${scheduleData.length}</div>
+                    <div class="stat-label">课程数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${teachers.size}</div>
+                    <div class="stat-label">教师</div>
+                </div>
+            </div>
+        </div>`;
+
+    // No data hint
+    if (scheduleData.length === 0 && dataDateRange && dataDateRange.max_date) {
+        html += `
+            <div class="sidebar-section">
+                <div style="background:#fef3c7;border-radius:8px;padding:12px;font-size:0.8rem;color:#92400e;">
+                    本周暂无课程数据<br>
+                    <span style="font-size:0.72rem;">数据范围: ${dataDateRange.min_date} ~ ${dataDateRange.max_date}（共${dataDateRange.total}条）</span>
+                    <button onclick="jumpToLatestData()" style="display:block;margin-top:8px;width:100%;padding:6px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:0.8rem;cursor:pointer;">
+                        跳转到最近有课的周
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    // Today courses
+    html += `
+        <div class="sidebar-section">
+            <div class="sidebar-title">今日课程 (${today.getMonth()+1}/${today.getDate()})</div>`;
+    if (todayCourses.length === 0) {
+        html += '<div class="sidebar-empty">今日无课程</div>';
+    } else {
+        todayCourses.forEach(c => {
+            html += `
+                <div class="sidebar-course" onclick="openEditModal(${c.id})">
+                    <span class="sc-time">${c.time_start}</span>
+                    <div class="sc-info">
+                        <div class="sc-name">${escapeHtml(c.course_name)}</div>
+                        <div class="sc-sub">${escapeHtml(c.teacher)}${c.students ? ' · ' + escapeHtml(c.students) : ''}</div>
+                    </div>
+                </div>`;
+        });
+    }
+    html += '</div>';
+
+    // Tomorrow courses
+    html += `
+        <div class="sidebar-section">
+            <div class="sidebar-title">明日课程 (${tomorrow.getMonth()+1}/${tomorrow.getDate()})</div>`;
+    if (tomorrowCourses.length === 0) {
+        html += '<div class="sidebar-empty">明日无课程</div>';
+    } else {
+        tomorrowCourses.forEach(c => {
+            html += `
+                <div class="sidebar-course" onclick="openEditModal(${c.id})">
+                    <span class="sc-time">${c.time_start}</span>
+                    <div class="sc-info">
+                        <div class="sc-name">${escapeHtml(c.course_name)}</div>
+                        <div class="sc-sub">${escapeHtml(c.teacher)}${c.students ? ' · ' + escapeHtml(c.students) : ''}</div>
+                    </div>
+                </div>`;
+        });
+    }
+    html += '</div>';
+
+    sidebar.innerHTML = html;
+}
+
+// ===== Course Modal =====
+function openAddModal(preDate) {
+    editingId = null;
+    document.getElementById('courseModalTitle').textContent = '添加课程';
+    document.getElementById('deleteBtn').style.display = 'none';
+    document.getElementById('courseForm').reset();
+    if (preDate) {
+        document.getElementById('courseDate').value = preDate;
+    }
+    setSelectedColor('blue');
+    document.getElementById('courseModal').classList.add('active');
+}
+
+function openAddModalForDate(dateStr) {
+    openAddModal(dateStr);
+}
+
+async function openEditModal(id) {
+    try {
+        const res = await fetch(`/oa/api/schedules/${id}`);
+        const json = await res.json();
+        if (!json.success) return;
+        const s = json.data;
+        editingId = id;
+
+        document.getElementById('courseModalTitle').textContent = '编辑课程';
+        document.getElementById('deleteBtn').style.display = 'inline-flex';
+        document.getElementById('courseDate').value = s.date;
+        document.getElementById('courseTimeStart').value = s.time_start;
+        document.getElementById('courseTimeEnd').value = s.time_end;
+        document.getElementById('courseTeacher').value = s.teacher;
+        document.getElementById('courseName').value = s.course_name;
+        document.getElementById('courseStudents').value = s.students || '';
+        document.getElementById('courseLocation').value = s.location || '';
+        document.getElementById('courseNotes').value = s.notes || '';
+        setSelectedColor(s.color_tag || 'blue');
+        document.getElementById('courseModal').classList.add('active');
+    } catch (e) {
+        showToast('加载失败');
+    }
+}
+
+function closeCourseModal() {
+    document.getElementById('courseModal').classList.remove('active');
+}
+
+async function saveCourse(e) {
+    e.preventDefault();
+    const data = {
+        date: document.getElementById('courseDate').value,
+        time_start: document.getElementById('courseTimeStart').value,
+        time_end: document.getElementById('courseTimeEnd').value,
+        teacher: document.getElementById('courseTeacher').value,
+        course_name: document.getElementById('courseName').value,
+        students: document.getElementById('courseStudents').value,
+        location: document.getElementById('courseLocation').value,
+        notes: document.getElementById('courseNotes').value,
+        color_tag: selectedColor
+    };
+
+    const url = editingId ? `/oa/api/schedules/${editingId}` : '/oa/api/schedules';
+    const method = editingId ? 'PUT' : 'POST';
+
+    try {
+        const res = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast(editingId ? '已更新' : '已添加');
+            closeCourseModal();
+            loadSchedules();
+        } else {
+            showToast(json.error || '保存失败');
+        }
+    } catch (e) {
+        showToast('网络错误');
+    }
+}
+
+async function deleteCourse() {
+    if (!editingId || !confirm('确定要删除这条课程吗？')) return;
+    try {
+        const res = await fetch(`/oa/api/schedules/${editingId}`, { method: 'DELETE' });
+        const json = await res.json();
+        if (json.success) {
+            showToast('已删除');
+            closeCourseModal();
+            loadSchedules();
+        } else {
+            showToast(json.error || '删除失败');
+        }
+    } catch (e) {
+        showToast('网络错误');
+    }
+}
+
+// ===== Color Picker =====
+function setSelectedColor(color) {
+    selectedColor = color;
+    document.querySelectorAll('.color-option').forEach(el => {
+        el.classList.toggle('selected', el.dataset.color === color);
+    });
+}
+
+document.getElementById('colorPicker').addEventListener('click', function(e) {
+    const opt = e.target.closest('.color-option');
+    if (opt) setSelectedColor(opt.dataset.color);
+});
+
+// ===== Toast =====
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 2500);
+}
+
+// ===== Jump to latest data =====
+function jumpToLatestData() {
+    if (dataDateRange && dataDateRange.max_date) {
+        const d = new Date(dataDateRange.max_date + 'T00:00:00');
+        weekStart = getWeekStart(d);
+        loadSchedules();
+    }
+}
+
+
+// ===== Drag-to-Select + Quick Note =====
+let quickNoteDate = null;
+let _dragState    = null;   // active drag info
+let _dragRectEl   = null;   // the DOM rect shown during drag
+
+/**
+ * Convert a Y offset (px, relative to day-column top) → "HH:MM" string.
+ * Snaps to nearest 15 minutes.
+ */
+function yToTime(y) {
+    const rawMin  = (y / HOUR_HEIGHT) * 60 + GRID_START_HOUR * 60;
+    const snapped = Math.round(rawMin / 15) * 15;
+    const clamped = Math.max(GRID_START_HOUR * 60, Math.min(GRID_END_HOUR * 60, snapped));
+    const h = Math.floor(clamped / 60);
+    const m = clamped % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+/** Add 60 minutes to a "HH:MM" string, clamped to GRID_END_HOUR. */
+function addHour(timeStr) {
+    const [h, m] = timeStr.split(':').map(Number);
+    const total  = Math.min(h * 60 + m + 60, GRID_END_HOUR * 60);
+    return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
+}
+
+/** Get Y offset inside a day-column from a mouse event. */
+function getColY(event, colEl) {
+    return Math.max(0, event.clientY - colEl.getBoundingClientRect().top);
+}
+
+// ---- Mouse handlers ----
+
+function handleDayMousedown(event, dateStr) {
+    if (event.button !== 0) return;                          // left-button only
+    if (event.target.closest('.course-block')) return;       // ignore course blocks
+    closeQuickNote();
+
+    const colEl  = event.currentTarget;
+    const startY = getColY(event, colEl);
+
+    // Create the drag selection rectangle inside this column
+    _dragRectEl = document.createElement('div');
+    _dragRectEl.className = 'drag-selection-rect';
+    _dragRectEl.innerHTML = '<span class="drag-time-label" id="dragTimeLabel"></span>';
+    _dragRectEl.style.top    = startY + 'px';
+    _dragRectEl.style.height = '2px';
+    colEl.appendChild(_dragRectEl);
+
+    _dragState = { dateStr, colEl, startY, currentY: startY, moved: false };
+
+    document.addEventListener('mousemove', _onDragMove);
+    document.addEventListener('mouseup',   _onDragEnd);
+    event.preventDefault();   // prevent text-selection artefacts
+}
+
+function _onDragMove(event) {
+    if (!_dragState) return;
+    const y   = getColY(event, _dragState.colEl);
+    const dy  = Math.abs(y - _dragState.startY);
+    _dragState.currentY = y;
+    _dragState.moved    = dy > 8;
+
+    if (_dragState.moved && _dragRectEl) {
+        const top    = Math.min(_dragState.startY, y);
+        const height = Math.max(dy, 4);
+        _dragRectEl.style.top    = top    + 'px';
+        _dragRectEl.style.height = height + 'px';
+
+        // Live time label
+        const t1 = yToTime(Math.min(_dragState.startY, y));
+        const t2 = yToTime(Math.max(_dragState.startY, y));
+        const lbl = document.getElementById('dragTimeLabel');
+        if (lbl) lbl.textContent = `${t1} – ${t2}`;
+    }
+}
+
+function _onDragEnd(event) {
+    document.removeEventListener('mousemove', _onDragMove);
+    document.removeEventListener('mouseup',   _onDragEnd);
+    if (!_dragState) return;
+
+    const { dateStr, startY, currentY, moved } = _dragState;
+
+    // Remove selection rect
+    if (_dragRectEl && _dragRectEl.parentNode) {
+        _dragRectEl.parentNode.removeChild(_dragRectEl);
+    }
+    _dragRectEl = null;
+    _dragState  = null;
+
+    let timeStart, timeEnd;
+    if (moved) {
+        timeStart = yToTime(Math.min(startY, currentY));
+        timeEnd   = yToTime(Math.max(startY, currentY));
+    } else {
+        // Pure click: snap start to nearest 15 min, default 1-hour duration
+        timeStart = yToTime(startY);
+        timeEnd   = addHour(timeStart);
+    }
+
+    _openQuickNote(dateStr, event.clientX, event.clientY, timeStart, timeEnd);
+}
+
+// ---- Quick Note popup ----
+
+function _openQuickNote(dateStr, clientX, clientY, timeStart, timeEnd) {
+    quickNoteDate = dateStr;
+
+    // Date label
+    const d     = new Date(dateStr + 'T00:00:00');
+    const label = `${d.getMonth()+1}月${d.getDate()}日`;
+    document.getElementById('qnDateLabel').textContent = label;
+
+    // Pre-fill time inputs
+    document.getElementById('qnTimeStart').value = timeStart || '';
+    document.getElementById('qnTimeEnd').value   = timeEnd   || '';
+
+    // Position popup near mouse
+    const popup  = document.getElementById('quickNotePopup');
+    const popupW = 280, popupH = 210;
+    let left = clientX - popupW / 2;
+    let top  = clientY + 12;
+    left = Math.max(8, Math.min(left, window.innerWidth  - popupW - 8));
+    top  = Math.max(8, Math.min(top,  window.innerHeight - popupH - 8));
+    popup.style.left    = left + 'px';
+    popup.style.top     = top  + 'px';
+    popup.style.display = 'block';
+
+    // Focus content input
+    const input = document.getElementById('quickNoteInput');
+    input.value = '';
+    input.focus();
+}
+
+function closeQuickNote() {
+    document.getElementById('quickNotePopup').style.display = 'none';
+    quickNoteDate = null;
+}
+
+function handleQnKeydown(event) {
+    if (event.key === 'Enter')  saveQuickNote();
+    if (event.key === 'Escape') closeQuickNote();
+}
+
+async function saveQuickNote() {
+    const text      = document.getElementById('quickNoteInput').value.trim();
+    const timeStart = document.getElementById('qnTimeStart').value;
+    const timeEnd   = document.getElementById('qnTimeEnd').value;
+
+    if (!text)                   { showToast('请输入备注内容'); document.getElementById('quickNoteInput').focus(); return; }
+    if (!timeStart || !timeEnd)  { showToast('请确认时间范围'); return; }
+    if (timeStart >= timeEnd)    { showToast('结束时间需晚于开始时间'); return; }
+
+    const data = {
+        date:        quickNoteDate,
+        time_start:  timeStart,
+        time_end:    timeEnd,
+        teacher:     '—',
+        course_name: text,
+        students:    '',
+        location:    '',
+        notes:       '临时安排',
+        color_tag:   'orange'
+    };
+
+    try {
+        const res = await fetch('/oa/api/schedules', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(data)
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast('✓ 已添加备注');
+            closeQuickNote();
+            loadSchedules();
+        } else {
+            showToast(json.error || '保存失败');
+        }
+    } catch(e) {
+        showToast('网络错误');
+    }
+}
+
+function openFullFormFromQuickNote() {
+    const date      = quickNoteDate;
+    const timeStart = document.getElementById('qnTimeStart').value;
+    const timeEnd   = document.getElementById('qnTimeEnd').value;
+    const content   = document.getElementById('quickNoteInput').value.trim();
+    closeQuickNote();
+    openAddModal(date);
+    if (timeStart) document.getElementById('courseTimeStart').value = timeStart;
+    if (timeEnd)   document.getElementById('courseTimeEnd').value   = timeEnd;
+    if (content)   document.getElementById('courseName').value      = content;
+}
+
+// Close popup when clicking outside
+document.addEventListener('mousedown', function(e) {
+    const popup = document.getElementById('quickNotePopup');
+    if (popup && popup.style.display !== 'none' && !popup.contains(e.target)) {
+        closeQuickNote();
+    }
+});
+
+// ===== AI Chat =====
+let chatHistory = [];
+let pendingProposal = null;
+let chatSending = false;
+
+const TOOL_LABELS = {
+    get_today_info: '获取日期信息',
+    query_schedules: '查询课程',
+    find_available_slots: '查找空闲时段',
+    propose_create_schedules: '生成排课方案',
+    propose_delete_schedules: '生成删除方案',
+    propose_update_schedules: '生成修改方案',
+    query_todos: '查询待办',
+    propose_create_todos: '生成待办创建方案',
+    propose_delete_todos: '生成待办删除方案',
+    propose_update_todos: '生成待办修改方案',
+};
+
+function toggleChat() {
+    const panel = document.getElementById('chatPanel');
+    const toggle = document.getElementById('chatToggle');
+    const active = panel.classList.toggle('active');
+    toggle.style.display = active ? 'none' : 'flex';
+    if (active) document.getElementById('chatInput').focus();
+}
+
+function appendChatMsg(role, content) {
+    const el = document.getElementById('chatMessages');
+    const welcome = document.getElementById('chatWelcome');
+    if (welcome) welcome.style.display = 'none';
+
+    const div = document.createElement('div');
+    div.className = `chat-msg ${role}`;
+
+    if (role === 'assistant') {
+        div.innerHTML = formatAssistantMsg(content);
+    } else {
+        div.textContent = content;
+    }
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+    return div;
+}
+
+function formatAssistantMsg(text) {
+    if (!text) return '';
+    // Strip MiniMax <think>...</think> reasoning tags
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!text) return '';
+    // Strip markdown tables (already rendered in proposal card)
+    text = text.replace(/^\|.+\|$/gm, '').trim();
+    // Clean up multiple blank lines left after table removal
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) return '';
+    // Simple markdown: bold, code blocks, line breaks
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.8rem;">$1</code>');
+    html = html.replace(/\n/g, '<br>');
+    return html;
+}
+
+function removeLastThinking() {
+    const msgs = document.querySelectorAll('#chatMessages .thinking-msg');
+    msgs.forEach(m => m.remove());
+}
+
+function showThinking(text) {
+    removeLastThinking();
+    const el = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = 'chat-msg thinking-msg';
+    div.textContent = text;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+
+function quickSend(text) {
+    document.getElementById('chatInput').value = text;
+    sendChatMessage();
+}
+
+function quickTemplate(text) {
+    const input = document.getElementById('chatInput');
+    input.value = text;
+    input.focus();
+    // Select first ___ placeholder for easy editing
+    const idx = text.indexOf('___');
+    if (idx >= 0) {
+        input.setSelectionRange(idx, idx + 3);
+    }
+}
+
+async function sendChatMessage() {
+    if (chatSending) return;
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    if (!message) return;
+
+    chatSending = true;
+    input.value = '';
+    input.style.height = 'auto';
+    document.getElementById('chatSendBtn').disabled = true;
+    appendChatMsg('user', message);
+    showThinking('思考中…');
+
+    try {
+        const res = await fetch('/oa/api/schedule-agent/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message, history: chatHistory })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const event = JSON.parse(line);
+                    handleChatEvent(event);
+                } catch(e) {}
+            }
+        }
+        // Process remaining buffer
+        if (buffer.trim()) {
+            try { handleChatEvent(JSON.parse(buffer)); } catch(e) {}
+        }
+    } catch(e) {
+        removeLastThinking();
+        appendChatMsg('system-msg', '网络错误，请重试');
+    } finally {
+        chatSending = false;
+        document.getElementById('chatSendBtn').disabled = false;
+        input.focus();
+    }
+}
+
+function handleChatEvent(event) {
+    switch(event.type) {
+        case 'thinking':
+            showThinking(typeof event.data === 'string' ? event.data : '思考中…');
+            break;
+        case 'tool_call': {
+            const name = event.data?.name || '';
+            const label = TOOL_LABELS[name] || name;
+            showThinking(`正在${label}…`);
+            break;
+        }
+        case 'response':
+            removeLastThinking();
+            if (event.content) appendChatMsg('assistant', event.content);
+            if (event.messages) chatHistory = event.messages;
+            if (event.proposal) showProposal(event.proposal);
+            break;
+        case 'error':
+            removeLastThinking();
+            appendChatMsg('system-msg', '错误: ' + (event.content || '未知错误'));
+            break;
+    }
+}
+
+function showProposal(proposal) {
+    pendingProposal = proposal;
+    const el = document.getElementById('chatMessages');
+
+    const card = document.createElement('div');
+    card.className = 'chat-proposal-card';
+    card.id = 'proposalCard';
+
+    let detailHtml = '';
+    if (proposal.action === 'create' && proposal.schedules) {
+        detailHtml = `<table><tr><th>日期</th><th>时间</th><th>教师</th><th>课程</th></tr>`;
+        proposal.schedules.slice(0, 20).forEach(s => {
+            detailHtml += `<tr><td>${s.date}</td><td>${s.time_start}-${s.time_end}</td><td>${escapeHtml(s.teacher)}</td><td>${escapeHtml(s.course_name)}</td></tr>`;
+        });
+        if (proposal.schedules.length > 20) {
+            detailHtml += `<tr><td colspan="4" style="text-align:center;color:#6b7280;">…共 ${proposal.schedules.length} 条</td></tr>`;
+        }
+        detailHtml += '</table>';
+    } else if (proposal.action === 'delete' && proposal.schedules) {
+        detailHtml = `<table><tr><th>ID</th><th>日期</th><th>课程</th><th>教师</th></tr>`;
+        proposal.schedules.forEach(s => {
+            detailHtml += `<tr><td>${s.id}</td><td>${s.date}</td><td>${escapeHtml(s.course_name)}</td><td>${escapeHtml(s.teacher)}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'create_todos' && proposal.todos) {
+        const pLabel = {1:'紧急',2:'一般',3:'低'};
+        detailHtml = `<table><tr><th>标题</th><th>负责人</th><th>截止</th><th>优先级</th></tr>`;
+        proposal.todos.slice(0,20).forEach(t => {
+            const people = Array.isArray(t.responsible_people) ? t.responsible_people.join(', ') : '';
+            detailHtml += `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(people)}</td><td>${t.due_date||'-'}</td><td>${pLabel[t.priority]||'一般'}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'delete_todos' && proposal.todos) {
+        detailHtml = `<table><tr><th>ID</th><th>标题</th><th>负责人</th></tr>`;
+        proposal.todos.forEach(t => {
+            detailHtml += `<tr><td>${t.id}</td><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.responsible_person||'')}</td></tr>`;
+        });
+        detailHtml += '</table>';
+    } else if (proposal.action === 'update_todos' && proposal.details) {
+        detailHtml = `<div>将修改 ${proposal.total} 条待办</div>`;
+    }
+
+    let conflictHtml = '';
+    if (proposal.conflicts && proposal.conflicts.length > 0) {
+        conflictHtml = `<div style="color:#dc2626;font-size:0.78rem;margin-bottom:6px;">⚠ 发现 ${proposal.conflicts.length} 个时间冲突</div>`;
+    }
+
+    card.innerHTML = `
+        <div class="proposal-summary">${escapeHtml(proposal.summary || '排课方案')}</div>
+        ${conflictHtml}
+        <div class="proposal-detail">${detailHtml}</div>
+        <div class="chat-proposal-actions">
+            <button class="confirm-btn" onclick="confirmProposal()">确认执行</button>
+            <button class="reject-btn" onclick="rejectProposal()">取消</button>
+        </div>`;
+
+    el.appendChild(card);
+    el.scrollTop = el.scrollHeight;
+}
+
+async function confirmProposal() {
+    if (!pendingProposal) return;
+    const card = document.getElementById('proposalCard');
+
+    try {
+        const res = await fetch('/oa/api/schedule-agent/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(pendingProposal)
+        });
+        const json = await res.json();
+        if (json.success) {
+            appendChatMsg('system-msg', json.message);
+            const act = pendingProposal.action;
+            if (act === 'create' || act === 'delete' || act === 'update') {
+                loadSchedules();
+            }
+        } else {
+            appendChatMsg('system-msg', '执行失败: ' + (json.error || '未知错误'));
+        }
+    } catch(e) {
+        appendChatMsg('system-msg', '网络错误');
+    }
+
+    if (card) card.remove();
+    pendingProposal = null;
+}
+
+function rejectProposal() {
+    const card = document.getElementById('proposalCard');
+    if (card) card.remove();
+    pendingProposal = null;
+    chatHistory.push({role: 'user', content: '取消，不执行这个方案。'});
+    appendChatMsg('system-msg', '方案已取消');
+}
+
+// ===== Init =====
+loadDateRange();
+loadSchedules();
+loadTeachers();
+</script>
+{% endblock %}

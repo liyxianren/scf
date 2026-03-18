@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="landing-html">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCF熵创未来 | 深圳熵创未来教育科技有限公司</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+</head>
+
+<body class="landing-body">
+    <div class="landing-bg" aria-hidden="true">
+        <div class="aurora-layer aurora-1"></div>
+        <div class="aurora-layer aurora-2"></div>
+        <div class="aurora-layer aurora-3"></div>
+        <div class="aurora-layer aurora-4"></div>
+        <div class="landing-geo landing-geo-1"></div>
+        <div class="landing-geo landing-geo-2"></div>
+        <div class="landing-geo landing-geo-3"></div>
+        <div class="landing-geo landing-geo-4"></div>
+        <div class="landing-geo landing-geo-5"></div>
+    </div>
+    <div class="landing-cursor-glow" id="cursorGlow" aria-hidden="true"></div>
+
+    <header class="landing-nav">
+        <div class="landing-container landing-nav-inner">
+            <a class="landing-logo" href="/">
+                <span class="logo-mark">SCF</span>
+                <span class="logo-text">熵创未来</span>
+            </a>
+            <nav class="landing-nav-links" aria-label="首页导航">
+                <a href="#about">公司介绍</a>
+                <a href="#products">产品服务</a>
+                <a href="#services">核心服务</a>
+                <a href="#results">成果展示</a>
+                <a href="#team">团队介绍</a>
+                <a href="#contact">联系我们</a>
+            </nav>
+            <a class="landing-nav-cta" href="#contact">预约咨询</a>
+        </div>
+    </header>
+
+    <main class="landing-main">
+        <section class="landing-hero" id="top">
+            <div class="landing-container landing-hero-grid">
+                <div class="landing-hero-copy landing-animate landing-delay-1">
+                    <span class="landing-eyebrow">Shenzhen Entropy Create Future</span>
+                    <p class="landing-company-name">深圳熵创未来教育科技有限公司</p>
+                    <h1 class="landing-hero-headline">把兴趣探索、研究实践与成果表达，做成一条清晰的成长路径</h1>
+                    <p class="landing-lede">面向青少年提供理工科综合素质培育方案，围绕工作坊、项目实践、科研与竞赛指导，建立长期可沉淀的成长闭环。</p>
+                    <p class="landing-tagline">长期主义，不做碎片化的“背景提升”。</p>
+                    <div class="landing-hero-actions">
+                        <a class="landing-btn landing-btn-primary" href="#about">了解方案</a>
+                        <a class="landing-btn landing-btn-ghost" href="#contact">联系咨询</a>
+                    </div>
+                    <div class="landing-hero-metrics">
+                        <div class="landing-metric">
+                            <span class="landing-metric-number">500+</span>
+                            <span class="landing-metric-label">服务学生</span>
+                            <span class="landing-metric-detail">覆盖国内外多地学习者</span>
+                        </div>
+                        <div class="landing-metric">
+                            <span class="landing-metric-number">100+</span>
+                            <span class="landing-metric-label">专利授权</span>
+                            <span class="landing-metric-detail">专利与软件著作权持续沉淀</span>
+                        </div>
+                        <div class="landing-metric">
+                            <span class="landing-metric-number">100+</span>
+                            <span class="landing-metric-label">国际竞赛获奖</span>
+                            <span class="landing-metric-detail">科研与赛事成果可见可验证</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="landing-hero-board landing-animate landing-delay-2">
+                    <div class="landing-board-header">
+                        <span class="landing-panel-kicker">核心路径</span>
+                        <h2>
+                            <span class="landing-board-brand">熵创未来</span>
+                            <span class="landing-board-title-text">从兴趣到成果的四步路径</span>
+                        </h2>
+                        <p>不是零散课程的简单拼接，而是一套围绕方向探索、能力建立、真实实践与成果沉淀展开的长期成长方案。</p>
+                    </div>
+                    <div class="landing-board-grid">
+                        <article class="landing-board-card">
+                            <span class="landing-board-label">四步路径</span>
+                            <ol class="landing-flow-list">
+                                <li>
+                                    <span class="landing-flow-number">01</span>
+                                    <div class="landing-flow-content">
+                                        <strong>兴趣探索</strong>
+                                        <p>通过 SCF 工作坊和主题体验，完成方向匹配与认知启蒙。</p>
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="landing-flow-number">02</span>
+                                    <div class="landing-flow-content">
+                                        <strong>系统训练</strong>
+                                        <p>补齐理工科核心能力，建立技术、表达与协作基础。</p>
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="landing-flow-number">03</span>
+                                    <div class="landing-flow-content">
+                                        <strong>项目实践</strong>
+                                        <p>围绕真实问题展开跨学科项目，沉淀完整的学习过程。</p>
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="landing-flow-number">04</span>
+                                    <div class="landing-flow-content">
+                                        <strong>成果输出</strong>
+                                        <p>形成论文、专利、作品集、竞赛成绩等高质量结果。</p>
+                                    </div>
+                                </li>
+                            </ol>
+                        </article>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section landing-section-muted" id="about">
+            <div class="landing-container">
+                <div class="landing-section-header landing-animate landing-delay-1">
+                    <span class="landing-section-kicker">公司介绍</span>
+                    <h2>从兴趣出发，但不止于兴趣</h2>
+                    <p>我们更关心的是学生如何在长期项目中完成认知、能力和成果的持续积累，而不是短期堆砌表面的履历。</p>
+                </div>
+
+                <div class="landing-about-grid">
+                    <article class="landing-story-card landing-animate landing-delay-2">
+                        <h3>我们在做什么</h3>
+                        <p class="landing-story-intro">熵创未来做的不是零散课程，而是围绕兴趣探索、技术训练、项目实践与成果沉淀建立起来的长期培养方案。</p>
+                        <div class="landing-story-points">
+                            <article class="landing-story-point">
+                                <strong>方向匹配</strong>
+                                <p>通过工作坊与主题体验，帮助学生找到真正适合长期投入的方向。</p>
+                            </article>
+                            <article class="landing-story-point">
+                                <strong>项目驱动</strong>
+                                <p>在完整项目中经历研究、实现、复盘与表达，而不是停留在零散知识点。</p>
+                            </article>
+                            <article class="landing-story-point">
+                                <strong>成果沉淀</strong>
+                                <p>让作品集、论文、专利与竞赛结果建立在真实训练和长期投入之上。</p>
+                            </article>
+                        </div>
+                        <blockquote class="landing-quote">真正有价值的成果，来自长期训练，而不是短期包装。</blockquote>
+                    </article>
+
+                    <aside class="landing-path landing-animate landing-delay-3">
+                        <h3>培养路径</h3>
+                        <ol class="landing-path-list">
+                            <li>
+                                <span class="landing-path-index">01</span>
+                                <div class="landing-path-copy">
+                                    <strong>兴趣探索</strong>
+                                    <p>SCF 工作坊主题体验，帮助学生完成方向匹配。</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="landing-path-index">02</span>
+                                <div class="landing-path-copy">
+                                    <strong>技术训练</strong>
+                                    <p>系统化能力提升，打磨面向项目的核心基础。</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="landing-path-index">03</span>
+                                <div class="landing-path-copy">
+                                    <strong>跨界创新</strong>
+                                    <p>通过团队协作解决真实问题，形成方法与视野。</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="landing-path-index">04</span>
+                                <div class="landing-path-copy">
+                                    <strong>成果输出</strong>
+                                    <p>用科研、作品集、竞赛成绩与论文完成沉淀与表达。</p>
+                                </div>
+                            </li>
+                        </ol>
+                    </aside>
+                </div>
+
+                <div class="landing-subsection landing-animate landing-delay-4">
+                    <h3 class="landing-subtitle">我们的核心原则</h3>
+                    <div class="landing-values-grid">
+                        <article class="landing-value-card">
+                            <span class="landing-card-kicker">01</span>
+                            <h3>兴趣驱动，但有专业边界</h3>
+                            <p>尊重学生兴趣，同时用系统方法引导其进入真正有积累价值的方向。</p>
+                        </article>
+                        <article class="landing-value-card">
+                            <span class="landing-card-kicker">02</span>
+                            <h3>个性发展，也要形成方案</h3>
+                            <p>关注个体差异，把长期成长目标拆成可执行、可复盘的阶段路径。</p>
+                        </article>
+                        <article class="landing-value-card">
+                            <span class="landing-card-kicker">03</span>
+                            <h3>成果呈现，必须回到能力本身</h3>
+                            <p>所有作品、论文、专利和竞赛成绩，都应来自真实训练与真实问题。</p>
+                        </article>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section landing-products" id="products">
+            <div class="landing-container">
+                <div class="landing-section-header landing-animate landing-delay-1">
+                    <span class="landing-section-kicker">产品服务</span>
+                    <h2>用清晰的产品入口，连接内部研发与对外服务</h2>
+                    <p>官网首页既要说明我们是谁，也要让不同角色的人快速找到正确入口。</p>
+                </div>
+
+                <div class="landing-product-grid">
+                    <article class="landing-product-card landing-animate landing-delay-2">
+                        <div class="landing-product-top">
+                            <span class="landing-product-tag landing-product-tag-internal">内部系统</span>
+                            <h3>AI Agent Hub</h3>
+                            <p>面向内部团队的项目提案、创意协作与工程手册生产力平台，服务于方案输出与知识沉淀。</p>
+                            <p class="landing-product-note">当前仅保留给内部团队使用。</p>
+                        </div>
+                        <ul class="landing-product-list">
+                            <li>创意助手</li>
+                            <li>计划书生成</li>
+                            <li>工程手册库</li>
+                        </ul>
+                        <a class="landing-btn landing-btn-ghost" href="/company/agents">进入内部入口</a>
+                    </article>
+
+                    <article class="landing-product-card landing-animate landing-delay-3">
+                        <div class="landing-product-top">
+                            <span class="landing-product-tag landing-product-tag-internal">内部系统</span>
+                            <h3>SCF OA</h3>
+                            <p>围绕课程排课、待办事项与数据管理建立内部协同流程，替代原有 Excel 驱动的管理方式。</p>
+                        </div>
+                        <ul class="landing-product-list">
+                            <li>课程排课管理</li>
+                            <li>待办事项追踪</li>
+                            <li>数据导入导出</li>
+                        </ul>
+                        <a class="landing-btn landing-btn-ghost" href="/oa/">进入 OA 系统</a>
+                    </article>
+
+                    <article class="landing-product-card landing-animate landing-delay-4">
+                        <div class="landing-product-top">
+                            <span class="landing-product-tag">对外服务</span>
+                            <h3>Code Learning</h3>
+                            <p>系统化编程课程与实训题库，覆盖 Python 与 C 语言，强化学生的基础训练与实际动手能力。</p>
+                        </div>
+                        <ul class="landing-product-list">
+                            <li>课程教程</li>
+                            <li>在线练习场</li>
+                            <li>进阶题库</li>
+                        </ul>
+                        <a class="landing-btn landing-btn-primary" href="/code">进入 Code Learning</a>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section" id="services">
+            <div class="landing-container">
+                <div class="landing-section-header landing-animate landing-delay-1">
+                    <span class="landing-section-kicker">核心服务</span>
+                    <h2>四个服务模块，贯穿学生成长的关键节点</h2>
+                    <p>课程、项目、竞赛与研究并不是分开的条线，而是同一条成长路径上的不同阶段。</p>
+                </div>
+
+                <div class="landing-services-grid">
+                    <article class="landing-service-card landing-animate landing-delay-2">
+                        <h3>SCF 工作坊</h3>
+                        <p>通过主题体验帮助学生理解理工科学习方式，完成初始方向匹配。</p>
+                        <ul class="landing-service-list">
+                            <li>主题项目体验</li>
+                            <li>综合能力启蒙</li>
+                        </ul>
+                    </article>
+                    <article class="landing-service-card landing-animate landing-delay-3">
+                        <h3>工程作品集</h3>
+                        <p>以多阶段项目构建完整学习过程，让成长有连续的中间产出。</p>
+                        <ul class="landing-service-list">
+                            <li>小型与中型项目结合</li>
+                            <li>长期过程沉淀</li>
+                        </ul>
+                    </article>
+                    <article class="landing-service-card landing-animate landing-delay-4">
+                        <h3>跨界创新项目</h3>
+                        <p>围绕现实问题展开团队协作，强化科研思维、创新能力与组织能力。</p>
+                        <ul class="landing-service-list">
+                            <li>问题导向训练</li>
+                            <li>协作与领导力提升</li>
+                        </ul>
+                    </article>
+                    <article class="landing-service-card landing-animate landing-delay-5">
+                        <h3>学术竞赛与研究</h3>
+                        <p>通过深度研究与高质量成果表达，帮助学生进入更高水平的学术环境。</p>
+                        <ul class="landing-service-list">
+                            <li>论文与报告产出</li>
+                            <li>国际竞赛实战</li>
+                        </ul>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section landing-results" id="results">
+            <div class="landing-container">
+                <div class="landing-section-header landing-animate landing-delay-1">
+                    <span class="landing-section-kicker">成果展示</span>
+                    <h2>看得见的结果，来自长期而稳定的积累</h2>
+                    <p>我们更愿意展示可验证的过程与成果，而不是情绪化的宣传语。</p>
+                </div>
+
+                <div class="landing-stats-grid">
+                    <div class="landing-stat landing-animate landing-delay-2">
+                        <span class="landing-stat-number">500+</span>
+                        <span class="landing-stat-label">服务学生</span>
+                        <span class="landing-stat-desc">覆盖国内外多地学习者</span>
+                    </div>
+                    <div class="landing-stat landing-animate landing-delay-3">
+                        <span class="landing-stat-number">100+</span>
+                        <span class="landing-stat-label">专利授权</span>
+                        <span class="landing-stat-desc">专利与著作权成果持续沉淀</span>
+                    </div>
+                    <div class="landing-stat landing-animate landing-delay-4">
+                        <span class="landing-stat-number">100+</span>
+                        <span class="landing-stat-label">国际竞赛获奖</span>
+                        <span class="landing-stat-desc">AMC、AIME、USABO 等赛事成果</span>
+                    </div>
+                    <div class="landing-stat landing-animate landing-delay-5">
+                        <span class="landing-stat-number">名校录取</span>
+                        <span class="landing-stat-label">世界顶尖高校</span>
+                        <span class="landing-stat-desc">长期积累在申请中形成清晰竞争力</span>
+                    </div>
+                </div>
+
+                <div class="landing-results-extra landing-animate landing-delay-3">
+                    <article class="landing-outcome-card">
+                        <h3>项目收获</h3>
+                        <ul class="landing-outcome-list">
+                            <li>推荐信与学术报告</li>
+                            <li>论文 / 学术会议摘要</li>
+                            <li>竞赛获奖证书</li>
+                            <li>专利授权与软件著作权</li>
+                        </ul>
+                    </article>
+                    <article class="landing-outcome-card">
+                        <h3>赛事与名校</h3>
+                        <ul class="landing-outcome-list">
+                            <li>AMC / AIME / USABO / USACO</li>
+                            <li>HiMCM / ISEF / 日内瓦国际发明展</li>
+                            <li>剑桥大学 / 帝国理工 / 西北大学</li>
+                            <li>康奈尔 / CMU / 加州大学伯克利</li>
+                        </ul>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section" id="team">
+            <div class="landing-container">
+                <div class="landing-section-header landing-animate landing-delay-1">
+                    <span class="landing-section-kicker">团队介绍</span>
+                    <h2>教育实践者与科研导师共同参与，保证方法与执行都足够扎实</h2>
+                    <p>团队构成覆盖国际教育、研发、科研训练与竞赛指导，确保培养方案不是停留在宣传层面。</p>
+                </div>
+
+                <div class="landing-team-grid">
+                    <article class="landing-team-card landing-animate landing-delay-2">
+                        <div class="landing-avatar">👩‍💼</div>
+                        <div>
+                            <h3>周行</h3>
+                            <p class="landing-team-role">创始人</p>
+                            <p class="landing-team-desc">10 余年国际教育行业经历，长期深耕科创项目与国际赛事板块。</p>
+                        </div>
+                    </article>
+                    <article class="landing-team-card landing-animate landing-delay-3">
+                        <div class="landing-avatar">👨‍💻</div>
+                        <div>
+                            <h3>范晓东</h3>
+                            <p class="landing-team-role">联合创始人 / 教研负责人</p>
+                            <p class="landing-team-desc">东南大学硕士，具备研发经验与 STEM 教育实践经验，负责课程与项目体系建设。</p>
+                        </div>
+                    </article>
+                </div>
+
+                <div class="landing-subsection landing-animate landing-delay-4">
+                    <h3 class="landing-subtitle">核心教研团队</h3>
+                    <div class="landing-teachers-grid">
+                        <article class="landing-teacher-card">
+                            <h4>Jason Xie</h4>
+                            <p class="landing-teacher-role">AI 项目培训师</p>
+                            <p class="landing-teacher-desc">曾任亚马逊 AI 项目培训师，同时具备信息学竞赛指导经验。</p>
+                        </article>
+                        <article class="landing-teacher-card">
+                            <h4>Prof. Zhu</h4>
+                            <p class="landing-teacher-role">博士研究生导师</p>
+                            <p class="landing-teacher-desc">承担国家自然基金与科研项目，具备稳定的学术指导与成果经验。</p>
+                        </article>
+                        <article class="landing-teacher-card">
+                            <h4>Dr. Luo</h4>
+                            <p class="landing-teacher-role">普林斯顿大学博士</p>
+                            <p class="landing-teacher-desc">发表 SCI 论文 12 篇，担任国际权威期刊审稿人。</p>
+                        </article>
+                        <article class="landing-teacher-card">
+                            <h4>Prof. Zhou</h4>
+                            <p class="landing-teacher-role">研究员 / 导师</p>
+                            <p class="landing-teacher-desc">中国空空导弹研究院研究员，研究方向覆盖惯性导航系统。</p>
+                        </article>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-section landing-contact" id="contact">
+            <div class="landing-container">
+                <div class="landing-contact-box landing-animate landing-delay-1">
+                    <div class="landing-contact-text">
+                        <span class="landing-section-kicker">联系我们</span>
+                        <h2>如果你在寻找一套更长期、更清晰的理工科成长方案，可以和我们聊聊</h2>
+                        <p>科创咨询、赛事咨询或合作联系，可添加周老师微信获取资料与课程介绍。我们会根据学生当前阶段与目标，给出更匹配的成长建议。</p>
+                        <div class="landing-contact-actions">
+                            <a class="landing-btn landing-btn-primary" href="/code">了解 Code Learning</a>
+                            <a class="landing-btn landing-btn-ghost" href="/company/agents">查看内部系统</a>
+                        </div>
+                    </div>
+                    <div class="landing-contact-card">
+                        <div class="landing-qr-box">
+                            <img src="{{ url_for('static', filename='images/qr-code.jpg') }}" alt="周老师微信二维码" class="landing-qr-image">
+                        </div>
+                        <p class="landing-qr-text">长按二维码添加周老师微信</p>
+                        <p class="landing-qr-sub">科创咨询 | 赛事咨询 | 合作联系</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="landing-footer">
+        <div class="landing-container landing-footer-inner">
+            <div>
+                <strong>深圳熵创未来教育科技有限公司</strong>
+                <span>SCF - Shenzhen Entropy Create Future</span>
+            </div>
+            <nav class="landing-footer-nav">
+                <a href="#about" class="landing-footer-link">关于我们</a>
+                <a href="#products" class="landing-footer-link">产品服务</a>
+                <a href="#contact" class="landing-footer-link">联系我们</a>
+                <a href="#top" class="landing-footer-link">返回顶部</a>
+            </nav>
+        </div>
+    </footer>
+
+    <script>
+    // ===== 滚动入场动画 =====
+    const revealElements = document.querySelectorAll('.landing-animate');
+
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                entry.target.classList.add('revealed');
+                observer.unobserve(entry.target);
+            });
+        }, { threshold: 0.15 });
+
+        revealElements.forEach((element) => {
+            element.classList.remove('landing-animate');
+            element.classList.add('landing-scroll-reveal');
+            observer.observe(element);
+        });
+    }
+
+    // ===== 数字递增动画 =====
+    const counters = document.querySelectorAll('.landing-metric-number, .landing-stat-number');
+
+    if ('IntersectionObserver' in window) {
+        const counterObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+
+                const element = entry.target;
+                const text = element.textContent.trim();
+                const match = text.match(/^(\d+)/);
+
+                if (!match) {
+                    counterObserver.unobserve(element);
+                    return;
+                }
+
+                const target = parseInt(match[1], 10);
+                const suffix = text.replace(/^\d+/, '');
+                let current = 0;
+                const step = Math.max(1, Math.floor(target / 40));
+
+                const timer = setInterval(() => {
+                    current += step;
+                    if (current >= target) {
+                        current = target;
+                        clearInterval(timer);
+                    }
+                    element.textContent = current + suffix;
+                }, 30);
+
+                counterObserver.unobserve(element);
+            });
+        }, { threshold: 0.5 });
+
+        counters.forEach((element) => counterObserver.observe(element));
+    }
+
+    // ===== 鼠标跟随光晕 =====
+    const cursorGlow = document.getElementById('cursorGlow');
+    if (cursorGlow) {
+        let mouseX = 0, mouseY = 0;
+        let glowX = 0, glowY = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY + window.scrollY;
+        });
+
+        function animateGlow() {
+            glowX += (mouseX - glowX) * 0.08;
+            glowY += (mouseY - glowY) * 0.08;
+            cursorGlow.style.transform = `translate(${glowX - 200}px, ${glowY - 200}px)`;
+            requestAnimationFrame(animateGlow);
+        }
+        animateGlow();
+    }
+
+    // ===== 导航栏滚动增强 =====
+    const nav = document.querySelector('.landing-nav');
+    if (nav) {
+        let lastScroll = 0;
+        window.addEventListener('scroll', () => {
+            const currentScroll = window.scrollY;
+            if (currentScroll > 50) {
+                nav.style.boxShadow = '0 8px 32px rgba(15, 23, 42, 0.06)';
+            } else {
+                nav.style.boxShadow = 'none';
+            }
+            lastScroll = currentScroll;
+        }, { passive: true });
+    }
+
+    // ===== 平滑锚点滚动 =====
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function(e) {
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
+    </script>
+</body>
+
+</html>

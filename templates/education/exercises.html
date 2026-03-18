@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}练习题 - {{ 'Python' if language == 'python' else 'C语言' if language == 'c' else 'Vibe Coding' }}学习平台{% endblock %}
+
+{% block content %}
+{% set lang = language|default('python') %}
+{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+{% set lang_prefix = '/' + lang %}
+
+<div class="container">
+    <div class="page-header">
+        <h1>{{ lang_name }} 练习题</h1>
+        <p>通过练习巩固所学知识，选择对应章节开始挑战吧</p>
+    </div>
+
+    <!-- 章节筛选 -->
+    <div class="exercises-filter" id="filter-buttons">
+        <button class="filter-btn active" data-lesson="0">全部</button>
+        <!-- 动态加载筛选按钮 -->
+    </div>
+
+    <div class="exercises-container" id="exercises-list">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <div>正在加载练习题...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const LANG = '{{ lang }}';
+const LANG_PREFIX = '{{ lang_prefix }}';
+
+let allExercises = [];
+let chapterNames = {};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 先加载课程列表获取章节名
+    fetch('/api/lessons?language=' + LANG)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 构建章节名映射和筛选按钮
+                const filterContainer = document.getElementById('filter-buttons');
+                let buttonsHtml = '<button class="filter-btn active" data-lesson="0">全部</button>';
+
+                data.data.forEach(lesson => {
+                    chapterNames[lesson.id] = lesson.title.replace(/第\d+章[：:]\s*/, '');
+                    buttonsHtml += `<button class="filter-btn" data-lesson="${lesson.id}">第${lesson.chapter_num}章</button>`;
+                });
+
+                filterContainer.innerHTML = buttonsHtml;
+
+                // 绑定筛选事件
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                        this.classList.add('active');
+                        const lessonId = parseInt(this.dataset.lesson);
+                        filterExercises(lessonId);
+                    });
+                });
+            }
+        });
+
+    // 加载练习题
+    loadExercises();
+});
+
+function loadExercises() {
+    fetch('/api/exercises?language=' + LANG)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                allExercises = data.data;
+                renderExercises(allExercises);
+            } else {
+                showError();
+            }
+        })
+        .catch(error => {
+            showError();
+        });
+}
+
+function filterExercises(lessonId) {
+    if (lessonId === 0) {
+        renderExercises(allExercises);
+    } else {
+        const filtered = allExercises.filter(ex => ex.lesson_id === lessonId);
+        renderExercises(filtered);
+    }
+}
+
+function renderExercises(exercises) {
+    const container = document.getElementById('exercises-list');
+
+    if (exercises.length === 0) {
+        container.innerHTML = '<p class="empty-message">该章节暂无练习题</p>';
+        return;
+    }
+
+    container.innerHTML = exercises.map(ex => `
+        <a href="${LANG_PREFIX}/exercises/${ex.id}" class="exercise-card">
+            <div class="exercise-header">
+                <h3 class="exercise-title">${ex.title}</h3>
+                <span class="difficulty-badge difficulty-${ex.difficulty}">
+                    ${['', '简单', '中等', '困难'][ex.difficulty] || '未知'}
+                </span>
+            </div>
+            <p class="exercise-desc">${stripMarkdown(ex.description).substring(0, 80)}...</p>
+            <div class="exercise-footer">
+                <span class="exercise-chapter">${chapterNames[ex.lesson_id] || '练习'}</span>
+                <span class="exercise-arrow">→</span>
+            </div>
+        </a>
+    `).join('');
+}
+
+function stripMarkdown(text) {
+    return text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/`/g, '')
+        .replace(/\n/g, ' ')
+        .trim();
+}
+
+function showError() {
+    document.getElementById('exercises-list').innerHTML =
+        '<p class="error-message">加载失败，请刷新重试</p>';
+}
+</script>
+{% endblock %}
