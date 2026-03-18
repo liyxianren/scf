@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block title %}管理面板 - OA系统{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:1100px;margin:0 auto;padding:28px 20px 40px}
+.page-header{margin-bottom:28px}
+.page-header h1{margin:0;font-size:1.8rem;color:#111827;display:flex;align-items:center;gap:10px}
+.page-header h1 .material-icons{color:#0ea5e9}
+.page-header .subtitle{margin:6px 0 0;color:#6b7280;font-size:.95rem}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.stat-card .stat-value{font-size:2rem;font-weight:800;color:#111827;line-height:1}
+.stat-card .stat-label{font-size:.82rem;color:#6b7280;margin-top:6px;font-weight:600}
+.stat-card .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+.stat-card .stat-icon .material-icons{color:#fff;font-size:1.3rem}
+.icon-blue{background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+.icon-amber{background:linear-gradient(135deg,#f59e0b,#eab308)}
+.icon-green{background:linear-gradient(135deg,#10b981,#059669)}
+.icon-purple{background:linear-gradient(135deg,#8b5cf6,#7c3aed)}
+.icon-rose{background:linear-gradient(135deg,#f43f5e,#e11d48)}
+.nav-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
+.nav-card{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;text-decoration:none;color:#111827;transition:all .2s;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.nav-card:hover{border-color:#7dd3fc;box-shadow:0 8px 24px rgba(14,165,233,.1);transform:translateY(-2px)}
+.nav-card .nav-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.nav-card .nav-icon .material-icons{font-size:1.4rem;color:#fff}
+.nav-card .nav-text h3{margin:0;font-size:.95rem;font-weight:700}
+.nav-card .nav-text p{margin:4px 0 0;font-size:.82rem;color:#6b7280}
+/* Sections - teacher-like panels */
+.section{margin-bottom:28px}
+.section h2{margin:0 0 14px;font-size:1.1rem;color:#111827;display:flex;align-items:center;gap:8px}
+.section h2 .material-icons{color:#0ea5e9;font-size:1.2rem}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.leave-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.leave-info{flex:1}
+.leave-info .leave-student{font-size:.92rem;font-weight:700;color:#111827}
+.leave-info .leave-detail{font-size:.82rem;color:#6b7280;margin-top:2px}
+.leave-actions{display:flex;gap:6px}
+.leave-actions button{padding:6px 14px;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer}
+.approve-btn{background:#dcfce7;color:#166534}
+.approve-btn:hover{background:#bbf7d0}
+.reject-btn{background:#fee2e2;color:#991b1b}
+.reject-btn:hover{background:#fecaca}
+.student-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.student-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9}
+.student-card .name{font-size:.92rem;font-weight:700;color:#111827}
+.student-card .course{font-size:.82rem;color:#6b7280;margin-top:2px}
+.contact-info{font-size:.78rem;color:#6b7280;margin-top:4px}
+.contact-info .material-icons{font-size:.85rem;vertical-align:middle;margin-right:2px}
+.empty{padding:20px;text-align:center;color:#9ca3af;font-size:.9rem}
+/* Small action buttons */
+.inline-btn{display:inline-flex;align-items:center;gap:4px;padding:6px 14px;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;text-decoration:none;color:#0369a1;background:#e0f2fe}
+.inline-btn:hover{background:#bae6fd}
+.inline-btn .material-icons{font-size:.95rem}
+/* Availability setup modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;justify-content:center;align-items:center;padding:20px}
+.modal-overlay.active{display:flex}
+.modal-content{width:800px;max-width:100%;max-height:92vh;overflow-y:auto;background:#fff;border-radius:22px;box-shadow:0 26px 80px rgba(15,23,42,.26)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:24px 26px 14px;border-bottom:1px solid #eef2f7}
+.modal-header h3{margin:0;font-size:1.22rem;color:#111827;display:flex;align-items:center;gap:8px}
+.modal-header h3 .material-icons{color:#0ea5e9}
+.close-btn{border:none;background:none;color:#94a3b8;font-size:1.6rem;cursor:pointer}
+.modal-body{padding:20px 26px 26px}
+.modal-body .hint{font-size:.85rem;color:#6b7280;margin:0 0 14px}
+.modal-footer{display:flex;gap:12px;padding:14px 26px 22px;border-top:1px solid #eef2f7;justify-content:flex-end}
+.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.92rem;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(14,165,233,.18)}
+.btn-primary:hover{opacity:.92}
+.legend{display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap}
+.legend-item{display:inline-flex;align-items:center;gap:6px;font-size:.84rem;color:#6b7280}
+.legend-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
+.swatch-available{background:#bae6fd}
+.swatch-preferred{background:#bbf7d0}
+.pref-toggle{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;cursor:pointer;font-size:.84rem;font-weight:700;color:#374151;user-select:none;margin-bottom:12px}
+.pref-toggle input{width:14px;height:14px;accent-color:#16a34a}
+/* Force setup banner */
+.force-banner{padding:20px 24px;background:#fef3c7;border:1px solid #fde68a;border-radius:16px;margin-bottom:24px;text-align:center}
+.force-banner h3{margin:0 0 6px;font-size:1rem;color:#92400e;display:flex;align-items:center;justify-content:center;gap:6px}
+.force-banner p{margin:0 0 14px;color:#a16207;font-size:.88rem}
+.toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
+.toast.show{display:block}
+@media(max-width:640px){.stats-row{grid-template-columns:1fr 1fr}.nav-grid{grid-template-columns:1fr}.student-list{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+    <div class="page-header">
+        <h1><span class="material-icons">admin_panel_settings</span> 管理面板</h1>
+        <p class="subtitle">欢迎回来，{{ current_user.display_name }}</p>
+    </div>
+
+    <!-- Force availability setup banner -->
+    {% if not has_availability %}
+    <div class="force-banner" id="forceBanner">
+        <h3><span class="material-icons" style="font-size:1.1rem">warning</span> 请先设置您的可用上课时间</h3>
+        <p>系统需要您的时间信息来进行自动排课匹配</p>
+        <button class="btn-primary" onclick="openAvailModal()"><span class="material-icons" style="font-size:1rem">schedule</span> 立即设置</button>
+    </div>
+    {% endif %}
+
+    <div class="stats-row" id="statsRow">
+        <div class="stat-card">
+            <div class="stat-icon icon-blue"><span class="material-icons">people</span></div>
+            <div class="stat-value" id="statUsers">-</div>
+            <div class="stat-label">用户总数</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon icon-amber"><span class="material-icons">pending_actions</span></div>
+            <div class="stat-value" id="statPending">-</div>
+            <div class="stat-label">待处理排课</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon icon-green"><span class="material-icons">check_circle</span></div>
+            <div class="stat-value" id="statConfirmed">-</div>
+            <div class="stat-label">已确认排课</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon icon-purple"><span class="material-icons">event</span></div>
+            <div class="stat-value" id="statWeek">-</div>
+            <div class="stat-label">本周课程</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon icon-rose"><span class="material-icons">school</span></div>
+            <div class="stat-value" id="statStudents">-</div>
+            <div class="stat-label">学生档案</div>
+        </div>
+    </div>
+
+    <div class="nav-grid">
+        <a href="/auth/admin/users" class="nav-card">
+            <div class="nav-icon icon-blue"><span class="material-icons">manage_accounts</span></div>
+            <div class="nav-text"><h3>用户管理</h3><p>管理员工和学生账号</p></div>
+        </a>
+        <a href="/auth/enrollments" class="nav-card">
+            <div class="nav-icon icon-amber"><span class="material-icons">assignment</span></div>
+            <div class="nav-text"><h3>排课管理</h3><p>报名、匹配、确认排课</p></div>
+        </a>
+        <a href="/oa/schedule" class="nav-card">
+            <div class="nav-icon icon-purple"><span class="material-icons">calendar_month</span></div>
+            <div class="nav-text"><h3>排课表</h3><p>查看完整课程日历</p></div>
+        </a>
+        <a href="/oa/todos" class="nav-card">
+            <div class="nav-icon icon-rose"><span class="material-icons">checklist</span></div>
+            <div class="nav-text"><h3>待办事项</h3><p>团队任务管理</p></div>
+        </a>
+        <a href="/oa/painpoints" class="nav-card">
+            <div class="nav-icon" style="background:linear-gradient(135deg,#6366f1,#4f46e5)"><span class="material-icons">feedback</span></div>
+            <div class="nav-text"><h3>痛点提交</h3><p>收集工作流程痛点</p></div>
+        </a>
+    </div>
+
+    <!-- My Schedule Section (Calendar View) -->
+    <div class="section">
+        <h2>
+            <span class="material-icons">event</span> 我的课表
+            <span style="flex:1"></span>
+            <button class="inline-btn" onclick="openAvailModal()"><span class="material-icons">schedule</span> 我的时间设置</button>
+        </h2>
+        <div id="myCalendar"></div>
+    </div>
+
+    <!-- Leave Requests -->
+    <div class="section">
+        <h2><span class="material-icons">event_busy</span> 请假审批</h2>
+        <div class="card">
+            <div id="leaveList"><div class="empty">加载中...</div></div>
+        </div>
+    </div>
+
+    <!-- My Students -->
+    <div class="section">
+        <h2><span class="material-icons">groups</span> 我的学生</h2>
+        <div class="card">
+            <div class="student-list" id="studentList"><div class="empty">加载中...</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- Availability Setup Modal -->
+<div id="availModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><span class="material-icons">schedule</span> 我的可用时间设置</h3>
+            <button class="close-btn" onclick="closeAvailModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="hint">点击格子选择您每周可以上课的时间段。切换「偏好时段」模式可标记您更偏好的时间。</p>
+            <label class="pref-toggle">
+                <input type="checkbox" id="prefMode" onchange="togglePrefMode()">
+                偏好时段模式
+            </label>
+            <div class="legend">
+                <span class="legend-item"><span class="legend-swatch swatch-available"></span> 可用时段</span>
+                <span class="legend-item"><span class="legend-swatch swatch-preferred"></span> 偏好时段</span>
+            </div>
+            <div id="availGridContainer"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-primary" onclick="saveMyAvailability()"><span class="material-icons" style="font-size:1rem">save</span> 保存</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/time-grid.js') }}"></script>
+<script src="{{ url_for('static', filename='js/week-calendar.js') }}"></script>
+<script>
+const MY_ID = {{ current_user.id }};
+let progressMap = {};
+let availGrid = null;
+let calendar = null;
+
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+/* ========== Stats ========== */
+async function loadStats(){
+    try{
+        const res = await fetch('/auth/api/admin/stats');
+        const json = await res.json();
+        if(json.success){
+            const d = json.data;
+            document.getElementById('statUsers').textContent = d.total_users;
+            document.getElementById('statPending').textContent = d.pending_enrollments;
+            document.getElementById('statConfirmed').textContent = d.confirmed_enrollments;
+            document.getElementById('statWeek').textContent = d.week_courses;
+            document.getElementById('statStudents').textContent = d.active_students;
+        }
+    }catch(e){}
+}
+
+/* ========== Progress + Calendar ========== */
+async function loadProgress(){
+    try{
+        const res = await fetch('/auth/api/enrollments/progress');
+        const json = await res.json();
+        if(json.success && json.data) progressMap = json.data;
+    }catch(e){}
+}
+
+async function loadStudents(){
+    try{
+        const res = await fetch('/auth/api/teacher/my-schedule?range=all');
+        const json = await res.json();
+        if(!json.success) return;
+        const stl = document.getElementById('studentList');
+        const d = json.data;
+        if(d.students && d.students.length > 0){
+            stl.innerHTML = d.students.map(s=>{
+                let contactHtml = '';
+                if(s.phone) contactHtml += `<div class="contact-info"><span class="material-icons">phone</span> ${s.phone}</div>`;
+                return `<div class="student-card"><div class="name">${s.name}</div><div class="course">${s.course} · ${s.status === 'confirmed' ? '已确认' : s.status === 'active' ? '进行中' : s.status}</div>${contactHtml}</div>`;
+            }).join('');
+        } else {
+            stl.innerHTML = '<div class="empty">暂无学生</div>';
+        }
+    }catch(e){}
+}
+
+/* ========== Leave Requests ========== */
+async function loadLeaveRequests(){
+    try{
+        const res = await fetch('/auth/api/leave-requests');
+        const json = await res.json();
+        const ll = document.getElementById('leaveList');
+        if(!json.success || !json.data || json.data.length === 0){
+            ll.innerHTML = '<div class="empty">暂无请假申请</div>';
+            return;
+        }
+        ll.innerHTML = json.data.map(r=>{
+            const actions = r.status === 'pending' ? `
+                <div class="leave-actions">
+                    <button class="approve-btn" onclick="handleLeave(${r.id},'approve')">批准</button>
+                    <button class="reject-btn" onclick="handleLeave(${r.id},'reject')">驳回</button>
+                </div>` : `<span style="font-size:.82rem;color:${r.status==='approved'?'#166534':'#991b1b'}">${r.status==='approved'?'已批准':'已驳回'}</span>`;
+            return `
+            <div class="leave-card">
+                <div class="leave-info">
+                    <div class="leave-student">${r.student_name||'学生'}</div>
+                    <div class="leave-detail">${r.course_name||''} · ${r.date||''} · 原因：${r.reason||'无'}</div>
+                </div>
+                ${actions}
+            </div>`;
+        }).join('');
+    }catch(e){}
+}
+
+async function handleLeave(id, action){
+    try{
+        const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, {method:'PUT'});
+        const json = await res.json();
+        if(json.success) loadLeaveRequests();
+        else alert(json.error || '操作失败');
+    }catch(e){alert('网络错误');}
+}
+
+/* ========== Availability Modal ========== */
+function openAvailModal(){
+    document.getElementById('availModal').classList.add('active');
+    if(!availGrid){
+        availGrid = new TimeGrid(document.getElementById('availGridContainer'), {
+            startHour: 8, endHour: 22, slotMinutes: 60, mode: 'available'
+        });
+    }
+    loadMyAvailability();
+}
+
+function closeAvailModal(){
+    document.getElementById('availModal').classList.remove('active');
+}
+
+function togglePrefMode(){
+    const checked = document.getElementById('prefMode').checked;
+    if(availGrid) availGrid.setMode(checked ? 'preferred' : 'available');
+}
+
+async function loadMyAvailability(){
+    try{
+        const res = await fetch(`/auth/api/teacher/${MY_ID}/availability`);
+        const json = await res.json();
+        if(json.success && availGrid){
+            availGrid.clear();
+            if(json.data.available) availGrid.setSlots(json.data.available, 'available');
+            if(json.data.preferred) availGrid.setSlots(json.data.preferred, 'preferred');
+        }
+    }catch(e){}
+}
+
+async function saveMyAvailability(){
+    if(!availGrid) return;
+    const data = {
+        available: availGrid.getSlots('available'),
+        preferred: availGrid.getSlots('preferred')
+    };
+    if(!data.available.length && !data.preferred.length){
+        showToast('请至少选择一个可用时段');
+        return;
+    }
+    try{
+        const res = await fetch(`/auth/api/teacher/${MY_ID}/availability`,{
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+        });
+        const json = await res.json();
+        if(json.success){
+            showToast('时间设置已保存');
+            closeAvailModal();
+            const banner = document.getElementById('forceBanner');
+            if(banner) banner.style.display = 'none';
+        } else showToast(json.error||'保存失败');
+    }catch(e){showToast('保存失败');}
+}
+
+/* ========== Init ========== */
+document.addEventListener('DOMContentLoaded', async function(){
+    loadStats();
+    await loadProgress();
+
+    // Calendar view
+    calendar = new WeekCalendar(document.getElementById('myCalendar'), {
+        progressMap: progressMap,
+        teacherFilter: '{{ current_user.display_name }}'
+    });
+    calendar.setProgressMap(progressMap);
+    await calendar.render();
+
+    loadStudents();
+    loadLeaveRequests();
+
+    {% if not has_availability %}
+    openAvailModal();
+    {% endif %}
+});
+</script>
+{% endblock %}

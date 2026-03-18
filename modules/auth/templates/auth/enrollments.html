@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}排课管理 - OA系统{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:1080px;margin:0 auto;padding:28px 20px 40px}
+.back-link{display:inline-flex;align-items:center;gap:4px;color:#6b7280;text-decoration:none;font-size:.88rem;margin-bottom:14px}
+.back-link:hover{color:#0ea5e9}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px;flex-wrap:wrap}
+.page-header h1{margin:0;display:flex;align-items:center;gap:10px;font-size:1.8rem;color:#111827}
+.page-header h1 .material-icons{color:#0ea5e9}
+.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.92rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(14,165,233,.18)}
+.btn-primary:hover{opacity:.92}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px}
+.filter-tab{padding:10px 16px;border:1px solid #dbe3f0;border-radius:999px;background:#fff;color:#6b7280;cursor:pointer;font-size:.88rem;font-weight:600}
+.filter-tab.active{background:#eff6ff;border-color:#7dd3fc;color:#0369a1;font-weight:700}
+.filter-count{margin-left:6px;padding:2px 7px;border-radius:999px;background:rgba(148,163,184,.18);font-size:.76rem}
+.enrollment-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.enrollment-card{padding:20px;background:#fff;border:1px solid #e5e7eb;border-radius:18px;box-shadow:0 8px 20px rgba(15,23,42,.04);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.enrollment-card:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(15,23,42,.08)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.card-student{font-size:1.1rem;font-weight:800;color:#111827;margin:0}
+.card-course{font-size:.88rem;color:#6b7280;margin:4px 0 0}
+.status-badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:.76rem;font-weight:700}
+.status-pending_info{background:#fef3c7;color:#92400e}
+.status-pending_schedule{background:#dbeafe;color:#1d4ed8}
+.status-pending_student_confirm{background:#fff7ed;color:#c2410c}
+.status-confirmed{background:#dcfce7;color:#166534}
+.status-active{background:#f3e8ff;color:#7c3aed}
+.card-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;font-size:.82rem;color:#6b7280}
+.card-meta span{display:inline-flex;align-items:center;gap:4px}
+.card-meta .material-icons{font-size:.95rem}
+.intake-link-box{margin-top:14px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;display:flex;align-items:center;gap:8px}
+.intake-link-box input{flex:1;border:none;background:none;font-size:.84rem;color:#334155;outline:none}
+.copy-btn{padding:6px 10px;border:none;border-radius:8px;background:#0ea5e9;color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.copy-btn:hover{opacity:.85}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1000;justify-content:center;align-items:center;padding:20px}
+.modal-overlay.active{display:flex}
+.modal-content{width:560px;max-width:100%;max-height:92vh;overflow-y:auto;background:#fff;border-radius:22px;box-shadow:0 26px 80px rgba(15,23,42,.26)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:24px 26px 14px;border-bottom:1px solid #eef2f7}
+.modal-header h3{margin:0;font-size:1.22rem;color:#111827}
+.close-btn{border:none;background:none;color:#94a3b8;font-size:1.6rem;cursor:pointer}
+.modal-body{padding:20px 26px 26px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;margin-bottom:6px;color:#374151;font-size:.85rem;font-weight:800}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:11px 13px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;box-sizing:border-box}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.modal-actions{display:flex;gap:12px;margin-top:20px}
+.modal-actions .btn-primary{flex:1;justify-content:center}
+.empty-msg{text-align:center;padding:54px 20px;border:1px dashed #cbd5e1;border-radius:18px;background:#f8fafc;color:#94a3b8}
+.toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
+.toast.show{display:block}
+@media(max-width:640px){.oa-page{padding-inline:14px}.page-header{flex-direction:column}.enrollment-grid{grid-template-columns:1fr}.form-row{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+  <a href="/oa/" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回 OA</a>
+  <div class="page-header">
+    <h1><span class="material-icons">school</span> 排课管理</h1>
+    <button class="btn-primary" onclick="openEnrollModal()"><span class="material-icons" style="font-size:1.1rem;">add</span> 新建报名</button>
+  </div>
+
+  <div class="filters" id="filterTabs">
+    <button class="filter-tab active" data-filter="all">全部 <span class="filter-count" id="countAll">0</span></button>
+    <button class="filter-tab" data-filter="pending_info">待填表 <span class="filter-count" id="countPendingInfo">0</span></button>
+    <button class="filter-tab" data-filter="pending_schedule">待排课 <span class="filter-count" id="countPendingSchedule">0</span></button>
+    <button class="filter-tab" data-filter="pending_student_confirm">待学生确认 <span class="filter-count" id="countPendingStudent">0</span></button>
+    <button class="filter-tab" data-filter="confirmed">已确认 <span class="filter-count" id="countConfirmed">0</span></button>
+    <button class="filter-tab" data-filter="active">进行中 <span class="filter-count" id="countActive">0</span></button>
+  </div>
+
+  <div id="enrollmentList" class="enrollment-grid">
+    <div class="empty-msg">加载中...</div>
+  </div>
+</div>
+
+<div id="enrollModal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-header"><h3>新建报名</h3><button class="close-btn" onclick="closeEnrollModal()">&times;</button></div>
+    <div class="modal-body">
+      <form id="enrollForm" onsubmit="saveEnrollment(event)">
+        <div class="form-group"><label>学生姓名</label><input type="text" id="formStudentName" required placeholder="学生姓名（学生端可修改）"></div>
+        <div class="form-group"><label>课程名称</label><input type="text" id="formCourseName" required placeholder="例如：Python入门"></div>
+        <div class="form-group"><label>授课教师</label>
+          <select id="formTeacherId" required>
+            <option value="">-- 选择教师 --</option>
+            {% for t in teachers %}
+            <option value="{{ t.id }}">{{ t.display_name or t.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group"><label>课时数量（小时）</label><input type="number" id="formTotalHours" required min="1" placeholder="例如：20"></div>
+        <div class="form-group"><label>备注</label><textarea id="formNotes" rows="2" placeholder="选填"></textarea></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn-primary"><span class="material-icons" style="font-size:1rem;">save</span> 创建报名</button>
+        </div>
+      </form>
+      <div id="intakeLinkResult" style="display:none;">
+        <hr style="margin:20px 0;border:none;border-top:1px solid #e5e7eb">
+        <p style="font-size:.88rem;color:#374151;font-weight:700;margin:0 0 8px">学生信息登记链接：</p>
+        <div class="intake-link-box">
+          <input type="text" id="intakeLinkInput" readonly>
+          <button class="copy-btn" onclick="copyIntakeLink()">复制链接</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+{% block extra_js %}
+<script>
+const STATUS_META={
+  pending_info:{label:'待填表',cls:'status-pending_info'},
+  pending_schedule:{label:'待排课',cls:'status-pending_schedule'},
+  pending_student_confirm:{label:'待学生确认',cls:'status-pending_student_confirm'},
+  confirmed:{label:'已确认',cls:'status-confirmed'},
+  active:{label:'进行中',cls:'status-active'}
+};
+let allEnrollments=[], currentFilter='all';
+
+function escapeHtml(v){if(!v)return'';const d=document.createElement('div');d.textContent=v;return d.innerHTML;}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+document.getElementById('filterTabs').addEventListener('click',e=>{
+  const tab=e.target.closest('.filter-tab');
+  if(!tab)return;
+  document.querySelectorAll('.filter-tab').forEach(x=>x.classList.remove('active'));
+  tab.classList.add('active');
+  currentFilter=tab.dataset.filter;
+  renderEnrollments();
+});
+
+function updateCounts(){
+  document.getElementById('countAll').textContent=allEnrollments.length;
+  document.getElementById('countPendingInfo').textContent=allEnrollments.filter(e=>e.status==='pending_info').length;
+  document.getElementById('countPendingSchedule').textContent=allEnrollments.filter(e=>e.status==='pending_schedule').length;
+  document.getElementById('countPendingStudent').textContent=allEnrollments.filter(e=>e.status==='pending_student_confirm').length;
+  document.getElementById('countConfirmed').textContent=allEnrollments.filter(e=>e.status==='confirmed').length;
+  document.getElementById('countActive').textContent=allEnrollments.filter(e=>e.status==='active').length;
+}
+
+function renderEnrollments(){
+  const box=document.getElementById('enrollmentList');
+  let filtered=allEnrollments;
+  if(currentFilter!=='all') filtered=allEnrollments.filter(e=>e.status===currentFilter);
+  if(!filtered.length){box.innerHTML=`<div class="empty-msg">暂无${currentFilter==='all'?'':'此状态的'}报名记录</div>`;return;}
+  box.innerHTML=filtered.map(e=>{
+    const s=STATUS_META[e.status]||STATUS_META.pending_info;
+    return `<div class="enrollment-card" onclick="location.href='/auth/enrollments/${e.id}'">
+      <div class="card-top">
+        <div>
+          <h3 class="card-student">${escapeHtml(e.student_name)}</h3>
+          <p class="card-course">${escapeHtml(e.course_name)}</p>
+        </div>
+        <span class="status-badge ${s.cls}">${s.label}</span>
+      </div>
+      <div class="card-meta">
+        ${e.teacher_name?`<span><span class="material-icons">person</span>${escapeHtml(e.teacher_name)}</span>`:''}
+        <span><span class="material-icons">timer</span>${e.total_hours||0}课时</span>
+        <span><span class="material-icons">event</span>${escapeHtml(e.created_at||'')}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadEnrollments(){
+  try{
+    const res=await fetch('/auth/api/enrollments');
+    const json=await res.json();
+    if(json.success){allEnrollments=json.data;updateCounts();renderEnrollments();}
+    else showToast(json.error||'加载失败');
+  }catch(e){showToast('加载报名失败');}
+}
+
+function openEnrollModal(){
+  document.getElementById('enrollForm').reset();
+  document.getElementById('intakeLinkResult').style.display='none';
+  document.getElementById('enrollModal').classList.add('active');
+}
+function closeEnrollModal(){document.getElementById('enrollModal').classList.remove('active');}
+
+async function saveEnrollment(ev){
+  ev.preventDefault();
+  const data={
+    student_name:document.getElementById('formStudentName').value.trim(),
+    course_name:document.getElementById('formCourseName').value.trim(),
+    teacher_id:document.getElementById('formTeacherId').value||null,
+    total_hours:parseInt(document.getElementById('formTotalHours').value)||0,
+    notes:document.getElementById('formNotes').value.trim()
+  };
+  try{
+    const res=await fetch('/auth/api/enrollments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const json=await res.json();
+    if(json.success){
+      showToast('报名已创建');
+      loadEnrollments();
+      if(json.data&&json.data.intake_url){
+        const linkInput=document.getElementById('intakeLinkInput');
+        linkInput.value=location.origin+json.data.intake_url;
+        document.getElementById('intakeLinkResult').style.display='block';
+      }
+    }else showToast(json.error||'创建失败');
+  }catch(e){showToast('创建失败');}
+}
+
+function copyIntakeLink(){
+  const input=document.getElementById('intakeLinkInput');
+  input.select();
+  navigator.clipboard.writeText(input.value).then(()=>showToast('链接已复制')).catch(()=>{document.execCommand('copy');showToast('链接已复制');});
+}
+
+document.addEventListener('DOMContentLoaded',loadEnrollments);
+</script>
+{% endblock %}

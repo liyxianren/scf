@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}登录 - SCF Hub{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.login-page{min-height:80vh;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+.login-card{width:400px;max-width:100%;padding:40px 36px;background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12);border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.login-card h1{margin:0 0 8px;font-size:1.6rem;color:#111827;text-align:center}
+.login-card .subtitle{margin:0 0 28px;color:#6b7280;font-size:.9rem;text-align:center}
+.form-group{margin-bottom:18px}
+.form-group label{display:block;margin-bottom:6px;color:#374151;font-size:.88rem;font-weight:700}
+.form-group input{width:100%;padding:12px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.95rem;box-sizing:border-box;background:#fff;transition:border-color .2s,box-shadow .2s}
+.form-group input:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
+.login-btn{width:100%;padding:13px;border:none;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:1rem;font-weight:700;cursor:pointer;margin-top:6px;transition:opacity .2s,box-shadow .2s;box-shadow:0 8px 20px rgba(14,165,233,.25)}
+.login-btn:hover{opacity:.92;box-shadow:0 12px 28px rgba(14,165,233,.35)}
+.error-msg{margin-bottom:16px;padding:10px 14px;border-radius:10px;background:#fee2e2;color:#991b1b;font-size:.88rem;display:none;text-align:center}
+.error-msg.show{display:block}
+</style>
+{% endblock %}
+{% block content %}
+<div class="login-page">
+  <div class="login-card">
+    <h1>SCF Hub</h1>
+    <p class="subtitle">内部系统登录</p>
+    <div class="error-msg" id="errorMsg">{{ error or '' }}</div>
+    <form method="POST" action="/auth/login" id="loginForm">
+      <div class="form-group">
+        <label>用户名</label>
+        <input type="text" name="username" id="username" required placeholder="请输入用户名" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <input type="password" name="password" id="password" required placeholder="请输入密码" autocomplete="current-password">
+      </div>
+      <button type="submit" class="login-btn">登录</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function(){
+  const err = document.getElementById('errorMsg');
+  if(err && err.textContent.trim()) err.classList.add('show');
+  document.getElementById('loginForm').addEventListener('submit', function(){
+    const btn = this.querySelector('.login-btn');
+    btn.textContent = '登录中...';
+    btn.disabled = true;
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}我的课表 - 学生面板{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:900px;margin:0 auto;padding:28px 20px 40px}
+.page-header{margin-bottom:28px}
+.page-header h1{margin:0;font-size:1.8rem;color:#111827;display:flex;align-items:center;gap:10px}
+.page-header h1 .material-icons{color:#0ea5e9}
+.page-header .subtitle{margin:6px 0 0;color:#6b7280;font-size:.95rem}
+.section{margin-bottom:24px}
+.section h2{margin:0 0 14px;font-size:1.1rem;color:#111827;display:flex;align-items:center;gap:8px}
+.section h2 .material-icons{color:#0ea5e9;font-size:1.2rem}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.info-item{padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9}
+.info-item .label{font-size:.78rem;font-weight:700;color:#6b7280;margin-bottom:4px}
+.info-item .value{font-size:.95rem;color:#111827;font-weight:600}
+.leave-section .leave-item{padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:8px}
+.leave-status{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.72rem;font-weight:700}
+.leave-status.pending{background:#fef3c7;color:#92400e}
+.leave-status.approved{background:#dcfce7;color:#166534}
+.leave-status.rejected{background:#fee2e2;color:#991b1b}
+.enrollment-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:10px}
+.enrollment-card .course-name{font-size:.95rem;font-weight:700;color:#111827}
+.enrollment-card .details{font-size:.82rem;color:#6b7280;margin-top:4px}
+.status-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.78rem;font-weight:700}
+.status-confirmed{background:#dcfce7;color:#166534}
+.status-active{background:#f3e8ff;color:#7c3aed}
+.status-pending_student_confirm{background:#fef3c7;color:#92400e}
+.confirm-preview{margin-top:12px;padding:14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px}
+.confirm-preview .preview-title{font-size:.85rem;font-weight:700;color:#0369a1;margin-bottom:8px}
+.confirm-preview .preview-detail{font-size:.88rem;color:#374151}
+.confirm-preview .preview-range{font-size:.82rem;color:#6b7280;margin-top:4px}
+.confirm-btns{margin-top:12px;display:flex;gap:10px}
+.confirm-btns button{flex:1;padding:10px;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-size:.88rem}
+.btn-confirm{background:linear-gradient(135deg,#10b981,#059669);color:#fff}
+.btn-confirm:hover{opacity:.9}
+.btn-reject{background:#fee2e2;color:#991b1b}
+.btn-reject:hover{background:#fecaca}
+.empty{padding:20px;text-align:center;color:#9ca3af;font-size:.9rem}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+    <div class="page-header">
+        <h1><span class="material-icons">school</span> 我的课表</h1>
+        <p class="subtitle">{{ current_user.display_name }}，欢迎</p>
+    </div>
+
+    <div class="section" id="profileSection" style="display:none">
+        <h2><span class="material-icons">person</span> 我的信息</h2>
+        <div class="card">
+            <div class="info-grid" id="profileGrid"></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><span class="material-icons">menu_book</span> 我的课程</h2>
+        <div class="card" id="enrollmentCard">
+            <div class="empty">加载中...</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><span class="material-icons">event</span> 课表</h2>
+        <div id="myCalendar"></div>
+    </div>
+
+    <div class="section leave-section">
+        <h2><span class="material-icons">event_busy</span> 我的请假</h2>
+        <div class="card">
+            <div id="leaveList">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/week-calendar.js') }}"></script>
+<script>
+const STUDENT_NAME = '{{ current_user.display_name }}';
+let progressMap = {};
+let calendar = null;
+
+document.addEventListener('DOMContentLoaded', async function(){
+    await loadProgress();
+    await loadStudentData();
+    await loadLeaveRequests();
+
+    // Calendar view - filter by student name in courses
+    calendar = new WeekCalendar(document.getElementById('myCalendar'), {
+        progressMap: progressMap,
+        emptyText: '等待老师排课中，请耐心等待',
+    });
+    // Override data loading to filter by student
+    const origLoad = calendar._loadData.bind(calendar);
+    calendar._loadData = async function() {
+        await origLoad();
+        this.scheduleData = this.scheduleData.filter(s => s.students && s.students.includes(STUDENT_NAME));
+    };
+    calendar.setProgressMap(progressMap);
+    await calendar.render();
+});
+
+async function loadProgress(){
+    try{
+        const res = await fetch('/auth/api/enrollments/progress');
+        const json = await res.json();
+        if(json.success && json.data) progressMap = json.data;
+    }catch(e){console.error(e);}
+}
+
+async function loadStudentData(){
+    try{
+        const res = await fetch('/auth/api/student/my-info');
+        const json = await res.json();
+        if(!json.success) return;
+        const d = json.data;
+
+        // Profile
+        if(d.profile){
+            const ps = document.getElementById('profileSection');
+            ps.style.display = '';
+            const pg = document.getElementById('profileGrid');
+            const p = d.profile;
+            pg.innerHTML = `
+                <div class="info-item"><div class="label">姓名</div><div class="value">${p.name||'-'}</div></div>
+                <div class="info-item"><div class="label">电话</div><div class="value">${p.phone||'-'}</div></div>
+            `;
+        }
+
+        // Enrollments
+        const ec = document.getElementById('enrollmentCard');
+        const statusLabels = {confirmed:'已确认', active:'进行中', pending_student_confirm:'待您确认',
+                              pending_info:'待填表', pending_schedule:'待排课'};
+        if(d.enrollments && d.enrollments.length > 0){
+            ec.innerHTML = d.enrollments.map(e=>{
+                const label = statusLabels[e.status] || e.status;
+                let extra = '';
+                if(e.status === 'pending_student_confirm' && e.confirmed_slot){
+                    const s = e.confirmed_slot;
+                    const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
+                    const dayName = dayNames[s.day_of_week] || '';
+                    const dates = s.dates || [];
+                    extra = `
+                    <div class="confirm-preview">
+                        <div class="preview-title">待确认的排课方案</div>
+                        <div class="preview-detail">每${dayName} ${s.time_start}-${s.time_end} · 共 ${dates.length} 节</div>
+                        <div class="preview-range">${dates.length ? dates[0]+' 至 '+dates[dates.length-1] : ''}</div>
+                        <div class="confirm-btns">
+                            <button class="btn-confirm" onclick="confirmSchedule(${e.id})">确认排课</button>
+                            <button class="btn-reject" onclick="rejectSchedule(${e.id})">有问题</button>
+                        </div>
+                    </div>`;
+                }
+                return `
+                <div class="enrollment-card">
+                    <div class="course-name">${e.course_name}</div>
+                    <div class="details">
+                        老师：${e.teacher_name} · 总课时：${e.total_hours||'-'}小时
+                        <span class="status-badge status-${e.status}">${label}</span>
+                    </div>
+                    ${extra}
+                </div>`;
+            }).join('');
+        } else {
+            ec.innerHTML = '<div class="empty">暂无课程</div>';
+        }
+    }catch(e){console.error(e);}
+}
+
+async function confirmSchedule(enrollmentId){
+    if(!confirm('确认此排课方案？确认后将生成正式课表。')) return;
+    try{
+        const res = await fetch(`/auth/api/enrollments/${enrollmentId}/student-confirm`,{
+            method:'POST', headers:{'Content-Type':'application/json'}});
+        const json = await res.json();
+        if(json.success){ alert('排课已确认！'); location.reload(); }
+        else alert(json.error||'确认失败');
+    }catch(e){alert('网络错误');}
+}
+
+async function rejectSchedule(enrollmentId){
+    const msg = prompt('请描述您的问题或疑虑：');
+    if(msg === null) return;
+    try{
+        const res = await fetch(`/auth/api/enrollments/${enrollmentId}/student-reject`,{
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({message: msg||'学生对排课方案有疑问'})});
+        const json = await res.json();
+        if(json.success) alert('已发送消息给老师，请在聊天中沟通。');
+        else alert(json.error||'发送失败');
+    }catch(e){alert('网络错误');}
+}
+
+async function requestLeave(scheduleId, courseName, date){
+    const reason = prompt(`请输入请假原因（${courseName} ${date}）：`);
+    if(!reason) return;
+    try{
+        const res = await fetch('/auth/api/leave-requests', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({schedule_id: scheduleId, reason: reason})
+        });
+        const json = await res.json();
+        if(json.success){
+            alert('请假申请已提交');
+            loadLeaveRequests();
+        } else {
+            alert(json.error || '提交失败');
+        }
+    }catch(e){alert('网络错误');}
+}
+
+async function loadLeaveRequests(){
+    try{
+        const res = await fetch('/auth/api/leave-requests');
+        const json = await res.json();
+        const ll = document.getElementById('leaveList');
+        if(!json.success || !json.data || json.data.length === 0){
+            ll.innerHTML = '<div class="empty">暂无请假记录</div>';
+            return;
+        }
+        const statusMap = {pending:'待审批',approved:'已批准',rejected:'已驳回'};
+        ll.innerHTML = json.data.map(r=>`
+            <div class="leave-item">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                    <div>
+                        <span style="font-weight:700;color:#111827;font-size:.9rem">${r.course_name||''}</span>
+                        <span style="font-size:.82rem;color:#6b7280;margin-left:8px">${r.date||''}</span>
+                    </div>
+                    <span class="leave-status ${r.status}">${statusMap[r.status]||r.status}</span>
+                </div>
+                <div style="font-size:.82rem;color:#6b7280;margin-top:4px">原因：${r.reason||'无'}</div>
+            </div>
+        `).join('');
+    }catch(e){console.error(e);}
+}
+</script>
+{% endblock %}

@@ -1,0 +1,624 @@
+{% extends "base.html" %}
+{% block title %}痛点提交 - OA 系统{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+    .pp-page { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
+    .pp-header { margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between; }
+    .pp-header h1 { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; margin: 0; }
+    .pp-header .back-link {
+        display: inline-flex; align-items: center; gap: 4px;
+        color: #6b7280; text-decoration: none; font-size: 0.9rem;
+    }
+    .pp-header .back-link:hover { color: #2563eb; }
+
+    .pp-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+    /* ---- Chat section ---- */
+    .pp-chat-section {
+        background: white; border-radius: 14px; border: 1px solid #e5e7eb;
+        display: flex; flex-direction: column; height: 680px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .pp-chat-header {
+        padding: 16px 20px; border-bottom: 1px solid #f0f0f0;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .pp-chat-header .material-icons { color: #8b5cf6; font-size: 1.4rem; }
+    .pp-chat-header h3 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+
+    .pp-name-bar {
+        padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
+        display: flex; align-items: center; gap: 10px; background: #fafbfc;
+    }
+    .pp-name-bar label { font-size: 0.85rem; color: #6b7280; white-space: nowrap; }
+    .pp-name-bar select {
+        flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+        font-size: 0.88rem; background: white;
+    }
+
+    .pp-messages {
+        flex: 1; overflow-y: auto; padding: 16px 20px;
+        display: flex; flex-direction: column; gap: 12px;
+    }
+    .pp-msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 0.9rem; line-height: 1.6; }
+    .pp-msg.user { align-self: flex-end; background: #2563eb; color: white; border-bottom-right-radius: 4px; }
+    .pp-msg.assistant { align-self: flex-start; background: #f3f4f6; color: #1a1a2e; border-bottom-left-radius: 4px; }
+    .pp-msg.assistant .report-block {
+        background: white; border: 1px solid #e5e7eb; border-radius: 8px;
+        padding: 12px; margin-top: 8px;
+    }
+    .pp-msg.system { align-self: center; color: #9ca3af; font-size: 0.82rem; }
+
+    .pp-welcome {
+        text-align: center; color: #9ca3af; padding: 40px 20px;
+        display: flex; flex-direction: column; align-items: center; gap: 12px;
+    }
+    .pp-welcome .material-icons { font-size: 2.8rem; color: #d1d5db; }
+    .pp-welcome p { margin: 0; font-size: 0.88rem; }
+    .pp-welcome .hints { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+    .pp-welcome .hint-btn {
+        padding: 6px 14px; background: #f3f4f6; border: 1px solid #e5e7eb;
+        border-radius: 20px; font-size: 0.8rem; color: #4b5563; cursor: pointer;
+        transition: all 0.15s;
+    }
+    .pp-welcome .hint-btn:hover { background: #e0e7ff; border-color: #818cf8; color: #4338ca; }
+
+    .pp-input-area {
+        padding: 12px 16px; border-top: 1px solid #f0f0f0;
+        display: flex; gap: 8px; align-items: flex-end;
+    }
+    .pp-input-area textarea {
+        flex: 1; resize: none; border: 1px solid #d1d5db; border-radius: 10px;
+        padding: 10px 14px; font-size: 0.9rem; min-height: 42px; max-height: 200px;
+        line-height: 1.4; font-family: inherit; overflow-y: auto;
+    }
+    .pp-input-area textarea:focus { outline: none; border-color: #818cf8; }
+    .pp-send-btn {
+        width: 42px; height: 42px; border-radius: 10px; border: none;
+        background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: opacity 0.15s;
+    }
+    .pp-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .pp-send-btn .material-icons { font-size: 1.2rem; }
+
+
+    /* ---- History section ---- */
+    .pp-history-section { display: flex; flex-direction: column; gap: 16px; }
+    .pp-history-header {
+        display: flex; align-items: center; justify-content: space-between;
+    }
+    .pp-history-header h3 { font-size: 1.05rem; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 6px; }
+    .pp-history-header h3 .material-icons { font-size: 1.2rem; color: #8b5cf6; }
+
+    .pp-filter-tabs { display: flex; gap: 6px; }
+    .pp-filter-tabs .tab {
+        padding: 4px 12px; border-radius: 16px; border: 1px solid #e5e7eb;
+        font-size: 0.78rem; cursor: pointer; background: white; color: #6b7280;
+        transition: all 0.15s;
+    }
+    .pp-filter-tabs .tab.active { background: #8b5cf6; color: white; border-color: #8b5cf6; }
+
+    .pp-card {
+        background: white; border-radius: 12px; border: 1px solid #e5e7eb;
+        overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .pp-card-header {
+        padding: 14px 18px; cursor: pointer; display: flex; align-items: center; gap: 12px;
+        transition: background 0.15s;
+    }
+    .pp-card-header:hover { background: #fafbfc; }
+    .pp-card-header .status-dot {
+        width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-new { background: #f59e0b; }
+    .status-resolved { background: #10b981; }
+    .status-rejected { background: #ef4444; }
+    .pp-card-header .card-info { flex: 1; min-width: 0; }
+    .pp-card-header .card-title { font-weight: 600; font-size: 0.92rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pp-card-header .card-meta { font-size: 0.78rem; color: #9ca3af; margin-top: 2px; }
+    .pp-card-header .expand-icon { color: #9ca3af; transition: transform 0.2s; }
+    .pp-card.expanded .expand-icon { transform: rotate(180deg); }
+
+    .pp-card-body { display: none; padding: 0 18px 16px; max-height: 400px; overflow-y: auto; }
+    .pp-card.expanded .pp-card-body { display: block; }
+    .pp-card-body .section-label { font-size: 0.78rem; color: #8b5cf6; font-weight: 600; margin: 12px 0 6px; text-transform: uppercase; }
+    .pp-card-body .problem-text { font-size: 0.88rem; color: #374151; line-height: 1.6; }
+    .pp-card-body .summary-text {
+        font-size: 0.88rem; color: #374151; line-height: 1.7;
+        background: #faf5ff; border-radius: 8px; padding: 12px; margin-top: 4px;
+    }
+    .pp-card-body .summary-text h2 { font-size: 1rem; font-weight: 700; margin: 10px 0 4px; color: #4338ca; }
+    .pp-card-body .summary-text h3 { font-size: 0.92rem; font-weight: 600; margin: 8px 0 4px; color: #6b7280; }
+    .pp-card-body .summary-text ul, .pp-card-body .summary-text ol { padding-left: 18px; margin: 4px 0; }
+    .pp-card-body .summary-text li { margin-bottom: 2px; }
+    .pp-card-body .summary-text strong { color: #1e1b4b; }
+    .pp-card-body .summary-text hr { border: none; border-top: 1px solid #e5e7eb; margin: 8px 0; }
+    .pp-card-body .conv-list { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+    .pp-card-body .conv-item { font-size: 0.82rem; line-height: 1.5; }
+    .pp-card-body .conv-item .role { font-weight: 600; color: #6b7280; }
+    .pp-card-actions {
+        display: flex; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f0f0f0;
+        align-items: center;
+    }
+    .pp-card-actions .act-btn {
+        padding: 5px 14px; border-radius: 6px; border: none;
+        font-size: 0.8rem; cursor: pointer; font-weight: 500;
+    }
+    .pp-card-actions .act-approve { background: #ecfdf5; color: #059669; }
+    .pp-card-actions .act-approve:hover { background: #d1fae5; }
+    .pp-card-actions .act-reject { background: #fef2f2; color: #dc2626; }
+    .pp-card-actions .act-reject:hover { background: #fee2e2; }
+    .pp-card-actions .act-delete {
+        margin-left: auto; padding: 5px 14px; border-radius: 6px; border: 1px solid #e5e7eb;
+        font-size: 0.8rem; cursor: pointer; background: white; color: #6b7280;
+    }
+    .pp-card-actions .act-delete:hover { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+
+    .pp-empty { text-align: center; color: #9ca3af; padding: 60px 20px; font-size: 0.9rem; }
+    .pp-history-list { display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 160px); overflow-y: auto; }
+
+    .pp-toast {
+        position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+        background: #1a1a2e; color: white; padding: 10px 24px; border-radius: 8px;
+        font-size: 0.88rem; display: none; z-index: 999; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .pp-toast.show { display: block; animation: fadeInUp 0.3s; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+    @media (max-width: 900px) {
+        .pp-layout { grid-template-columns: 1fr; }
+        .pp-chat-section { height: 560px; }
+    }
+
+    /* Report confirm card */
+    .report-confirm-card {
+        display: flex; align-items: center; gap: 12px;
+        background: linear-gradient(135deg, #faf5ff, #eef2ff); border: 1px solid #e9d5ff;
+        border-radius: 12px; padding: 14px 18px; margin-top: 8px; max-width: 85%;
+    }
+    .confirm-btn-primary {
+        padding: 7px 18px; border-radius: 8px; border: none;
+        background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white;
+        font-size: 0.85rem; cursor: pointer; font-weight: 500; white-space: nowrap;
+    }
+    .confirm-btn-primary:hover { opacity: 0.9; }
+    .confirm-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .confirm-btn-secondary {
+        padding: 7px 14px; border-radius: 8px; border: 1px solid #d1d5db;
+        background: white; color: #4b5563; font-size: 0.85rem; cursor: pointer; white-space: nowrap;
+    }
+    .confirm-btn-secondary:hover { background: #f3f4f6; }
+
+    /* Markdown rendering in AI messages */
+    .pp-msg.assistant h2 { font-size: 1rem; font-weight: 700; margin: 12px 0 6px; color: #4338ca; }
+    .pp-msg.assistant h3 { font-size: 0.92rem; font-weight: 600; margin: 10px 0 4px; color: #6b7280; }
+    .pp-msg.assistant ul, .pp-msg.assistant ol { padding-left: 18px; margin: 4px 0; }
+    .pp-msg.assistant li { margin-bottom: 2px; }
+    .pp-msg.assistant strong { color: #1e1b4b; }
+    .pp-msg.assistant hr { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pp-page">
+    <div class="pp-header">
+        <h1>痛点提交</h1>
+        <a class="back-link" href="/oa/">
+            <span class="material-icons" style="font-size:1.1rem;">arrow_back</span> 返回首页
+        </a>
+    </div>
+
+    <div class="pp-layout">
+        <!-- Left: Chat -->
+        <div class="pp-chat-section">
+            <div class="pp-chat-header">
+                <span class="material-icons">psychology</span>
+                <h3>AI 需求分析</h3>
+                <span class="material-icons" id="ppResetBtn" style="margin-left:auto; cursor:pointer; color:#9ca3af; font-size:1.2rem; display:none;" onclick="resetChat()" title="重新开始">refresh</span>
+            </div>
+            <div class="pp-name-bar">
+                <label>提交人：</label>
+                <select id="ppSubmitter">
+                    <option value="">请选择</option>
+                    {% for name in staff_options %}
+                    <option value="{{ name }}">{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="pp-messages" id="ppMessages">
+                <div class="pp-welcome" id="ppWelcome">
+                    <span class="material-icons">lightbulb</span>
+                    <p>描述你在工作中遇到的问题<br>AI 会帮你梳理痛点并分析解决方案</p>
+                    <div class="hints">
+                        <span class="hint-btn" onclick="quickSend('排课太麻烦了，每次都要手动对时间')">排课效率低</span>
+                        <span class="hint-btn" onclick="quickSend('家长沟通记录太分散，找不到之前说的内容')">沟通记录散</span>
+                        <span class="hint-btn" onclick="quickSend('每周要手动统计课时和出勤，很耗时间')">统计太耗时</span>
+                    </div>
+                </div>
+            </div>
+            <div class="pp-input-area">
+                <textarea id="ppInput" placeholder="描述你遇到的问题..." rows="1"
+                    oninput="autoResize(this)"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+                <button class="pp-send-btn" id="ppSendBtn" onclick="sendMessage()">
+                    <span class="material-icons">send</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Right: History -->
+        <div class="pp-history-section">
+            <div class="pp-history-header">
+                <h3><span class="material-icons">history</span> 提交记录</h3>
+                <div class="pp-filter-tabs">
+                    <span class="tab active" data-status="all" onclick="filterHistory('all', this)">全部</span>
+                    <span class="tab" data-status="new" onclick="filterHistory('new', this)">待审核</span>
+                    <span class="tab" data-status="resolved" onclick="filterHistory('resolved', this)">已通过</span>
+                    <span class="tab" data-status="rejected" onclick="filterHistory('rejected', this)">未通过</span>
+                </div>
+            </div>
+            <div class="pp-history-list" id="ppHistoryList">
+                <div class="pp-empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="pp-toast" id="ppToast"></div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const STATUS_LABELS = { new: '待审核', resolved: '已通过', rejected: '未通过' };
+let chatHistory = [];
+let isSending = false;
+let currentFilter = 'all';
+let latestReport = '';
+
+// ========== Chat ==========
+
+function quickSend(text) {
+    document.getElementById('ppInput').value = text;
+    sendMessage();
+}
+
+async function sendMessage() {
+    const input = document.getElementById('ppInput');
+    const msg = input.value.trim();
+    if (!msg || isSending) return;
+
+    const submitter = document.getElementById('ppSubmitter').value;
+    if (!submitter) { showToast('请先选择提交人'); return; }
+
+    isSending = true;
+    input.value = '';
+    input.style.height = 'auto';
+    document.getElementById('ppSendBtn').disabled = true;
+
+    // Hide welcome
+    const welcome = document.getElementById('ppWelcome');
+    if (welcome) welcome.style.display = 'none';
+
+    // Add user message
+    addMessage('user', msg);
+    chatHistory.push({ role: 'user', content: msg });
+
+    // Add streaming placeholder
+    const aiDiv = addMessage('assistant', '');
+    aiDiv.innerHTML = '<span style="color:#9ca3af;">思考中...</span>';
+
+    try {
+        const resp = await fetch('/oa/api/painpoint-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg, history: chatHistory.slice(0, -1) }),
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const evt = JSON.parse(line);
+                    if (evt.type === 'content') {
+                        fullText += evt.data;
+                        aiDiv.innerHTML = formatMarkdown(fullText);
+                    } else if (evt.type === 'error') {
+                        aiDiv.innerHTML = '<span style="color:#dc2626;">错误: ' + escapeHtml(evt.data) + '</span>';
+                    }
+                } catch (e) {}
+            }
+        }
+
+        // Clean any residual think tags
+        fullText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        aiDiv.innerHTML = formatMarkdown(fullText);
+        chatHistory.push({ role: 'assistant', content: fullText });
+
+        // Check if AI generated a final report (marked with [分析报告])
+        if (fullText.includes('[分析报告]')) {
+            const reportIdx = fullText.indexOf('[分析报告]');
+            latestReport = fullText.substring(reportIdx).trim();
+            // Remove old confirm cards
+            document.querySelectorAll('.report-confirm-card').forEach(el => el.remove());
+            // Add confirm card after this message
+            const confirmCard = document.createElement('div');
+            confirmCard.className = 'report-confirm-card';
+            confirmCard.innerHTML = `
+                <span class="material-icons" style="color: #8b5cf6; font-size: 1.3rem;">task_alt</span>
+                <div style="flex:1;">
+                    <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 2px;">分析报告已生成</div>
+                    <div style="font-size: 0.82rem; color: #6b7280;">确认后将提交至审核区域</div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="confirm-btn-secondary" onclick="focusInput()">继续修改</button>
+                    <button class="confirm-btn-primary" onclick="confirmReport()">确认提交</button>
+                </div>
+            `;
+            document.getElementById('ppMessages').appendChild(confirmCard);
+        }
+        // Show reset button once conversation starts
+        document.getElementById('ppResetBtn').style.display = '';
+
+    } catch (e) {
+        aiDiv.innerHTML = '<span style="color:#dc2626;">网络错误: ' + escapeHtml(e.message) + '</span>';
+    }
+
+    isSending = false;
+    document.getElementById('ppSendBtn').disabled = false;
+    scrollMessages();
+}
+
+function addMessage(role, text) {
+    const container = document.getElementById('ppMessages');
+    const div = document.createElement('div');
+    div.className = 'pp-msg ' + role;
+    div.innerHTML = role === 'user' ? escapeHtml(text) : formatMarkdown(text);
+    container.appendChild(div);
+    scrollMessages();
+    return div;
+}
+
+function scrollMessages() {
+    const el = document.getElementById('ppMessages');
+    el.scrollTop = el.scrollHeight;
+}
+
+function resetChat() {
+    chatHistory = [];
+    latestReport = '';
+    document.getElementById('ppResetBtn').style.display = 'none';
+    document.getElementById('ppMessages').innerHTML = `
+        <div class="pp-welcome" id="ppWelcome">
+            <span class="material-icons">lightbulb</span>
+            <p>描述你在工作中遇到的问题<br>AI 会帮你梳理痛点并分析解决方案</p>
+            <div class="hints">
+                <span class="hint-btn" onclick="quickSend('排课太麻烦了，每次都要手动对时间')">排课效率低</span>
+                <span class="hint-btn" onclick="quickSend('家长沟通记录太分散，找不到之前说的内容')">沟通记录散</span>
+                <span class="hint-btn" onclick="quickSend('每周要手动统计课时和出勤，很耗时间')">统计太耗时</span>
+            </div>
+        </div>`;
+}
+
+function focusInput() {
+    const input = document.getElementById('ppInput');
+    input.focus();
+    input.placeholder = '告诉AI哪里需要修改...';
+}
+
+async function confirmReport() {
+    const submitter = document.getElementById('ppSubmitter').value;
+    if (!submitter) { showToast('请选择提交人'); return; }
+    if (!latestReport) { showToast('尚无分析报告'); return; }
+
+    // Disable confirm buttons
+    document.querySelectorAll('.report-confirm-card button').forEach(btn => btn.disabled = true);
+
+    try {
+        // Generate title from conversation
+        const titleResp = await fetch('/oa/api/painpoint-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation: chatHistory }),
+        });
+        const titleData = await titleResp.json();
+        const title = titleData.title || '工作痛点';
+
+        // First user message as problem description
+        const problem = chatHistory.find(m => m.role === 'user')?.content || '';
+
+        const resp = await fetch('/oa/api/painpoints', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                submitter,
+                title,
+                problem,
+                ai_summary: latestReport,
+                conversation: chatHistory,
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('提交成功！');
+            resetChat();
+            loadHistory();
+        } else {
+            showToast('提交失败: ' + (data.error || ''));
+        }
+    } catch (e) {
+        showToast('网络错误');
+    }
+
+    document.querySelectorAll('.report-confirm-card button').forEach(btn => btn.disabled = false);
+}
+
+// ========== History ==========
+
+async function loadHistory() {
+    const url = currentFilter === 'all' ? '/oa/api/painpoints' : `/oa/api/painpoints?status=${currentFilter}`;
+    try {
+        const resp = await fetch(url);
+        const items = await resp.json();
+        renderHistory(items);
+    } catch (e) {
+        document.getElementById('ppHistoryList').innerHTML = '<div class="pp-empty">加载失败</div>';
+    }
+}
+
+function renderHistory(items) {
+    const container = document.getElementById('ppHistoryList');
+    if (!items.length) {
+        container.innerHTML = '<div class="pp-empty">暂无提交记录</div>';
+        return;
+    }
+
+    container.innerHTML = items.map(p => {
+        const conv = tryParseJSON(p.conversation);
+        const convHtml = Array.isArray(conv) ? conv.map(m => {
+            let c = (m.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            const preview = c.substring(0, 200);
+            return `<div class="conv-item"><span class="role">${m.role === 'user' ? '员工' : 'AI'}：</span>${escapeHtml(preview)}${c.length > 200 ? '...' : ''}</div>`;
+        }).join('') : '<div class="conv-item" style="color:#9ca3af;">无对话记录</div>';
+
+        const date = p.created_at ? new Date(p.created_at).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+
+        return `
+        <div class="pp-card" id="ppCard${p.id}">
+            <div class="pp-card-header" onclick="toggleCard(${p.id})">
+                <span class="status-dot status-${p.status}"></span>
+                <div class="card-info">
+                    <p class="card-title">${escapeHtml(p.title)}</p>
+                    <span class="card-meta">${escapeHtml(p.submitter)} · ${date} · ${STATUS_LABELS[p.status] || p.status}</span>
+                </div>
+                <span class="material-icons expand-icon">expand_more</span>
+            </div>
+            <div class="pp-card-body">
+                <div class="section-label">原始问题</div>
+                <div class="problem-text">${escapeHtml(p.problem || '无')}</div>
+                <div class="section-label">AI 分析</div>
+                <div class="summary-text">${formatMarkdown(p.ai_summary || '无')}</div>
+                <div class="section-label">对话记录</div>
+                <div class="conv-list">${convHtml}</div>
+                <div class="pp-card-actions">
+                    <button class="act-btn act-approve" onclick="updateStatus(${p.id},'resolved')" ${p.status==='resolved'?'disabled style="opacity:0.4"':''}>通过</button>
+                    <button class="act-btn act-reject" onclick="updateStatus(${p.id},'rejected')" ${p.status==='rejected'?'disabled style="opacity:0.4"':''}>不通过</button>
+                    <button class="act-btn act-delete" onclick="deletePainpoint(${p.id})">删除</button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function toggleCard(id) {
+    document.getElementById('ppCard' + id)?.classList.toggle('expanded');
+}
+
+function filterHistory(status, el) {
+    currentFilter = status;
+    document.querySelectorAll('.pp-filter-tabs .tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    loadHistory();
+}
+
+async function updateStatus(id, status) {
+    try {
+        await fetch(`/oa/api/painpoints/${id}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+        });
+        showToast('状态已更新');
+        loadHistory();
+    } catch (e) {
+        showToast('更新失败');
+    }
+}
+
+async function deletePainpoint(id) {
+    if (!confirm('确定删除这条记录？')) return;
+    try {
+        await fetch(`/oa/api/painpoints/${id}`, { method: 'DELETE' });
+        showToast('已删除');
+        loadHistory();
+    } catch (e) {
+        showToast('删除失败');
+    }
+}
+
+// ========== Utils ==========
+
+function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function escapeHtml(t) {
+    if (!t) return '';
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatMarkdown(text) {
+    if (!text) return '';
+    // Strip <think>...</think> tags
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!text) return '';
+    let html = escapeHtml(text);
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    // Bold
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Lists
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+    // Horizontal rule
+    html = html.replace(/^---$/gm, '<hr>');
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+    // Clean up
+    html = html.replace(/<br><h/g, '<h');
+    html = html.replace(/<\/h(\d)><br>/g, '</h$1>');
+    html = html.replace(/<br><ul>/g, '<ul>');
+    html = html.replace(/<\/ul><br>/g, '</ul>');
+    html = html.replace(/<br><hr>/g, '<hr>');
+    html = html.replace(/<hr><br>/g, '<hr>');
+    html = html.replace(/<br><li>/g, '<li>');
+    html = html.replace(/\[分析报告\]/g, '');
+    return html;
+}
+
+function tryParseJSON(str) {
+    if (!str) return [];
+    if (Array.isArray(str)) return str;
+    try { return JSON.parse(str); } catch { return []; }
+}
+
+function showToast(msg) {
+    const el = document.getElementById('ppToast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// Init
+loadHistory();
+</script>
+{% endblock %}

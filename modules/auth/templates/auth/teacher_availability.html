@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}教师时间管理 - OA系统{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:1080px;margin:0 auto;padding:28px 20px 40px}
+.back-link{display:inline-flex;align-items:center;gap:4px;color:#6b7280;text-decoration:none;font-size:.88rem;margin-bottom:14px}
+.back-link:hover{color:#0ea5e9}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px;flex-wrap:wrap}
+.page-header h1{margin:0;display:flex;align-items:center;gap:10px;font-size:1.8rem;color:#111827}
+.page-header h1 .material-icons{color:#0ea5e9}
+.controls-bar{display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.controls-bar select{padding:10px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;min-width:200px}
+.controls-bar select:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
+.pref-toggle{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid #d1d5db;border-radius:12px;background:#fff;cursor:pointer;font-size:.88rem;font-weight:700;color:#374151;user-select:none}
+.pref-toggle input{width:16px;height:16px;accent-color:#16a34a}
+.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.92rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(14,165,233,.18)}
+.btn-primary:hover{opacity:.92}
+.legend{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.legend-item{display:inline-flex;align-items:center;gap:6px;font-size:.84rem;color:#6b7280}
+.legend-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
+.swatch-available{background:#bae6fd}
+.swatch-preferred{background:#bbf7d0}
+#timeGridContainer{background:#fff;border-radius:16px;padding:20px;box-shadow:0 10px 24px rgba(15,23,42,.04);border:1px solid #e5e7eb;overflow-x:auto}
+.toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
+.toast.show{display:block}
+@media(max-width:640px){.oa-page{padding-inline:14px}.controls-bar{flex-direction:column;align-items:stretch}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+  <a href="/oa/" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回 OA</a>
+  <div class="page-header">
+    <h1><span class="material-icons">schedule</span> 教师时间管理</h1>
+    <button class="btn-primary" onclick="saveAvailability()"><span class="material-icons" style="font-size:1.1rem;">save</span> 保存</button>
+  </div>
+  <div class="controls-bar">
+    <select id="teacherSelect">
+      <option value="">-- 选择教师 --</option>
+      {% for t in teachers %}
+      <option value="{{ t.id }}">{{ t.display_name or t.username }}</option>
+      {% endfor %}
+    </select>
+    <label class="pref-toggle">
+      <input type="checkbox" id="prefMode" onchange="togglePrefMode()">
+      偏好时段模式
+    </label>
+  </div>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch swatch-available"></span> 可用时段</span>
+    <span class="legend-item"><span class="legend-swatch swatch-preferred"></span> 偏好时段</span>
+  </div>
+  <div id="timeGridContainer"></div>
+</div>
+<div id="toast" class="toast"></div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/time-grid.js') }}"></script>
+<script>
+let grid = null;
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+document.addEventListener('DOMContentLoaded', function(){
+  grid = new TimeGrid(document.getElementById('timeGridContainer'), {
+    startHour: 8, endHour: 22, slotMinutes: 60, mode: 'available'
+  });
+  // 如果是 teacher 角色，自动选中自己并加载数据
+  {% if current_user.is_authenticated and current_user.role == 'teacher' %}
+  const sel = document.getElementById('teacherSelect');
+  sel.value = '{{ current_user.id }}';
+  sel.disabled = true;
+  sel.dispatchEvent(new Event('change'));
+  {% endif %}
+});
+
+function togglePrefMode(){
+  const checked = document.getElementById('prefMode').checked;
+  if(grid) grid.setMode(checked ? 'preferred' : 'available');
+}
+
+document.getElementById('teacherSelect').addEventListener('change', async function(){
+  const tid = this.value;
+  if(!tid){if(grid)grid.clear();return;}
+  try{
+    const res = await fetch(`/auth/api/teacher/${tid}/availability`);
+    const json = await res.json();
+    if(json.success && grid){
+      grid.clear();
+      if(json.data.available) grid.setSlots(json.data.available, 'available');
+      if(json.data.preferred) grid.setSlots(json.data.preferred, 'preferred');
+    } else if(!json.success){showToast(json.error||'加载失败');}
+  }catch(e){showToast('加载失败');}
+});
+
+async function saveAvailability(){
+  const tid = document.getElementById('teacherSelect').value;
+  if(!tid){showToast('请先选择教师');return;}
+  if(!grid){return;}
+  const data = {
+    available: grid.getSlots('available'),
+    preferred: grid.getSlots('preferred')
+  };
+  try{
+    const res = await fetch(`/auth/api/teacher/${tid}/availability`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)
+    });
+    const json = await res.json();
+    if(json.success) showToast('保存成功');
+    else showToast(json.error||'保存失败');
+  }catch(e){showToast('保存失败');}
+}
+</script>
+{% endblock %}

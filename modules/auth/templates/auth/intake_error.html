@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}链接无效{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.error-page{max-width:500px;margin:0 auto;padding:80px 20px;text-align:center}
+.error-icon{width:80px;height:80px;margin:0 auto 20px;background:#fee2e2;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.error-icon .material-icons{font-size:2.4rem;color:#dc2626}
+.error-page h1{font-size:1.4rem;color:#111827;margin:0 0 8px}
+.error-page p{color:#6b7280;font-size:.95rem;margin:0}
+</style>
+{% endblock %}
+{% block content %}
+<div class="error-page">
+    <div class="error-icon"><span class="material-icons">error_outline</span></div>
+    <h1>无法访问</h1>
+    <p>{{ message }}</p>
+</div>
+{% endblock %}

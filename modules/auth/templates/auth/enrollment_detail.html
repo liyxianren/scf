@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}报名详情 - OA系统{% endblock %}
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+.oa-page{max-width:900px;margin:0 auto;padding:28px 20px 40px}
+.back-link{display:inline-flex;align-items:center;gap:4px;color:#6b7280;text-decoration:none;font-size:.88rem;margin-bottom:14px}
+.back-link:hover{color:#0ea5e9}
+.detail-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.detail-header h1{margin:0;font-size:1.6rem;color:#111827}
+.detail-header .subtitle{margin:6px 0 0;color:#6b7280;font-size:.95rem}
+.status-badge{display:inline-block;padding:6px 14px;border-radius:999px;font-size:.84rem;font-weight:700}
+.status-pending_info{background:#fef3c7;color:#92400e}
+.status-pending_schedule{background:#dbeafe;color:#1d4ed8}
+.status-confirmed{background:#dcfce7;color:#166534}
+.status-active{background:#f3e8ff;color:#7c3aed}
+.status-pending_student_confirm{background:#fef3c7;color:#92400e}
+.info-card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 8px 20px rgba(15,23,42,.04);margin-bottom:20px}
+.info-card h2{margin:0 0 16px;font-size:1.1rem;color:#111827;display:flex;align-items:center;gap:8px}
+.info-card h2 .material-icons{color:#0ea5e9;font-size:1.2rem}
+.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.info-item{padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9}
+.info-item .label{font-size:.78rem;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:4px}
+.info-item .value{font-size:.95rem;color:#111827;font-weight:600}
+.intake-link-box{display:flex;align-items:center;gap:8px;padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;margin-top:12px}
+.intake-link-box input{flex:1;border:none;background:none;font-size:.88rem;color:#0369a1;outline:none;font-weight:600}
+.copy-btn{padding:8px 14px;border:none;border-radius:8px;background:#0ea5e9;color:#fff;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.copy-btn:hover{opacity:.85}
+.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.92rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(14,165,233,.18)}
+.btn-primary:hover{opacity:.92}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.profile-section{margin-top:12px}
+.profile-section .times-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.time-chip{display:inline-block;padding:6px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;font-size:.82rem;color:#1d4ed8;font-weight:600}
+.proposal-cards{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+.proposal-card{padding:20px;background:#fff;border:2px solid #e5e7eb;border-radius:16px;transition:border-color .2s}
+.proposal-card:hover{border-color:#7dd3fc}
+.proposal-card h3{margin:0 0 10px;font-size:1rem;color:#111827;display:flex;align-items:center;gap:8px}
+.proposal-detail{font-size:.88rem;color:#475569;margin:4px 0}
+.proposal-score{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;background:#dcfce7;color:#166534;font-size:.82rem;font-weight:700}
+.proposal-conflicts{font-size:.82rem;color:#dc2626;margin-top:6px}
+.proposal-dates{margin-top:12px}
+.dates-summary{font-size:.82rem;color:#374151;font-weight:600;margin-bottom:10px}
+.mini-cal-grid{display:flex;flex-wrap:wrap;gap:12px}
+.mini-month{background:#f8fafc;border:1px solid #f1f5f9;border-radius:10px;padding:10px;min-width:200px;flex:1}
+.mini-month-title{font-size:.78rem;font-weight:700;color:#374151;text-align:center;margin-bottom:6px}
+.mini-month-header{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:.62rem;color:#9ca3af;font-weight:600;margin-bottom:2px}
+.mini-month-body{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;gap:1px}
+.mini-day{font-size:.72rem;padding:3px 0;border-radius:4px;color:#374151}
+.mini-day.empty{color:transparent}
+.mini-day.course{background:#0ea5e9;color:#fff;font-weight:700;border-radius:6px}
+.mini-day.skipped{background:#fef3c7;color:#92400e;text-decoration:line-through;border-radius:6px}
+.mini-day.today{box-shadow:inset 0 0 0 1.5px #0ea5e9}
+.mini-legend{display:flex;gap:12px;margin-top:10px;flex-wrap:wrap}
+.mini-legend-item{display:flex;align-items:center;gap:4px;font-size:.72rem;color:#6b7280}
+.mini-legend-swatch{width:12px;height:12px;border-radius:3px}
+.confirm-slot-btn{margin-top:14px;width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer}
+.confirm-slot-btn:hover{opacity:.9}
+.success-banner{padding:20px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;text-align:center}
+.success-banner .material-icons{font-size:2.4rem;color:#16a34a}
+.success-banner p{margin:8px 0 0;color:#166534;font-weight:700}
+.day-names{--days: '周一','周二','周三','周四','周五','周六','周日'}
+.toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
+.toast.show{display:block}
+@media(max-width:640px){.oa-page{padding-inline:14px}.detail-header{flex-direction:column}.info-grid{grid-template-columns:1fr}.proposal-cards{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="oa-page">
+  <a href="/auth/enrollments" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回排课管理</a>
+
+  <div class="detail-header">
+    <div>
+      <h1>{{ enrollment.student_name }} - {{ enrollment.course_name }}</h1>
+      <p class="subtitle">创建时间：{{ enrollment.created_at or '' }}</p>
+    </div>
+    <span class="status-badge status-{{ enrollment.status }}">
+      {% if enrollment.status == 'pending_info' %}待填表
+      {% elif enrollment.status == 'pending_schedule' %}待排课
+      {% elif enrollment.status == 'pending_student_confirm' %}待学生确认
+      {% elif enrollment.status == 'confirmed' %}已确认
+      {% elif enrollment.status == 'active' %}进行中
+      {% else %}{{ enrollment.status }}{% endif %}
+    </span>
+  </div>
+
+  <!-- Basic Info -->
+  <div class="info-card">
+    <h2><span class="material-icons">info</span> 报名信息</h2>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">学生姓名</div><div class="value">{{ enrollment.student_name }}</div></div>
+      <div class="info-item"><div class="label">课程名称</div><div class="value">{{ enrollment.course_name }}</div></div>
+      <div class="info-item"><div class="label">授课教师</div><div class="value">{{ enrollment.teacher_name or '未指定' }}</div></div>
+      <div class="info-item"><div class="label">总课时</div><div class="value">{{ enrollment.total_hours or 0 }} 小时</div></div>
+      <div class="info-item"><div class="label">每次课时</div><div class="value">{{ enrollment.hours_per_session or 2 }} 小时</div></div>
+      <div class="info-item"><div class="label">每周次数</div><div class="value">{{ enrollment.sessions_per_week or 1 }} 次</div></div>
+    </div>
+    {% if enrollment.notes %}
+    <div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9">
+      <div style="font-size:.78rem;font-weight:700;color:#6b7280;margin-bottom:4px">备注</div>
+      <div style="font-size:.92rem;color:#374151">{{ enrollment.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Intake Link (pending_info) -->
+  {% if enrollment.status == 'pending_info' %}
+  <div class="info-card">
+    <h2><span class="material-icons">link</span> 学生信息登记链接</h2>
+    <p style="font-size:.88rem;color:#6b7280;margin:0 0 10px">将以下链接发送给学生或家长填写信息：</p>
+    <div class="intake-link-box">
+      <input type="text" id="intakeLinkInput" readonly value="{{ enrollment.intake_url or '' }}">
+      <button class="copy-btn" onclick="copyLink()">复制链接</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Student Profile -->
+  {% if enrollment.student_profile %}
+  <div class="info-card">
+    <h2><span class="material-icons">person</span> 学生信息</h2>
+    <div class="info-grid">
+      {% set p = enrollment.student_profile %}
+      <div class="info-item"><div class="label">姓名</div><div class="value">{{ p.name or '-' }}</div></div>
+      <div class="info-item"><div class="label">联系电话</div><div class="value">{{ p.phone or '-' }}</div></div>
+    </div>
+    {% if p.available_slots %}
+    <div class="profile-section">
+      <div style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px">意向上课时间</div>
+      <div class="times-list">
+        {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
+        {% for slot in p.available_slots %}
+        <span class="time-chip">{{ day_names[slot.day] if slot.day < day_names|length else '' }} {{ slot.start }}-{{ slot.end }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if p.excluded_dates %}
+    <div class="profile-section" style="margin-top:12px">
+      <div style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px">不可上课日期</div>
+      <div class="times-list">
+        {% for d in p.excluded_dates %}
+        <span class="time-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c">{{ d }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if p.notes %}
+    <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9">
+      <div style="font-size:.78rem;font-weight:700;color:#6b7280;margin-bottom:4px">备注</div>
+      <div style="font-size:.92rem;color:#374151">{{ p.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Auto Match (pending_schedule) -->
+  {% if enrollment.status == 'pending_schedule' %}
+  <div class="info-card">
+    <h2><span class="material-icons">auto_fix_high</span> 自动排课</h2>
+    <p style="font-size:.88rem;color:#6b7280;margin:0 0 8px">系统将根据教师和学生的可用时间自动匹配最佳上课时段。</p>
+    <p style="font-size:.82rem;color:#9ca3af;margin:0 0 14px">
+      <span class="material-icons" style="font-size:.9rem;vertical-align:middle">info</span>
+      请确保授课教师已在其面板中设置了可用时间（教师登录后会自动提示设置）
+    </p>
+    <div id="matchError" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:.88rem"></div>
+    <button class="btn-primary" id="matchBtn" onclick="autoMatch()"><span class="material-icons" style="font-size:1.1rem;">play_arrow</span> 自动匹配排课</button>
+  </div>
+  {% endif %}
+
+  <!-- Proposed Slots -->
+  {% if enrollment.proposed_slots %}
+  <div class="info-card">
+    <h2><span class="material-icons">event_available</span> 推荐方案</h2>
+    <p style="font-size:.88rem;color:#6b7280;margin:0 0 4px">以下是系统推荐的排课方案，请查看日历后选择：</p>
+    <div class="proposal-cards">
+      {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
+      {% for slot in enrollment.proposed_slots[:3] %}
+      <div class="proposal-card">
+        <h3>
+          方案 {{ loop.index }}：每{{ day_names[slot.day_of_week] if slot.day_of_week is defined and slot.day_of_week < day_names|length else '' }} {{ slot.time_start or '' }}-{{ slot.time_end or '' }}
+          <span class="proposal-score"><span class="material-icons" style="font-size:.9rem;">star</span> 匹配度 {{ slot.score }}</span>
+        </h3>
+        {% if slot.conflicts %}
+        <p class="proposal-conflicts"><span class="material-icons" style="font-size:.9rem;vertical-align:middle;">warning</span>
+          时间冲突：{% for c in slot.conflicts %}{{ c.course_name }}({{ c.time }}){% if not loop.last %}、{% endif %}{% endfor %}
+        </p>
+        {% endif %}
+        {% if slot.dates %}
+        <div class="proposal-dates">
+          <div class="dates-summary">共 {{ slot.dates|length }} 节 · {{ slot.dates[0] }} 至 {{ slot.dates[-1] }}{% if slot.skipped_dates %} · 跳过 {{ slot.skipped_dates|length }} 天{% endif %}</div>
+          <div class="mini-cal-container" id="miniCal_{{ loop.index0 }}"></div>
+          <div class="mini-legend">
+            <span class="mini-legend-item"><span class="mini-legend-swatch" style="background:#0ea5e9"></span> 上课日</span>
+            {% if slot.skipped_dates %}
+            <span class="mini-legend-item"><span class="mini-legend-swatch" style="background:#fef3c7;border:1px solid #fde68a"></span> 跳过</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+        <button class="confirm-slot-btn" onclick="confirmSlot({{ loop.index0 }})">确认此方案</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Pending Student Confirm -->
+  {% if enrollment.status == 'pending_student_confirm' %}
+  <div class="info-card">
+    <div style="padding:20px;background:#fffbeb;border:1px solid #fde68a;border-radius:14px;text-align:center">
+      <span class="material-icons" style="font-size:2.4rem;color:#f59e0b">hourglass_top</span>
+      <p style="margin:8px 0 0;color:#92400e;font-weight:700">等待学生确认排课方案</p>
+      <p style="margin:6px 0 0;color:#a16207;font-size:.88rem">已通过站内消息通知学生，请等待确认</p>
+    </div>
+    {% if enrollment.confirmed_slot %}
+    {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
+    {% set cs = enrollment.confirmed_slot %}
+    <div class="info-grid" style="margin-top:16px">
+      <div class="info-item"><div class="label">上课日</div><div class="value">{{ day_names[cs.day_of_week] if cs.day_of_week is defined and cs.day_of_week < day_names|length else '' }}</div></div>
+      <div class="info-item"><div class="label">上课时间</div><div class="value">{{ cs.time_start or '' }} - {{ cs.time_end or '' }}</div></div>
+      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.dates|length if cs.dates else '-' }}</div></div>
+    </div>
+    <div style="margin-top:14px;text-align:center">
+      <a href="/auth/api/enrollments/{{ enrollment.id }}/export" class="btn-primary" style="text-decoration:none">
+        <span class="material-icons" style="font-size:1rem">download</span> 导出课表 Excel
+      </a>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Confirmed -->
+  {% if enrollment.status == 'confirmed' %}
+  <div class="info-card">
+    <div class="success-banner">
+      <span class="material-icons">check_circle</span>
+      <p>排课已确认，学生已同意</p>
+    </div>
+    {% if enrollment.confirmed_slot %}
+    {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
+    {% set cs = enrollment.confirmed_slot %}
+    <div class="info-grid" style="margin-top:16px">
+      <div class="info-item"><div class="label">上课日</div><div class="value">{{ day_names[cs.day_of_week] if cs.day_of_week is defined and cs.day_of_week < day_names|length else '' }}</div></div>
+      <div class="info-item"><div class="label">上课时间</div><div class="value">{{ cs.time_start or '' }} - {{ cs.time_end or '' }}</div></div>
+      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.dates|length if cs.dates else '-' }}</div></div>
+    </div>
+    <div style="margin-top:14px;text-align:center">
+      <a href="/auth/api/enrollments/{{ enrollment.id }}/export" class="btn-primary" style="text-decoration:none">
+        <span class="material-icons" style="font-size:1rem">download</span> 导出课表 Excel
+      </a>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+{% block extra_js %}
+<script>
+const ENROLLMENT_ID = {{ enrollment.id }};
+{% if enrollment.proposed_slots %}
+const PROPOSED_SLOTS = {{ enrollment.proposed_slots | tojson }};
+{% else %}
+const PROPOSED_SLOTS = [];
+{% endif %}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+document.addEventListener('DOMContentLoaded', function(){
+  const linkInput=document.getElementById('intakeLinkInput');
+  if(linkInput && linkInput.value && !linkInput.value.startsWith('http')){
+    linkInput.value = location.origin + linkInput.value;
+  }
+  // Render mini calendars for each proposed slot
+  PROPOSED_SLOTS.forEach((slot, idx) => {
+    const container = document.getElementById('miniCal_' + idx);
+    if(container && slot.dates) renderMiniCalendar(container, slot.dates, slot.skipped_dates || []);
+  });
+});
+
+function renderMiniCalendar(container, dates, skipped){
+  const courseSet = new Set(dates);
+  const skipSet = new Set(skipped);
+  const allDates = dates.concat(skipped).sort();
+  if(!allDates.length) return;
+
+  // Collect months that span the schedule
+  const first = new Date(allDates[0] + 'T00:00:00');
+  const last = new Date(allDates[allDates.length-1] + 'T00:00:00');
+  const months = [];
+  let cur = new Date(first.getFullYear(), first.getMonth(), 1);
+  while(cur <= last){
+    months.push({year: cur.getFullYear(), month: cur.getMonth()});
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  const WDAYS = ['一','二','三','四','五','六','日'];
+  const MNAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  let html = '<div class="mini-cal-grid">';
+  months.forEach(m => {
+    const daysInMonth = new Date(m.year, m.month + 1, 0).getDate();
+    // day of week for the 1st (0=Sun → convert to Mon-based: Mon=0..Sun=6)
+    let startDow = new Date(m.year, m.month, 1).getDay();
+    startDow = startDow === 0 ? 6 : startDow - 1;
+
+    html += `<div class="mini-month">`;
+    html += `<div class="mini-month-title">${m.year}年${MNAMES[m.month]}</div>`;
+    html += `<div class="mini-month-header">${WDAYS.map(d=>`<div>${d}</div>`).join('')}</div>`;
+    html += `<div class="mini-month-body">`;
+
+    // Empty cells before first day
+    for(let i = 0; i < startDow; i++) html += `<div class="mini-day empty">.</div>`;
+
+    for(let d = 1; d <= daysInMonth; d++){
+      const ds = `${m.year}-${String(m.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      let cls = 'mini-day';
+      if(courseSet.has(ds)) cls += ' course';
+      else if(skipSet.has(ds)) cls += ' skipped';
+      if(ds === todayStr) cls += ' today';
+      html += `<div class="${cls}">${d}</div>`;
+    }
+
+    html += `</div></div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function copyLink(){
+  const input=document.getElementById('intakeLinkInput');
+  if(!input)return;
+  input.select();
+  navigator.clipboard.writeText(input.value).then(()=>showToast('链接已复制')).catch(()=>{document.execCommand('copy');showToast('链接已复制');});
+}
+
+async function autoMatch(){
+  const btn=document.getElementById('matchBtn');
+  const errBox=document.getElementById('matchError');
+  if(errBox) errBox.style.display='none';
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="material-icons" style="font-size:1.1rem;">hourglass_top</span> 匹配中...';}
+  try{
+    const res=await fetch(`/auth/api/enrollments/${ENROLLMENT_ID}/match`,{method:'POST'});
+    const json=await res.json();
+    if(json.success){showToast('匹配完成，找到 '+(json.proposed_slots||[]).length+' 个方案');setTimeout(()=>location.reload(),800);}
+    else{
+      const msg=json.error||'匹配失败';
+      if(errBox){errBox.textContent=msg;errBox.style.display='block';}
+      else{showToast(msg);}
+      if(btn){btn.disabled=false;btn.innerHTML='<span class="material-icons" style="font-size:1.1rem;">play_arrow</span> 自动匹配排课';}
+    }
+  }catch(e){showToast('匹配失败');if(btn){btn.disabled=false;btn.innerHTML='<span class="material-icons" style="font-size:1.1rem;">play_arrow</span> 自动匹配排课';}}
+}
+
+async function confirmSlot(index){
+  if(!confirm('确认选择此方案？'))return;
+  try{
+    const res=await fetch(`/auth/api/enrollments/${ENROLLMENT_ID}/confirm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slot_index:index})});
+    const json=await res.json();
+    if(json.success){showToast('已确认方案');setTimeout(()=>location.reload(),800);}
+    else showToast(json.error||'确认失败');
+  }catch(e){showToast('确认失败');}
+}
+</script>
+{% endblock %}
