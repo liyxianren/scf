@@ -5,9 +5,20 @@ from config import Config
 from extensions import db, login_manager
 
 
-def create_app(config_class=Config):
+def create_app(
+    config_class=Config,
+    *,
+    config_overrides=None,
+    migrate_columns=None,
+    init_data=None,
+    backfill_schedule_links=None,
+    cleanup_expired=None,
+    run_once_migrations=None,
+):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    if config_overrides:
+        app.config.update(config_overrides)
 
     # 初始化扩展
     db.init_app(app)
@@ -17,7 +28,7 @@ def create_app(config_class=Config):
     @login_manager.user_loader
     def load_user(user_id):
         from modules.auth.models import User
-        return User.query.get(int(user_id))
+        return db.session.get(User, int(user_id))
 
     # 注册蓝图
     from modules.education.routes import lesson_bp, exercise_bp, code_runner_bp
@@ -40,15 +51,27 @@ def create_app(config_class=Config):
     # 初始化数据库
     with app.app_context():
         db.create_all()
-        _migrate_add_columns()
-        _init_data()
-        _cleanup_expired()
+        if _resolve_startup_flag(app, migrate_columns, 'SCF_AUTO_MIGRATE_COLUMNS'):
+            _migrate_add_columns()
+        if _resolve_startup_flag(app, init_data, 'SCF_AUTO_INIT_DATA'):
+            _init_data()
+        if _resolve_startup_flag(app, backfill_schedule_links, 'SCF_AUTO_BACKFILL_SCHEDULE_LINKS'):
+            _backfill_schedule_links()
+        if _resolve_startup_flag(app, cleanup_expired, 'SCF_AUTO_CLEANUP_EXPIRED'):
+            _cleanup_expired()
 
         # 一次性数据修复（教师姓名 + 课表颜色）
-        from migrations_once import run_once_migrations
-        run_once_migrations()
+        if _resolve_startup_flag(app, run_once_migrations, 'SCF_RUN_ONCE_MIGRATIONS'):
+            from migrations_once import run_once_migrations as run_one_off_migrations
+            run_one_off_migrations()
 
     return app
+
+
+def _resolve_startup_flag(app, explicit_value, config_key):
+    if explicit_value is not None:
+        return explicit_value
+    return bool(app.config.get(config_key, True))
 
 
 def _migrate_add_columns():
@@ -114,6 +137,15 @@ def _cleanup_expired():
             db.session.delete(handbook)
         db.session.commit()
         print(f"已清理 {len(expired_handbooks)} 个过期工程手册")
+
+
+def _backfill_schedule_links():
+    """回填历史自动排课记录的关联字段。"""
+    from modules.auth.services import backfill_schedule_relationships
+
+    updated = backfill_schedule_relationships()
+    if updated:
+        print(f"已回填 {updated} 条历史课表关联数据")
 
 
 def _register_page_routes(app):
@@ -228,9 +260,13 @@ def _register_page_routes(app):
 
 
 # 模块级变量，供 gunicorn / Procfile / Zeabur 引用
-app = create_app()
+if os.environ.get('SCF_SKIP_APP_AUTO_CREATE') == '1':
+    app = None
+else:
+    app = create_app()
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    runtime_app = app or create_app()
+    runtime_app.run(debug=True, host='0.0.0.0', port=port)

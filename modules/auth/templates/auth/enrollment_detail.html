@@ -7,6 +7,7 @@
 .back-link{display:inline-flex;align-items:center;gap:4px;color:#6b7280;text-decoration:none;font-size:.88rem;margin-bottom:14px}
 .back-link:hover{color:#0ea5e9}
 .detail-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.header-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .detail-header h1{margin:0;font-size:1.6rem;color:#111827}
 .detail-header .subtitle{margin:6px 0 0;color:#6b7280;font-size:.95rem}
 .status-badge{display:inline-block;padding:6px 14px;border-radius:999px;font-size:.84rem;font-weight:700}
@@ -14,6 +15,7 @@
 .status-pending_schedule{background:#dbeafe;color:#1d4ed8}
 .status-confirmed{background:#dcfce7;color:#166534}
 .status-active{background:#f3e8ff;color:#7c3aed}
+.status-completed{background:#e0f2fe;color:#0369a1}
 .status-pending_student_confirm{background:#fef3c7;color:#92400e}
 .info-card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 8px 20px rgba(15,23,42,.04);margin-bottom:20px}
 .info-card h2{margin:0 0 16px;font-size:1.1rem;color:#111827;display:flex;align-items:center;gap:8px}
@@ -56,6 +58,14 @@
 .mini-legend-swatch{width:12px;height:12px;border-radius:3px}
 .confirm-slot-btn{margin-top:14px;width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer}
 .confirm-slot-btn:hover{opacity:.9}
+.btn-danger{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border:none;border-radius:10px;background:#fee2e2;color:#991b1b;font-size:.88rem;font-weight:700;cursor:pointer}
+.btn-danger:hover{background:#fecaca}
+.slot-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.slot-chip{display:inline-flex;align-items:center;gap:4px;padding:6px 10px;border-radius:999px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-size:.82rem;font-weight:700}
+.feedback-box{margin-top:14px;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px}
+.feedback-box .feedback-label{font-size:.78rem;font-weight:800;color:#9a3412;text-transform:uppercase;margin-bottom:6px}
+.feedback-box .feedback-text{font-size:.92rem;color:#7c2d12;line-height:1.6}
+.feedback-box .feedback-meta{margin-top:10px;font-size:.8rem;color:#9a3412;display:flex;gap:10px;flex-wrap:wrap}
 .success-banner{padding:20px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;text-align:center}
 .success-banner .material-icons{font-size:2.4rem;color:#16a34a}
 .success-banner p{margin:8px 0 0;color:#166534;font-weight:700}
@@ -74,14 +84,23 @@
       <h1>{{ enrollment.student_name }} - {{ enrollment.course_name }}</h1>
       <p class="subtitle">创建时间：{{ enrollment.created_at or '' }}</p>
     </div>
-    <span class="status-badge status-{{ enrollment.status }}">
-      {% if enrollment.status == 'pending_info' %}待填表
-      {% elif enrollment.status == 'pending_schedule' %}待排课
-      {% elif enrollment.status == 'pending_student_confirm' %}待学生确认
-      {% elif enrollment.status == 'confirmed' %}已确认
-      {% elif enrollment.status == 'active' %}进行中
-      {% else %}{{ enrollment.status }}{% endif %}
-    </span>
+    <div class="header-actions">
+      <span class="status-badge status-{{ enrollment.status }}">
+        {% if enrollment.status == 'pending_info' %}待填表
+        {% elif enrollment.status == 'pending_schedule' %}待排课
+        {% elif enrollment.status == 'pending_student_confirm' %}待学生确认
+        {% elif enrollment.status == 'confirmed' %}已确认
+        {% elif enrollment.status == 'active' %}进行中
+        {% elif enrollment.status == 'completed' %}已完成
+        {% else %}{{ enrollment.status }}{% endif %}
+      </span>
+      {% if enrollment.can_edit %}
+      <a href="{{ enrollment.edit_intake_url }}" class="btn-primary" style="text-decoration:none"><span class="material-icons" style="font-size:1rem">edit</span> 修改学生信息</a>
+      {% endif %}
+      {% if current_user.role == 'admin' %}
+      <button class="btn-danger" onclick="deleteEnrollment()"><span class="material-icons" style="font-size:1rem">delete</span> 删除报名</button>
+      {% endif %}
+    </div>
   </div>
 
   <!-- Basic Info -->
@@ -112,6 +131,36 @@
       <input type="text" id="intakeLinkInput" readonly value="{{ enrollment.intake_url or '' }}">
       <button class="copy-btn" onclick="copyLink()">复制链接</button>
     </div>
+  </div>
+  {% endif %}
+
+  {% if enrollment.latest_feedback %}
+  <div class="info-card">
+    <h2><span class="material-icons">feedback</span> 学生反馈</h2>
+    <div class="feedback-box">
+      <div class="feedback-label">最近一次退回意见</div>
+      <div class="feedback-text">{{ enrollment.latest_feedback }}</div>
+      <div class="feedback-meta">
+        {% if enrollment.latest_feedback_at %}
+        <span>反馈时间：{{ enrollment.latest_feedback_at }}</span>
+        {% endif %}
+        {% if enrollment.has_unread_feedback %}
+        <span>老师端未读</span>
+        {% endif %}
+        <a href="/auth/chat" style="color:#c2410c;font-weight:700;text-decoration:none">前往聊天</a>
+      </div>
+    </div>
+    {% if enrollment.confirmed_slot %}
+    {% set rejected_plan = enrollment.confirmed_slot %}
+    <div style="margin-top:14px">
+      <div style="font-size:.84rem;font-weight:700;color:#374151">上次退回的排课方案</div>
+      <div class="slot-list">
+        {% for weekly_slot in rejected_plan.weekly_slots or [] %}
+        <span class="slot-chip">{{ ['周一','周二','周三','周四','周五','周六','周日'][weekly_slot.day_of_week] }} {{ weekly_slot.time_start }}-{{ weekly_slot.time_end }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -154,8 +203,29 @@
   </div>
   {% endif %}
 
+  <div class="info-card">
+    <h2><span class="material-icons">monitoring</span> 交付进度</h2>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">已排课次数</div><div class="value">{{ enrollment.scheduled_count or 0 }}</div></div>
+      <div class="info-item"><div class="label">已完成次数</div><div class="value">{{ enrollment.completed_count or 0 }}</div></div>
+      <div class="info-item"><div class="label">请假次数</div><div class="value">{{ enrollment.leave_count or 0 }}</div></div>
+      <div class="info-item"><div class="label">待反馈课次</div><div class="value">{{ enrollment.pending_feedback_count or 0 }}</div></div>
+    </div>
+    {% if enrollment.latest_teacher_feedback %}
+    <div class="feedback-box" style="margin-top:14px;background:#f0f9ff;border-color:#bae6fd">
+      <div class="feedback-label" style="color:#0369a1">最近一次老师反馈</div>
+      <div class="feedback-text" style="color:#0f172a">{{ enrollment.latest_teacher_feedback }}</div>
+      {% if enrollment.latest_teacher_feedback_at %}
+      <div class="feedback-meta" style="color:#0369a1">
+        <span>提交时间：{{ enrollment.latest_teacher_feedback_at }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
   <!-- Auto Match (pending_schedule) -->
-  {% if enrollment.status == 'pending_schedule' %}
+  {% if enrollment.status == 'pending_schedule' and current_user.role == 'admin' %}
   <div class="info-card">
     <h2><span class="material-icons">auto_fix_high</span> 自动排课</h2>
     <p style="font-size:.88rem;color:#6b7280;margin:0 0 8px">系统将根据教师和学生的可用时间自动匹配最佳上课时段。</p>
@@ -169,7 +239,7 @@
   {% endif %}
 
   <!-- Proposed Slots -->
-  {% if enrollment.proposed_slots %}
+  {% if enrollment.proposed_slots and enrollment.status == 'pending_schedule' and current_user.role == 'admin' %}
   <div class="info-card">
     <h2><span class="material-icons">event_available</span> 推荐方案</h2>
     <p style="font-size:.88rem;color:#6b7280;margin:0 0 4px">以下是系统推荐的排课方案，请查看日历后选择：</p>
@@ -178,17 +248,23 @@
       {% for slot in enrollment.proposed_slots[:3] %}
       <div class="proposal-card">
         <h3>
-          方案 {{ loop.index }}：每{{ day_names[slot.day_of_week] if slot.day_of_week is defined and slot.day_of_week < day_names|length else '' }} {{ slot.time_start or '' }}-{{ slot.time_end or '' }}
-          <span class="proposal-score"><span class="material-icons" style="font-size:.9rem;">star</span> 匹配度 {{ slot.score }}</span>
+          方案 {{ loop.index }}
+          <span class="proposal-score"><span class="material-icons" style="font-size:.9rem;">star</span> 匹配度 {{ slot.plan_score }}</span>
         </h3>
-        {% if slot.conflicts %}
+        <p class="proposal-detail">每周 {{ slot.sessions_per_week }} 次 · 预计 {{ slot.estimated_weeks }} 周完成 · 覆盖 {{ slot.distinct_days }} 个 weekday</p>
+        <div class="slot-list">
+          {% for weekly_slot in slot.weekly_slots or [] %}
+          <span class="slot-chip">{{ day_names[weekly_slot.day_of_week] }} {{ weekly_slot.time_start }}-{{ weekly_slot.time_end }}</span>
+          {% endfor %}
+        </div>
+        {% if slot.total_conflicts %}
         <p class="proposal-conflicts"><span class="material-icons" style="font-size:.9rem;vertical-align:middle;">warning</span>
-          时间冲突：{% for c in slot.conflicts %}{{ c.course_name }}({{ c.time }}){% if not loop.last %}、{% endif %}{% endfor %}
+          该方案包含 {{ slot.total_conflicts }} 处老师现有课程冲突，请谨慎确认。
         </p>
         {% endif %}
-        {% if slot.dates %}
+        {% if slot.session_dates %}
         <div class="proposal-dates">
-          <div class="dates-summary">共 {{ slot.dates|length }} 节 · {{ slot.dates[0] }} 至 {{ slot.dates[-1] }}{% if slot.skipped_dates %} · 跳过 {{ slot.skipped_dates|length }} 天{% endif %}</div>
+          <div class="dates-summary">共 {{ slot.session_dates|length }} 节 · {{ slot.date_start }} 至 {{ slot.date_end }}{% if slot.skipped_dates %} · 跳过 {{ slot.skipped_dates|length }} 天{% endif %}</div>
           <div class="mini-cal-container" id="miniCal_{{ loop.index0 }}"></div>
           <div class="mini-legend">
             <span class="mini-legend-item"><span class="mini-legend-swatch" style="background:#0ea5e9"></span> 上课日</span>
@@ -214,12 +290,16 @@
       <p style="margin:6px 0 0;color:#a16207;font-size:.88rem">已通过站内消息通知学生，请等待确认</p>
     </div>
     {% if enrollment.confirmed_slot %}
-    {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
     {% set cs = enrollment.confirmed_slot %}
     <div class="info-grid" style="margin-top:16px">
-      <div class="info-item"><div class="label">上课日</div><div class="value">{{ day_names[cs.day_of_week] if cs.day_of_week is defined and cs.day_of_week < day_names|length else '' }}</div></div>
-      <div class="info-item"><div class="label">上课时间</div><div class="value">{{ cs.time_start or '' }} - {{ cs.time_end or '' }}</div></div>
-      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.dates|length if cs.dates else '-' }}</div></div>
+      <div class="info-item"><div class="label">每周次数</div><div class="value">{{ cs.sessions_per_week or '-' }}</div></div>
+      <div class="info-item"><div class="label">预计完成周数</div><div class="value">{{ cs.estimated_weeks or '-' }}</div></div>
+      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.session_dates|length if cs.session_dates else '-' }}</div></div>
+    </div>
+    <div class="slot-list">
+      {% for weekly_slot in cs.weekly_slots or [] %}
+      <span class="slot-chip">{{ ['周一','周二','周三','周四','周五','周六','周日'][weekly_slot.day_of_week] }} {{ weekly_slot.time_start }}-{{ weekly_slot.time_end }}</span>
+      {% endfor %}
     </div>
     <div style="margin-top:14px;text-align:center">
       <a href="/auth/api/enrollments/{{ enrollment.id }}/export" class="btn-primary" style="text-decoration:none">
@@ -238,12 +318,16 @@
       <p>排课已确认，学生已同意</p>
     </div>
     {% if enrollment.confirmed_slot %}
-    {% set day_names = ['周一','周二','周三','周四','周五','周六','周日'] %}
     {% set cs = enrollment.confirmed_slot %}
     <div class="info-grid" style="margin-top:16px">
-      <div class="info-item"><div class="label">上课日</div><div class="value">{{ day_names[cs.day_of_week] if cs.day_of_week is defined and cs.day_of_week < day_names|length else '' }}</div></div>
-      <div class="info-item"><div class="label">上课时间</div><div class="value">{{ cs.time_start or '' }} - {{ cs.time_end or '' }}</div></div>
-      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.dates|length if cs.dates else '-' }}</div></div>
+      <div class="info-item"><div class="label">每周次数</div><div class="value">{{ cs.sessions_per_week or '-' }}</div></div>
+      <div class="info-item"><div class="label">预计完成周数</div><div class="value">{{ cs.estimated_weeks or '-' }}</div></div>
+      <div class="info-item"><div class="label">总节数</div><div class="value">{{ cs.session_dates|length if cs.session_dates else '-' }}</div></div>
+    </div>
+    <div class="slot-list">
+      {% for weekly_slot in cs.weekly_slots or [] %}
+      <span class="slot-chip">{{ ['周一','周二','周三','周四','周五','周六','周日'][weekly_slot.day_of_week] }} {{ weekly_slot.time_start }}-{{ weekly_slot.time_end }}</span>
+      {% endfor %}
     </div>
     <div style="margin-top:14px;text-align:center">
       <a href="/auth/api/enrollments/{{ enrollment.id }}/export" class="btn-primary" style="text-decoration:none">
@@ -275,7 +359,9 @@ document.addEventListener('DOMContentLoaded', function(){
   // Render mini calendars for each proposed slot
   PROPOSED_SLOTS.forEach((slot, idx) => {
     const container = document.getElementById('miniCal_' + idx);
-    if(container && slot.dates) renderMiniCalendar(container, slot.dates, slot.skipped_dates || []);
+    const planDates = (slot.session_dates || []).map(item => item.date);
+    const skippedDates = (slot.skipped_dates || []).map(item => item.date);
+    if(container && planDates.length) renderMiniCalendar(container, planDates, skippedDates);
   });
 });
 
@@ -362,6 +448,22 @@ async function confirmSlot(index){
     if(json.success){showToast('已确认方案');setTimeout(()=>location.reload(),800);}
     else showToast(json.error||'确认失败');
   }catch(e){showToast('确认失败');}
+}
+
+async function deleteEnrollment(){
+  if(!confirm('确认删除这条报名？如果已生成正式课表，将一并删除关联课程。')) return;
+  try{
+    const res = await fetch(`/auth/api/enrollments/${ENROLLMENT_ID}`, {method:'DELETE'});
+    const json = await res.json();
+    if(json.success){
+      showToast('报名已删除');
+      setTimeout(() => location.href = '/auth/enrollments', 600);
+    }else{
+      showToast(json.error || '删除失败');
+    }
+  }catch(e){
+    showToast('删除失败');
+  }
 }
 </script>
 {% endblock %}

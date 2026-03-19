@@ -113,6 +113,7 @@ function renderUsers(){
       <td>
         <button class="action-btn edit-btn" onclick="openEditUser(${u.id})">编辑</button>
         <button class="action-btn toggle-btn ${isActive?'deactivate':''}" onclick="toggleUser(${u.id})">${isActive?'停用':'启用'}</button>
+        ${u.role === 'student' ? `<button class="action-btn" style="background:#fee2e2;color:#991b1b" onclick="deleteUser(${u.id}, '${escapeHtml(u.display_name)}')">删除</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -182,6 +183,16 @@ async function toggleUser(id){
     if(json.success){showToast('已更新状态');loadUsers();}
     else showToast(json.error||'操作失败');
   }catch(e){showToast('操作失败');}
+}
+
+async function deleteUser(id, displayName){
+  if(!confirm(`确认删除学生账号「${displayName}」？该操作不可恢复。`)) return;
+  try{
+    const res=await fetch(`/auth/api/users/${id}`,{method:'DELETE'});
+    const json=await res.json();
+    if(json.success){showToast('已删除');loadUsers();}
+    else showToast(json.error||'删除失败');
+  }catch(e){showToast('删除失败');}
 }
 
 async function seedStaff(){

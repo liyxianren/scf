@@ -4,6 +4,7 @@ from sqlalchemy import or_, and_, func
 from extensions import db
 from modules.auth import auth_bp
 from modules.auth.models import User, ChatMessage
+from modules.auth.services import user_can_chat_with
 
 
 @auth_bp.route('/chat')
@@ -32,8 +33,8 @@ def api_chat_conversations():
 
     conversations = []
     for (pid,) in partner_ids:
-        partner = User.query.get(pid)
-        if not partner:
+        partner = db.session.get(User, pid)
+        if not partner or not user_can_chat_with(current_user, partner):
             continue
         # 最新一条消息
         last_msg = ChatMessage.query.filter(
@@ -52,6 +53,7 @@ def api_chat_conversations():
             'last_message': last_msg.content[:50] if last_msg else '',
             'last_time': last_msg.created_at.isoformat() if last_msg else None,
             'unread': unread,
+            'unread_count': unread,
         })
 
     conversations.sort(key=lambda c: c['last_time'] or '', reverse=True)
@@ -65,6 +67,11 @@ def api_chat_messages():
     partner_id = request.args.get('with', type=int)
     if not partner_id:
         return jsonify({'success': False, 'error': '缺少 with 参数'}), 400
+    partner = db.session.get(User, partner_id)
+    if not partner:
+        return jsonify({'success': False, 'error': '联系人不存在'}), 404
+    if not user_can_chat_with(current_user, partner):
+        return jsonify({'success': False, 'error': '无权查看该会话'}), 403
 
     uid = current_user.id
     messages = ChatMessage.query.filter(
@@ -95,10 +102,20 @@ def api_chat_send():
 
     if not receiver_id or not content:
         return jsonify({'success': False, 'error': '缺少接收人或消息内容'}), 400
+    if receiver_id == current_user.id:
+        return jsonify({'success': False, 'error': '不能给自己发送消息'}), 400
+
+    receiver = db.session.get(User, receiver_id)
+    if not receiver:
+        return jsonify({'success': False, 'error': '接收人不存在'}), 404
+    if not receiver.is_active:
+        return jsonify({'success': False, 'error': '接收人已停用'}), 400
+    if not user_can_chat_with(current_user, receiver):
+        return jsonify({'success': False, 'error': '无权向该用户发消息'}), 403
 
     msg = ChatMessage(
         sender_id=current_user.id,
-        receiver_id=receiver_id,
+        receiver_id=receiver.id,
         content=content,
     )
     db.session.add(msg)
@@ -109,6 +126,12 @@ def api_chat_send():
 @auth_bp.route('/api/chat/unread-count')
 @login_required
 def api_chat_unread_count():
-    count = ChatMessage.query.filter_by(
-        receiver_id=current_user.id, is_read=False).count()
+    unread_messages = ChatMessage.query.filter_by(
+        receiver_id=current_user.id, is_read=False
+    ).all()
+    count = 0
+    for message in unread_messages:
+        sender = db.session.get(User, message.sender_id)
+        if sender and user_can_chat_with(current_user, sender):
+            count += 1
     return jsonify({'success': True, 'count': count})

@@ -27,9 +27,14 @@
 .status-pending_student_confirm{background:#fff7ed;color:#c2410c}
 .status-confirmed{background:#dcfce7;color:#166534}
 .status-active{background:#f3e8ff;color:#7c3aed}
+.status-completed{background:#e0f2fe;color:#0369a1}
 .card-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;font-size:.82rem;color:#6b7280}
 .card-meta span{display:inline-flex;align-items:center;gap:4px}
 .card-meta .material-icons{font-size:.95rem}
+.card-actions{display:flex;gap:10px;margin-top:14px}
+.card-actions .action-btn{flex:1;padding:10px;border:none;border-radius:10px;font-size:.84rem;font-weight:700;cursor:pointer}
+.card-actions .view-btn{background:#eff6ff;color:#1d4ed8}
+.card-actions .delete-btn{background:#fee2e2;color:#991b1b}
 .intake-link-box{margin-top:14px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;display:flex;align-items:center;gap:8px}
 .intake-link-box input{flex:1;border:none;background:none;font-size:.84rem;color:#334155;outline:none}
 .copy-btn{padding:6px 10px;border:none;border-radius:8px;background:#0ea5e9;color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap}
@@ -56,10 +61,12 @@
 {% endblock %}
 {% block content %}
 <div class="oa-page">
-  <a href="/oa/" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回 OA</a>
+  <a href="{% if current_user.role == 'admin' %}/auth/admin/dashboard{% else %}/auth/teacher/dashboard{% endif %}" class="back-link"><span class="material-icons" style="font-size:18px;">arrow_back</span> 返回上一页</a>
   <div class="page-header">
     <h1><span class="material-icons">school</span> 排课管理</h1>
+    {% if current_user.role == 'admin' %}
     <button class="btn-primary" onclick="openEnrollModal()"><span class="material-icons" style="font-size:1.1rem;">add</span> 新建报名</button>
+    {% endif %}
   </div>
 
   <div class="filters" id="filterTabs">
@@ -69,6 +76,7 @@
     <button class="filter-tab" data-filter="pending_student_confirm">待学生确认 <span class="filter-count" id="countPendingStudent">0</span></button>
     <button class="filter-tab" data-filter="confirmed">已确认 <span class="filter-count" id="countConfirmed">0</span></button>
     <button class="filter-tab" data-filter="active">进行中 <span class="filter-count" id="countActive">0</span></button>
+    <button class="filter-tab" data-filter="completed">已完成 <span class="filter-count" id="countCompleted">0</span></button>
   </div>
 
   <div id="enrollmentList" class="enrollment-grid">
@@ -118,7 +126,8 @@ const STATUS_META={
   pending_schedule:{label:'待排课',cls:'status-pending_schedule'},
   pending_student_confirm:{label:'待学生确认',cls:'status-pending_student_confirm'},
   confirmed:{label:'已确认',cls:'status-confirmed'},
-  active:{label:'进行中',cls:'status-active'}
+  active:{label:'进行中',cls:'status-active'},
+  completed:{label:'已完成',cls:'status-completed'}
 };
 let allEnrollments=[], currentFilter='all';
 
@@ -141,6 +150,7 @@ function updateCounts(){
   document.getElementById('countPendingStudent').textContent=allEnrollments.filter(e=>e.status==='pending_student_confirm').length;
   document.getElementById('countConfirmed').textContent=allEnrollments.filter(e=>e.status==='confirmed').length;
   document.getElementById('countActive').textContent=allEnrollments.filter(e=>e.status==='active').length;
+  document.getElementById('countCompleted').textContent=allEnrollments.filter(e=>e.status==='completed').length;
 }
 
 function renderEnrollments(){
@@ -162,6 +172,10 @@ function renderEnrollments(){
         ${e.teacher_name?`<span><span class="material-icons">person</span>${escapeHtml(e.teacher_name)}</span>`:''}
         <span><span class="material-icons">timer</span>${e.total_hours||0}课时</span>
         <span><span class="material-icons">event</span>${escapeHtml(e.created_at||'')}</span>
+      </div>
+      <div class="card-actions">
+        <button class="action-btn view-btn" onclick="event.stopPropagation();location.href='/auth/enrollments/${e.id}'">查看详情</button>
+        ${CURRENT_ROLE === 'admin' ? `<button class="action-btn delete-btn" onclick="event.stopPropagation();deleteEnrollment(${e.id}, '${escapeHtml(e.student_name)}')">删除报名</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -213,6 +227,23 @@ function copyIntakeLink(){
   navigator.clipboard.writeText(input.value).then(()=>showToast('链接已复制')).catch(()=>{document.execCommand('copy');showToast('链接已复制');});
 }
 
+async function deleteEnrollment(id, studentName){
+  if(!confirm(`确认删除报名「${studentName}」？如果已生成正式课表，将一并删除关联课程。`)) return;
+  try{
+    const res=await fetch(`/auth/api/enrollments/${id}`,{method:'DELETE'});
+    const json=await res.json();
+    if(json.success){
+      showToast('报名已删除');
+      loadEnrollments();
+    }else{
+      showToast(json.error||'删除失败');
+    }
+  }catch(e){
+    showToast('删除失败');
+  }
+}
+
+const CURRENT_ROLE = '{{ current_user.role }}';
 document.addEventListener('DOMContentLoaded',loadEnrollments);
 </script>
 {% endblock %}

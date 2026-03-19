@@ -38,14 +38,14 @@
                     <a href="/auth/admin/users" class="nav-link">用户管理</a>
                     <a href="/oa/todos" class="nav-link">待办</a>
                     <a href="/oa/painpoints" class="nav-link">痛点</a>
+                    <a href="/auth/chat" class="nav-link">消息 <span id="navUnreadBadge" style="display:none;margin-left:6px;padding:1px 7px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;vertical-align:middle"></span></a>
                     {% elif current_user.role == 'teacher' %}
                     <a href="/auth/teacher/dashboard" class="nav-link">我的面板</a>
-                    <a href="/oa/schedule" class="nav-link">排课表</a>
-                    <a href="/oa/todos" class="nav-link">待办</a>
-                    <a href="/auth/chat" class="nav-link">消息</a>
+                    <a href="/auth/enrollments" class="nav-link">排课管理</a>
+                    <a href="/auth/chat" class="nav-link">消息 <span id="navUnreadBadge" style="display:none;margin-left:6px;padding:1px 7px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;vertical-align:middle"></span></a>
                     {% elif current_user.role == 'student' %}
                     <a href="/auth/student/dashboard" class="nav-link">我的课表</a>
-                    <a href="/auth/chat" class="nav-link">消息</a>
+                    <a href="/auth/chat" class="nav-link">消息 <span id="navUnreadBadge" style="display:none;margin-left:6px;padding:1px 7px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;vertical-align:middle"></span></a>
                     {% endif %}
                     <span class="nav-link" style="opacity:0.6;font-size:0.85em;cursor:default">{{ current_user.display_name }}</span>
                     <a href="/auth/logout" class="nav-link" style="opacity:0.7;font-size:0.9em">退出</a>
@@ -127,6 +127,33 @@
         });
     })();
     </script>
+    {% if current_user.is_authenticated and current_user.role in ['admin', 'teacher', 'student'] %}
+    <script>
+    (function() {
+        const badge = document.getElementById('navUnreadBadge');
+        if (!badge) return;
+
+        async function refreshUnreadCount() {
+            try {
+                const res = await fetch('/auth/api/chat/unread-count');
+                const json = await res.json();
+                const count = json && json.success ? Number(json.count || 0) : 0;
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : String(count);
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            } catch (err) {
+                badge.style.display = 'none';
+            }
+        }
+
+        refreshUnreadCount();
+        window.setInterval(refreshUnreadCount, 30000);
+    })();
+    </script>
+    {% endif %}
 </body>
 
 </html>

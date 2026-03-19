@@ -21,6 +21,7 @@
 .conv-role{font-size:.65rem;padding:1px 6px;border-radius:999px;font-weight:600}
 .conv-role.teacher{background:#f3e8ff;color:#7c3aed}
 .conv-role.student{background:#dcfce7;color:#166534}
+.conv-role.admin{background:#e0f2fe;color:#0369a1}
 .conv-preview{font-size:.78rem;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .conv-unread{background:#ef4444;color:#fff;font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:999px;flex-shrink:0}
 .chat-main{flex:1;display:flex;flex-direction:column;background:#fafbfc}
@@ -130,6 +131,12 @@ document.addEventListener('DOMContentLoaded', function(){
   loadConversations();
 });
 
+function getRoleMeta(role){
+  if(role === 'teacher') return {cls: 'teacher', label: '老师'};
+  if(role === 'student') return {cls: 'student', label: '学生'};
+  return {cls: 'admin', label: '管理员'};
+}
+
 async function loadConversations(){
   try{
     const res = await fetch('/auth/api/chat/conversations');
@@ -141,14 +148,20 @@ async function loadConversations(){
       return;
     }
     list.innerHTML = json.data.map(c => {
-      const roleCls = c.role === 'teacher' ? 'teacher' : 'student';
-      const roleLabel = c.role === 'teacher' ? '老师' : '学生';
-      const unread = c.unread_count > 0 ? `<span class="conv-unread">${c.unread_count}</span>` : '';
+      const roleMeta = getRoleMeta(c.role);
+      const unreadCount = Number(c.unread_count || c.unread || 0);
+      const unread = unreadCount > 0 ? `<span class="conv-unread">${unreadCount}</span>` : '';
       return `
-        <div class="conv-item ${c.user_id === activePartnerId ? 'active' : ''}" onclick="openChat(${c.user_id}, '${escHtml(c.display_name)}', '${c.role}')">
+        <div
+          class="conv-item ${c.user_id === activePartnerId ? 'active' : ''}"
+          data-user-id="${c.user_id}"
+          data-name="${escAttr(c.display_name)}"
+          data-role="${escAttr(c.role)}"
+          onclick="openChatFromElement(this)"
+        >
           <div class="conv-avatar"><span class="material-icons">person</span></div>
           <div class="conv-info">
-            <div class="conv-name">${escHtml(c.display_name)} <span class="conv-role ${roleCls}">${roleLabel}</span></div>
+            <div class="conv-name">${escHtml(c.display_name)} <span class="conv-role ${roleMeta.cls}">${roleMeta.label}</span></div>
             <div class="conv-preview">${escHtml(c.last_message || '')}</div>
           </div>
           ${unread}
@@ -158,21 +171,27 @@ async function loadConversations(){
   }catch(e){console.error(e);}
 }
 
-async function openChat(userId, name, role){
+function openChatFromElement(element){
+  const {userId, name, role} = element.dataset;
+  return openChat(Number(userId), name, role, element);
+}
+
+async function openChat(userId, name, role, activeElement=null){
   activePartnerId = userId;
   document.getElementById('noChatSelected').style.display = 'none';
   const area = document.getElementById('chatArea');
   area.style.display = 'flex';
   document.getElementById('partnerName').textContent = name;
-  const roleLabel = role === 'teacher' ? '老师' : '学生';
-  document.getElementById('partnerRole').textContent = roleLabel;
+  document.getElementById('partnerRole').textContent = getRoleMeta(role).label;
 
   // On mobile, hide sidebar
   document.getElementById('chatSidebar').classList.add('hidden');
 
   // Highlight active
   document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
-  event && event.currentTarget && event.currentTarget.classList.add('active');
+  if(activeElement){
+    activeElement.classList.add('active');
+  }
 
   await loadMessages();
   startPolling();
@@ -251,7 +270,7 @@ async function openNewChat(){
   try{
     let contacts = [];
     if(CURRENT_ROLE === 'teacher'){
-      const res = await fetch('/auth/api/teacher/my-schedule');
+      const res = await fetch('/auth/api/teacher/my-schedule?range=all');
       const json = await res.json();
       if(json.success && json.data.students){
         const seen = new Set();
@@ -274,18 +293,31 @@ async function openNewChat(){
           }
         });
       }
+    } else if(CURRENT_ROLE === 'admin'){
+      const res = await fetch('/auth/api/users');
+      const json = await res.json();
+      if(json.success && json.data){
+        contacts = json.data
+          .filter(user => user.id !== CURRENT_USER_ID && user.is_active)
+          .map(user => ({id: user.id, name: user.display_name, role: user.role}));
+      }
     }
     if(contacts.length === 0){
       cl.innerHTML = '<div class="empty-state" style="padding:20px"><span>暂无可联系的人</span></div>';
       return;
     }
     cl.innerHTML = contacts.map(c => {
-      const roleCls = c.role === 'teacher' ? 'teacher' : 'student';
-      const roleLabel = c.role === 'teacher' ? '老师' : '学生';
+      const roleMeta = getRoleMeta(c.role);
       return `
-        <div class="modal-user-item" onclick="startChatWith(${c.id}, '${escHtml(c.name)}', '${c.role}')">
+        <div
+          class="modal-user-item"
+          data-user-id="${c.id}"
+          data-name="${escAttr(c.name)}"
+          data-role="${escAttr(c.role)}"
+          onclick="startChatWith(this)"
+        >
           <div class="conv-avatar"><span class="material-icons">person</span></div>
-          <div class="name">${escHtml(c.name)} <span class="conv-role ${roleCls}">${roleLabel}</span></div>
+          <div class="name">${escHtml(c.name)} <span class="conv-role ${roleMeta.cls}">${roleMeta.label}</span></div>
         </div>
       `;
     }).join('');
@@ -299,14 +331,20 @@ function closeNewChat(){
   document.getElementById('newChatModal').classList.remove('show');
 }
 
-function startChatWith(userId, name, role){
+function startChatWith(element){
+  const {userId, name, role} = element.dataset;
   closeNewChat();
-  openChat(userId, name, role);
+  openChat(Number(userId), name, role);
 }
 
 function escHtml(str){
   if(!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(str){
+  if(!str) return '';
+  return escHtml(str).replace(/'/g, '&#39;');
 }
 </script>
 {% endblock %}

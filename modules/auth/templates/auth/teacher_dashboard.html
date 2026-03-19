@@ -22,6 +22,9 @@
 .approve-btn:hover{background:#bbf7d0}
 .reject-btn{background:#fee2e2;color:#991b1b}
 .reject-btn:hover{background:#fecaca}
+.task-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:10px}
+.task-card .task-title{font-size:.92rem;font-weight:700;color:#111827}
+.task-card .task-detail{font-size:.82rem;color:#6b7280;margin-top:4px}
 .contact-info{font-size:.78rem;color:#6b7280;margin-top:4px}
 .contact-info .material-icons{font-size:.85rem;vertical-align:middle;margin-right:2px}
 .student-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
@@ -85,8 +88,8 @@
     <div class="section">
         <div class="nav-shortcuts">
             <button class="nav-btn" onclick="openAvailModal()"><span class="material-icons" style="font-size:1.1rem">schedule</span> 我的时间设置</button>
-            <a href="/oa/schedule" class="nav-btn secondary"><span class="material-icons" style="font-size:1.1rem">calendar_month</span> 排课表</a>
-            <a href="/oa/todos" class="nav-btn secondary"><span class="material-icons" style="font-size:1.1rem">checklist</span> 待办事项</a>
+            <a href="/auth/enrollments" class="nav-btn secondary"><span class="material-icons" style="font-size:1.1rem">school</span> 我的报名</a>
+            <a href="/auth/chat" class="nav-btn secondary"><span class="material-icons" style="font-size:1.1rem">chat</span> 消息 <span id="teacherChatBadge" style="display:none;margin-left:2px;padding:1px 7px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700"></span></a>
         </div>
     </div>
 
@@ -96,9 +99,27 @@
     </div>
 
     <div class="section">
+        <h2><span class="material-icons">upcoming</span> 未来 7 天课程</h2>
+        <div class="card">
+            <div id="upcomingList">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
         <h2><span class="material-icons">event_busy</span> 请假审批</h2>
         <div class="card">
             <div id="leaveList">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><span class="material-icons">edit_note</span> 待提交反馈</h2>
+        <div class="card">
+            <div id="feedbackList">
                 <div class="empty">加载中...</div>
             </div>
         </div>
@@ -155,21 +176,38 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 
 document.addEventListener('DOMContentLoaded', async function(){
     await loadProgress();
+    await loadUnreadCount();
 
     calendar = new WeekCalendar(document.getElementById('myCalendar'), {
         progressMap: progressMap,
-        teacherFilter: '{{ current_user.display_name }}'
+        fetchUrl: '/auth/api/teacher/my-schedules/by-date'
     });
     calendar.setProgressMap(progressMap);
     await calendar.render();
 
-    await loadStudents();
+    await loadTeacherSummary();
     await loadLeaveRequests();
 
     {% if not has_availability %}
     openAvailModal();
     {% endif %}
 });
+
+async function loadUnreadCount(){
+    try{
+        const res = await fetch('/auth/api/chat/unread-count');
+        const json = await res.json();
+        const badge = document.getElementById('teacherChatBadge');
+        if(!badge) return;
+        const count = json.success ? Number(json.count || 0) : 0;
+        if(count > 0){
+            badge.textContent = count > 99 ? '99+' : String(count);
+            badge.style.display = 'inline-block';
+        }else{
+            badge.style.display = 'none';
+        }
+    }catch(e){console.error(e);}
+}
 
 async function loadProgress(){
     try{
@@ -179,13 +217,14 @@ async function loadProgress(){
     }catch(e){console.error(e);}
 }
 
-async function loadStudents(){
+async function loadTeacherSummary(){
     try{
         const res = await fetch('/auth/api/teacher/my-schedule?range=all');
         const json = await res.json();
         if(!json.success) return;
-        const stl = document.getElementById('studentList');
         const d = json.data;
+
+        const stl = document.getElementById('studentList');
         if(d.students && d.students.length > 0){
             stl.innerHTML = d.students.map(s=>{
                 let contactHtml = '';
@@ -195,7 +234,62 @@ async function loadStudents(){
         } else {
             stl.innerHTML = '<div class="empty">暂无学生</div>';
         }
+
+        const upcoming = document.getElementById('upcomingList');
+        if(d.upcoming_schedules && d.upcoming_schedules.length > 0){
+            upcoming.innerHTML = d.upcoming_schedules.map(s => `
+                <div class="task-card">
+                    <div class="task-title">${s.course_name}</div>
+                    <div class="task-detail">${s.date} ${s.time_start}-${s.time_end} · ${s.students || '未绑定学生'}</div>
+                </div>
+            `).join('');
+        } else {
+            upcoming.innerHTML = '<div class="empty">未来 7 天暂无课程</div>';
+        }
+
+        const feedback = document.getElementById('feedbackList');
+        if(d.pending_feedback_schedules && d.pending_feedback_schedules.length > 0){
+            feedback.innerHTML = d.pending_feedback_schedules.map(s => `
+                <div class="task-card">
+                    <div class="task-title">${s.course_name}</div>
+                    <div class="task-detail">${s.date} ${s.time_start}-${s.time_end} · ${s.students || '未绑定学生'}</div>
+                    <div style="margin-top:10px">
+                        <button class="inline-btn" onclick="submitFeedback(${s.id}, '${(s.course_name || '').replace(/'/g, "\\'")}')">
+                            <span class="material-icons">edit_note</span> 提交反馈
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            feedback.innerHTML = '<div class="empty">暂无待提交反馈课程</div>';
+        }
     }catch(e){console.error(e);}
+}
+
+async function submitFeedback(scheduleId, courseName){
+    const summary = prompt(`请输入「${courseName}」本次课程总结：`);
+    if(summary === null) return;
+    const homework = prompt('请输入课后作业（可留空）：', '') ?? '';
+    const nextFocus = prompt('请输入下次课重点（可留空）：', '') ?? '';
+    try{
+        const res = await fetch(`/auth/api/schedules/${scheduleId}/feedback/submit`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({summary, homework, next_focus: nextFocus})
+        });
+        const json = await res.json();
+        if(json.success){
+            showToast('课程反馈已提交');
+            await loadTeacherSummary();
+            await loadProgress();
+            calendar.setProgressMap(progressMap);
+            await calendar.render();
+        }else{
+            alert(json.error || '提交失败');
+        }
+    }catch(e){
+        alert('网络错误');
+    }
 }
 
 async function loadLeaveRequests(){

@@ -24,9 +24,13 @@
 .enrollment-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:10px}
 .enrollment-card .course-name{font-size:.95rem;font-weight:700;color:#111827}
 .enrollment-card .details{font-size:.82rem;color:#6b7280;margin-top:4px}
+.schedule-card{padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #f1f5f9;margin-bottom:10px}
+.schedule-card .title{font-size:.92rem;font-weight:700;color:#111827}
+.schedule-card .detail{font-size:.82rem;color:#6b7280;margin-top:4px}
 .status-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.78rem;font-weight:700}
 .status-confirmed{background:#dcfce7;color:#166534}
 .status-active{background:#f3e8ff;color:#7c3aed}
+.status-completed{background:#e0f2fe;color:#0369a1}
 .status-pending_student_confirm{background:#fef3c7;color:#92400e}
 .confirm-preview{margin-top:12px;padding:14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px}
 .confirm-preview .preview-title{font-size:.85rem;font-weight:700;color:#0369a1;margin-bottom:8px}
@@ -63,6 +67,13 @@
     </div>
 
     <div class="section">
+        <h2><span class="material-icons">upcoming</span> 未来课次</h2>
+        <div class="card" id="scheduleCardList">
+            <div class="empty">加载中...</div>
+        </div>
+    </div>
+
+    <div class="section">
         <h2><span class="material-icons">event</span> 课表</h2>
         <div id="myCalendar"></div>
     </div>
@@ -83,23 +94,18 @@
 const STUDENT_NAME = '{{ current_user.display_name }}';
 let progressMap = {};
 let calendar = null;
+const DAY_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
 
 document.addEventListener('DOMContentLoaded', async function(){
     await loadProgress();
     await loadStudentData();
     await loadLeaveRequests();
 
-    // Calendar view - filter by student name in courses
     calendar = new WeekCalendar(document.getElementById('myCalendar'), {
         progressMap: progressMap,
+        fetchUrl: '/auth/api/student/my-schedules/by-date',
         emptyText: '等待老师排课中，请耐心等待',
     });
-    // Override data loading to filter by student
-    const origLoad = calendar._loadData.bind(calendar);
-    calendar._loadData = async function() {
-        await origLoad();
-        this.scheduleData = this.scheduleData.filter(s => s.students && s.students.includes(STUDENT_NAME));
-    };
     calendar.setProgressMap(progressMap);
     await calendar.render();
 });
@@ -118,6 +124,7 @@ async function loadStudentData(){
         const json = await res.json();
         if(!json.success) return;
         const d = json.data;
+        const todayStr = new Date().toISOString().slice(0,10);
 
         // Profile
         if(d.profile){
@@ -133,7 +140,7 @@ async function loadStudentData(){
 
         // Enrollments
         const ec = document.getElementById('enrollmentCard');
-        const statusLabels = {confirmed:'已确认', active:'进行中', pending_student_confirm:'待您确认',
+        const statusLabels = {confirmed:'已确认', active:'进行中', completed:'已完成', pending_student_confirm:'待您确认',
                               pending_info:'待填表', pending_schedule:'待排课'};
         if(d.enrollments && d.enrollments.length > 0){
             ec.innerHTML = d.enrollments.map(e=>{
@@ -141,13 +148,12 @@ async function loadStudentData(){
                 let extra = '';
                 if(e.status === 'pending_student_confirm' && e.confirmed_slot){
                     const s = e.confirmed_slot;
-                    const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
-                    const dayName = dayNames[s.day_of_week] || '';
-                    const dates = s.dates || [];
+                    const weeklyText = formatWeeklySlots(s.weekly_slots || []);
+                    const dates = (s.session_dates || []).map(item => item.date);
                     extra = `
                     <div class="confirm-preview">
                         <div class="preview-title">待确认的排课方案</div>
-                        <div class="preview-detail">每${dayName} ${s.time_start}-${s.time_end} · 共 ${dates.length} 节</div>
+                        <div class="preview-detail">${weeklyText || '待定'} · 共 ${dates.length} 节</div>
                         <div class="preview-range">${dates.length ? dates[0]+' 至 '+dates[dates.length-1] : ''}</div>
                         <div class="confirm-btns">
                             <button class="btn-confirm" onclick="confirmSchedule(${e.id})">确认排课</button>
@@ -155,6 +161,8 @@ async function loadStudentData(){
                         </div>
                     </div>`;
                 }
+                const editLink = e.can_edit ? `<div style="margin-top:10px"><a href="${e.edit_intake_url}" style="font-size:.82rem;color:#0369a1;font-weight:700;text-decoration:none">修改上课时间与信息</a></div>` : '';
+                const latestTeacherFeedback = e.latest_teacher_feedback ? `<div style="margin-top:10px;font-size:.82rem;color:#475569">最近一次老师反馈：${e.latest_teacher_feedback}</div>` : '';
                 return `
                 <div class="enrollment-card">
                     <div class="course-name">${e.course_name}</div>
@@ -163,12 +171,44 @@ async function loadStudentData(){
                         <span class="status-badge status-${e.status}">${label}</span>
                     </div>
                     ${extra}
+                    ${editLink}
+                    ${latestTeacherFeedback}
                 </div>`;
             }).join('');
         } else {
             ec.innerHTML = '<div class="empty">暂无课程</div>';
         }
+
+        const sc = document.getElementById('scheduleCardList');
+        if(d.schedules && d.schedules.length > 0){
+            const upcoming = d.schedules.filter(s => s.date >= todayStr).slice(0, 10);
+            if(upcoming.length > 0){
+                sc.innerHTML = upcoming.map(s => {
+                    const safeCourseName = (s.course_name || '').replace(/'/g, "\\'");
+                    const leaveBtn = s.can_request_leave ? `<button class="btn-reject" style="flex:none;padding:8px 14px" onclick="requestLeave(${s.id}, '${safeCourseName}', '${s.date}')">申请请假</button>` : '';
+                    const feedbackHtml = s.feedback && s.feedback.status === 'submitted' ? `<div style="margin-top:8px;font-size:.82rem;color:#334155">老师反馈：${s.feedback.summary || '已提交反馈'}</div>` : '';
+                    return `
+                        <div class="schedule-card">
+                            <div class="title">${s.course_name}</div>
+                            <div class="detail">${s.date} ${s.time_start}-${s.time_end} · ${s.teacher || s.teacher_name || ''}</div>
+                            ${feedbackHtml}
+                            ${leaveBtn ? `<div style="margin-top:10px">${leaveBtn}</div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                sc.innerHTML = '<div class="empty">暂无未来课次</div>';
+            }
+        } else {
+            sc.innerHTML = '<div class="empty">暂无未来课次</div>';
+        }
     }catch(e){console.error(e);}
+}
+
+function formatWeeklySlots(weeklySlots){
+    return (weeklySlots || []).map(slot => {
+        return `${DAY_NAMES[slot.day_of_week] || ''} ${slot.time_start}-${slot.time_end}`;
+    }).join('；');
 }
 
 async function confirmSchedule(enrollmentId){
@@ -190,7 +230,7 @@ async function rejectSchedule(enrollmentId){
             method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({message: msg||'学生对排课方案有疑问'})});
         const json = await res.json();
-        if(json.success) alert('已发送消息给老师，请在聊天中沟通。');
+        if(json.success){ alert('已发送消息给老师，排课已退回待重新安排。'); location.reload(); }
         else alert(json.error||'发送失败');
     }catch(e){alert('网络错误');}
 }

@@ -123,7 +123,7 @@ class Enrollment(db.Model):
     hours_per_session = db.Column(db.Float, default=2.0)
     sessions_per_week = db.Column(db.Integer, default=1)
     status = db.Column(db.String(30), default='pending_info')
-    # pending_info → pending_schedule → confirmed → active → completed
+    # pending_info → pending_schedule → pending_student_confirm → confirmed → active → completed
     intake_token = db.Column(db.String(64), unique=True)
     token_expires_at = db.Column(db.DateTime)
     student_profile_id = db.Column(db.Integer, db.ForeignKey('student_profiles.id'), nullable=True)
@@ -135,6 +135,7 @@ class Enrollment(db.Model):
 
     teacher = db.relationship('User', foreign_keys=[teacher_id])
     student_profile = db.relationship('StudentProfile', backref='enrollment', foreign_keys=[student_profile_id])
+    schedules = db.relationship('CourseSchedule', back_populates='enrollment', lazy=True)
 
     def to_dict(self):
         import json
@@ -186,7 +187,8 @@ class LeaveRequest(db.Model):
     approved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    schedule = db.relationship('CourseSchedule', foreign_keys=[schedule_id])
+    schedule = db.relationship('CourseSchedule', foreign_keys=[schedule_id], overlaps='leave_requests,schedule_record')
+    enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id])
     approver = db.relationship('User', foreign_keys=[approved_by])
 
     def to_dict(self):
@@ -198,6 +200,8 @@ class LeaveRequest(db.Model):
             'leave_date': self.leave_date.isoformat() if self.leave_date else None,
             'date': self.leave_date.isoformat() if self.leave_date else None,
             'course_name': self.schedule.course_name if self.schedule else '',
+            'teacher_id': self.schedule.teacher_id if self.schedule else None,
+            'teacher_name': self.schedule.teacher if self.schedule else '',
             'reason': self.reason,
             'status': self.status,
             'approved_by': self.approved_by,

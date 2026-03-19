@@ -13,6 +13,7 @@
 class WeekCalendar {
   constructor(container, options = {}) {
     this.container = container;
+    this.fetchUrl = options.fetchUrl || '/oa/api/schedules/by-date';
     this.progressMap = options.progressMap || {};
     this.onCourseClick = options.onCourseClick || null;
     this.teacherFilter = options.teacherFilter || null; // filter courses by teacher name
@@ -89,7 +90,8 @@ class WeekCalendar {
     const start = this._fmt(days[0]);
     const end = this._fmt(days[6]);
     try {
-      const res = await fetch(`/oa/api/schedules/by-date?start=${start}&end=${end}`);
+      const separator = this.fetchUrl.includes('?') ? '&' : '?';
+      const res = await fetch(`${this.fetchUrl}${separator}start=${start}&end=${end}`);
       const json = await res.json();
       if (json.success) {
         let data = json.data;

@@ -1,16 +1,95 @@
 import json
+from calendar import monthrange
 from datetime import date, timedelta
-from flask import render_template, jsonify, request, redirect, url_for
-from flask_login import login_user, logout_user, login_required, current_user
-from extensions import db
-from modules.auth.models import User, TeacherAvailability
-from modules.auth.services import seed_staff_accounts
-from modules.auth.decorators import role_required
 
+from flask import jsonify, redirect, render_template, request
+from flask_login import current_user, login_user, login_required, logout_user
+
+from extensions import db
 from modules.auth import auth_bp
+from modules.auth.decorators import role_required
+from modules.auth.models import Enrollment, LeaveRequest, TeacherAvailability, User
+from modules.auth.services import (
+    _latest_leave_request,
+    _schedule_has_started,
+    build_enrollment_payload,
+    build_feedback_payload,
+    build_schedule_payload,
+    delete_student_user_hard,
+    get_accessible_enrollment_query,
+    get_business_today,
+    save_course_feedback,
+    seed_staff_accounts,
+    user_can_access_schedule,
+)
+from modules.oa.models import CourseSchedule
+
+
+def _resolve_date_range(range_param):
+    today = get_business_today()
+    if range_param == 'month':
+        _, last_day = monthrange(today.year, today.month)
+        return today.replace(day=1), today.replace(day=last_day)
+    if range_param == 'all':
+        return today, today + timedelta(days=365)
+    start = today - timedelta(days=today.weekday())
+    return start, start + timedelta(days=6)
+
+
+def _parse_calendar_range():
+    start_str = request.args.get('start')
+    end_str = request.args.get('end')
+    if not start_str or not end_str:
+        return None, None, jsonify({'success': False, 'error': '请提供 start 和 end 日期参数'}), 400
+    try:
+        return date.fromisoformat(start_str), date.fromisoformat(end_str), None, None
+    except ValueError:
+        return None, None, jsonify({'success': False, 'error': '日期格式错误，请使用 YYYY-MM-DD'}), 400
+
+
+def _teacher_can_manage_availability(teacher_id):
+    return current_user.role == 'admin' or current_user.id == teacher_id
+
+
+def _feedback_permission_error(schedule):
+    if not schedule or schedule.teacher_id != current_user.id:
+        return jsonify({'success': False, 'error': '无权提交该课程反馈'}), 403
+    if getattr(schedule, 'feedback', None) and schedule.feedback.status == 'submitted':
+        return jsonify({'success': False, 'error': '该课程反馈已提交'}), 400
+    latest_leave = _latest_leave_request(schedule)
+    if latest_leave and latest_leave.status == 'approved':
+        return jsonify({'success': False, 'error': '该课程已批准请假，不能提交反馈'}), 400
+    if not _schedule_has_started(schedule):
+        return jsonify({'success': False, 'error': '课程尚未开始，暂不能提交反馈'}), 400
+    return None
+
+
+def _teacher_schedule_query(user, start, end):
+    return CourseSchedule.query.filter(
+        CourseSchedule.teacher_id == user.id,
+        CourseSchedule.date >= start,
+        CourseSchedule.date <= end,
+    ).order_by(CourseSchedule.date, CourseSchedule.time_start)
+
+
+def _student_schedule_query(user, start=None, end=None):
+    profile = user.student_profile
+    if not profile:
+        return CourseSchedule.query.filter(False)
+
+    query = CourseSchedule.query.join(
+        Enrollment, CourseSchedule.enrollment_id == Enrollment.id
+    ).filter(Enrollment.student_profile_id == profile.id)
+
+    if start is not None:
+        query = query.filter(CourseSchedule.date >= start)
+    if end is not None:
+        query = query.filter(CourseSchedule.date <= end)
+    return query.order_by(CourseSchedule.date, CourseSchedule.time_start)
 
 
 # ========== 登录/登出 ==========
+
 
 @auth_bp.route('/login', methods=['GET'])
 def login_page():
@@ -41,9 +120,9 @@ def login():
 def _redirect_by_role(user):
     if user.role == 'admin':
         return redirect('/auth/admin/dashboard')
-    elif user.role == 'teacher':
+    if user.role == 'teacher':
         return redirect('/auth/teacher/dashboard')
-    elif user.role == 'student':
+    if user.role == 'student':
         return redirect('/auth/student/dashboard')
     return redirect('/oa/')
 
@@ -56,6 +135,7 @@ def logout():
 
 # ========== 管理员面板 ==========
 
+
 @auth_bp.route('/admin/dashboard')
 @role_required('admin')
 def admin_dashboard():
@@ -66,20 +146,23 @@ def admin_dashboard():
 @auth_bp.route('/api/admin/stats')
 @role_required('admin')
 def api_admin_stats():
-    from modules.auth.models import Enrollment, StudentProfile
-    from modules.oa.models import CourseSchedule
+    from modules.auth.models import StudentProfile
 
-    today = date.today()
+    today = get_business_today()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
 
     total_users = User.query.count()
     pending_enrollments = Enrollment.query.filter(
-        Enrollment.status.in_(['pending_info', 'pending_schedule', 'pending_student_confirm'])).count()
-    confirmed_enrollments = Enrollment.query.filter_by(status='confirmed').count()
+        Enrollment.status.in_(['pending_info', 'pending_schedule', 'pending_student_confirm'])
+    ).count()
+    confirmed_enrollments = Enrollment.query.filter(
+        Enrollment.status.in_(['confirmed', 'active', 'completed'])
+    ).count()
     week_courses = CourseSchedule.query.filter(
         CourseSchedule.date >= week_start,
-        CourseSchedule.date <= week_end).count()
+        CourseSchedule.date <= week_end,
+    ).count()
     active_students = StudentProfile.query.count()
 
     return jsonify({
@@ -102,109 +185,130 @@ def manage_users():
 
 # ========== 老师面板 ==========
 
+
 @auth_bp.route('/teacher/dashboard')
-@login_required
+@role_required('teacher', 'admin')
 def teacher_dashboard():
     has_availability = TeacherAvailability.query.filter_by(user_id=current_user.id).count() > 0
     return render_template('auth/teacher_dashboard.html', has_availability=has_availability)
 
 
 @auth_bp.route('/api/teacher/my-schedule')
-@login_required
+@role_required('teacher', 'admin')
 def api_teacher_my_schedule():
-    from modules.oa.models import CourseSchedule
-    from modules.auth.models import Enrollment, StudentProfile
+    start, end = _resolve_date_range(request.args.get('range', 'week'))
+    schedules = _teacher_schedule_query(current_user, start, end).all()
+    payload_schedules = [build_schedule_payload(schedule, current_user) for schedule in schedules]
 
-    teacher_name = current_user.display_name
-    today = date.today()
-    range_param = request.args.get('range', 'week')
+    enrollments = get_accessible_enrollment_query(current_user).filter(
+        Enrollment.status.in_(['confirmed', 'active', 'pending_student_confirm', 'pending_schedule'])
+    ).all()
 
-    if range_param == 'month':
-        import calendar
-        _, last_day = calendar.monthrange(today.year, today.month)
-        start = today.replace(day=1)
-        end = today.replace(day=last_day)
-    elif range_param == 'all':
-        start = today
-        end = today + timedelta(days=365)
-    else:  # week
-        start = today - timedelta(days=today.weekday())
-        end = start + timedelta(days=6)
-
-    schedules = CourseSchedule.query.filter(
-        CourseSchedule.teacher == teacher_name,
-        CourseSchedule.date >= start,
-        CourseSchedule.date <= end
-    ).order_by(CourseSchedule.date, CourseSchedule.time_start).all()
-
-    enrollments = Enrollment.query.filter_by(teacher_id=current_user.id).filter(
-        Enrollment.status.in_(['confirmed', 'active'])).all()
-
-    # 学生联系方式
     students = []
-    for e in enrollments:
-        info = {'name': e.student_name, 'course': e.course_name, 'status': e.status}
-        if e.student_profile:
-            info['phone'] = e.student_profile.phone
-            info['parent_phone'] = e.student_profile.parent_phone
+    for enrollment in enrollments:
+        info = {
+            'name': enrollment.student_name,
+            'course': enrollment.course_name,
+            'status': enrollment.status,
+            'user_id': enrollment.student_profile.user_id if enrollment.student_profile else None,
+            'student_profile_id': enrollment.student_profile_id,
+        }
+        if enrollment.student_profile:
+            info['phone'] = enrollment.student_profile.phone
+            info['parent_phone'] = enrollment.student_profile.parent_phone
         students.append(info)
+
+    today = get_business_today()
+    upcoming_end = today + timedelta(days=7)
+    upcoming = [
+        payload for payload in payload_schedules
+        if today <= date.fromisoformat(payload['date']) <= upcoming_end
+    ]
+    pending_feedback = [
+        payload for payload in payload_schedules
+        if payload.get('can_submit_feedback')
+    ]
 
     return jsonify({
         'success': True,
         'data': {
-            'schedules': [s.to_dict() for s in schedules],
+            'schedules': payload_schedules,
             'students': students,
-            'total': len(schedules),
+            'total': len(payload_schedules),
+            'upcoming_schedules': upcoming[:10],
+            'pending_feedback_schedules': pending_feedback[:10],
+            'pending_feedback_count': len(pending_feedback),
         }
+    })
+
+
+@auth_bp.route('/api/teacher/my-schedules/by-date')
+@role_required('teacher', 'admin')
+def api_teacher_my_schedules_by_date():
+    start, end, error_response, status_code = _parse_calendar_range()
+    if error_response:
+        return error_response, status_code
+
+    schedules = _teacher_schedule_query(current_user, start, end).all()
+    return jsonify({
+        'success': True,
+        'data': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+        'total': len(schedules),
     })
 
 
 # ========== 学生面板 ==========
 
+
 @auth_bp.route('/student/dashboard')
-@login_required
+@role_required('student')
 def student_dashboard():
     return render_template('auth/student_dashboard.html')
 
 
 @auth_bp.route('/api/student/my-info')
-@login_required
+@role_required('student')
 def api_student_my_info():
-    from modules.oa.models import CourseSchedule
-    from modules.auth.models import Enrollment
-
     profile = current_user.student_profile
-    student_name = current_user.display_name
+    enrollments = []
+    schedules = []
 
-    # 查课表
-    schedules = CourseSchedule.query.filter(
-        CourseSchedule.students.contains(student_name)
-    ).order_by(CourseSchedule.date.desc()).limit(50).all()
-
-    # 查报名
-    enrollments = Enrollment.query.filter(
-        Enrollment.student_name == student_name
-    ).all()
+    if profile:
+        enrollments = Enrollment.query.filter(
+            Enrollment.student_profile_id == profile.id
+        ).order_by(Enrollment.created_at.desc()).all()
+        schedules = _student_schedule_query(current_user).order_by(
+            CourseSchedule.date.desc(),
+            CourseSchedule.time_start.desc(),
+        ).limit(50).all()
 
     return jsonify({
         'success': True,
         'data': {
             'profile': profile.to_dict() if profile else None,
-            'schedules': [s.to_dict() for s in schedules],
-            'enrollments': [{
-                'id': e.id,
-                'course_name': e.course_name,
-                'teacher_name': e.teacher.display_name if e.teacher else '',
-                'total_hours': e.total_hours,
-                'hours_per_session': e.hours_per_session,
-                'status': e.status,
-                'confirmed_slot': json.loads(e.confirmed_slot) if e.confirmed_slot else None,
-            } for e in enrollments],
+            'schedules': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+            'enrollments': [build_enrollment_payload(enrollment, current_user) for enrollment in enrollments],
         }
     })
 
 
+@auth_bp.route('/api/student/my-schedules/by-date')
+@role_required('student')
+def api_student_my_schedules_by_date():
+    start, end, error_response, status_code = _parse_calendar_range()
+    if error_response:
+        return error_response, status_code
+
+    schedules = _student_schedule_query(current_user, start, end).all()
+    return jsonify({
+        'success': True,
+        'data': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+        'total': len(schedules),
+    })
+
+
 # ========== 用户管理 API ==========
+
 
 @auth_bp.route('/api/users', methods=['GET'])
 @role_required('admin')
@@ -246,7 +350,7 @@ def api_create_user():
 @auth_bp.route('/api/users/<int:user_id>', methods=['PUT'])
 @role_required('admin')
 def api_update_user(user_id):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({'success': False, 'error': '用户不存在'}), 404
 
@@ -272,18 +376,16 @@ def api_update_user(user_id):
 @auth_bp.route('/api/users/<int:user_id>', methods=['DELETE'])
 @role_required('admin')
 def api_delete_user(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'success': False, 'error': '用户不存在'}), 404
-    user.is_active = False
-    db.session.commit()
-    return jsonify({'success': True, 'message': '用户已停用'})
+    success, message = delete_student_user_hard(user_id)
+    if success:
+        return jsonify({'success': True, 'message': message})
+    return jsonify({'success': False, 'error': message}), 404 if message == '用户不存在' else 400
 
 
 @auth_bp.route('/api/users/<int:user_id>/toggle', methods=['POST'])
 @role_required('admin')
 def api_toggle_user(user_id):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({'success': False, 'error': '用户不存在'}), 404
     user.is_active = not user.is_active
@@ -300,26 +402,32 @@ def api_seed_staff():
 
 # ========== 老师可用时间 ==========
 
+
 @auth_bp.route('/teacher/availability')
-@login_required
+@role_required('teacher', 'admin')
 def teacher_availability_page():
-    teachers = User.query.filter(User.role.in_(['teacher', 'admin'])).all()
+    if current_user.role == 'admin':
+        teachers = User.query.filter(User.role.in_(['teacher', 'admin'])).all()
+    else:
+        teachers = [current_user]
     return render_template('auth/teacher_availability.html', teachers=teachers)
 
 
 @auth_bp.route('/api/teacher/<int:teacher_id>/availability', methods=['GET'])
-@login_required
+@role_required('teacher', 'admin')
 def api_get_teacher_availability(teacher_id):
-    user = User.query.get(teacher_id)
+    user = db.session.get(User, teacher_id)
     if not user:
         return jsonify({'success': False, 'error': '用户不存在'}), 404
+    if not _teacher_can_manage_availability(teacher_id):
+        return jsonify({'success': False, 'error': '无权访问该教师时间设置'}), 403
 
     slots = TeacherAvailability.query.filter_by(user_id=teacher_id).all()
     available = []
     preferred = []
-    for s in slots:
-        item = {'day': s.day_of_week, 'start': s.time_start, 'end': s.time_end}
-        if s.is_preferred:
+    for slot in slots:
+        item = {'day': slot.day_of_week, 'start': slot.time_start, 'end': slot.time_end}
+        if slot.is_preferred:
             preferred.append(item)
         else:
             available.append(item)
@@ -327,11 +435,13 @@ def api_get_teacher_availability(teacher_id):
 
 
 @auth_bp.route('/api/teacher/<int:teacher_id>/availability', methods=['POST'])
-@login_required
+@role_required('teacher', 'admin')
 def api_set_teacher_availability(teacher_id):
-    user = User.query.get(teacher_id)
+    user = db.session.get(User, teacher_id)
     if not user:
         return jsonify({'success': False, 'error': '用户不存在'}), 404
+    if not _teacher_can_manage_availability(teacher_id):
+        return jsonify({'success': False, 'error': '无权修改该教师时间设置'}), 403
 
     data = request.get_json()
     if not data:
@@ -341,14 +451,73 @@ def api_set_teacher_availability(teacher_id):
 
     for slot_data in data.get('available', []):
         db.session.add(TeacherAvailability(
-            user_id=teacher_id, day_of_week=slot_data['day'],
-            time_start=slot_data['start'], time_end=slot_data['end'],
-            is_preferred=False))
+            user_id=teacher_id,
+            day_of_week=slot_data['day'],
+            time_start=slot_data['start'],
+            time_end=slot_data['end'],
+            is_preferred=False,
+        ))
     for slot_data in data.get('preferred', []):
         db.session.add(TeacherAvailability(
-            user_id=teacher_id, day_of_week=slot_data['day'],
-            time_start=slot_data['start'], time_end=slot_data['end'],
-            is_preferred=True))
+            user_id=teacher_id,
+            day_of_week=slot_data['day'],
+            time_start=slot_data['start'],
+            time_end=slot_data['end'],
+            is_preferred=True,
+        ))
 
     db.session.commit()
     return jsonify({'success': True, 'message': '保存成功'})
+
+
+# ========== 课程反馈 API ==========
+
+
+@auth_bp.route('/api/schedules/<int:schedule_id>/feedback', methods=['GET'])
+@login_required
+def api_get_schedule_feedback(schedule_id):
+    schedule = db.session.get(CourseSchedule, schedule_id)
+    if not schedule:
+        return jsonify({'success': False, 'error': '课程不存在'}), 404
+    if not user_can_access_schedule(current_user, schedule):
+        return jsonify({'success': False, 'error': '无权查看该课程反馈'}), 403
+
+    feedback = schedule.feedback
+    if current_user.role == 'student' and (not feedback or feedback.status != 'submitted'):
+        return jsonify({'success': True, 'data': None})
+
+    return jsonify({'success': True, 'data': build_feedback_payload(feedback, current_user)})
+
+
+@auth_bp.route('/api/schedules/<int:schedule_id>/feedback', methods=['POST'])
+@role_required('teacher')
+def api_save_schedule_feedback(schedule_id):
+    schedule = db.session.get(CourseSchedule, schedule_id)
+    if not schedule:
+        return jsonify({'success': False, 'error': '课程不存在'}), 404
+    permission_error = _feedback_permission_error(schedule)
+    if permission_error:
+        return permission_error
+
+    data = request.get_json() or {}
+    success, message, feedback = save_course_feedback(schedule, current_user.id, data, submit=False)
+    if not success:
+        return jsonify({'success': False, 'error': message}), 400
+    return jsonify({'success': True, 'message': message, 'data': build_feedback_payload(feedback, current_user)})
+
+
+@auth_bp.route('/api/schedules/<int:schedule_id>/feedback/submit', methods=['POST'])
+@role_required('teacher')
+def api_submit_schedule_feedback(schedule_id):
+    schedule = db.session.get(CourseSchedule, schedule_id)
+    if not schedule:
+        return jsonify({'success': False, 'error': '课程不存在'}), 404
+    permission_error = _feedback_permission_error(schedule)
+    if permission_error:
+        return permission_error
+
+    data = request.get_json() or {}
+    success, message, feedback = save_course_feedback(schedule, current_user.id, data, submit=True)
+    if not success:
+        return jsonify({'success': False, 'error': message}), 400
+    return jsonify({'success': True, 'message': message, 'data': build_feedback_payload(feedback, current_user)})

@@ -12,7 +12,9 @@ class CourseSchedule(db.Model):
     time_start = db.Column(db.String(10), nullable=False)
     time_end = db.Column(db.String(10), nullable=False)
     teacher = db.Column(db.String(100), nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     course_name = db.Column(db.String(200), nullable=False)
+    enrollment_id = db.Column(db.Integer, db.ForeignKey('enrollments.id'), nullable=True)
     students = db.Column(db.Text)
     location = db.Column(db.String(200))
     notes = db.Column(db.Text)
@@ -21,6 +23,20 @@ class CourseSchedule(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     todos = db.relationship('OATodo', backref='schedule', lazy=True)
+    feedback = db.relationship(
+        'CourseFeedback',
+        backref='schedule',
+        uselist=False,
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    leave_requests = db.relationship(
+        'LeaveRequest',
+        backref='schedule_record',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id], lazy=True, back_populates='schedules')
 
     def to_dict(self):
         return {
@@ -30,13 +46,51 @@ class CourseSchedule(db.Model):
             'time_start': self.time_start,
             'time_end': self.time_end,
             'teacher': self.teacher,
+            'teacher_id': self.teacher_id,
             'course_name': self.course_name,
+            'enrollment_id': self.enrollment_id,
             'students': self.students,
             'location': self.location,
             'notes': self.notes,
             'color_tag': self.color_tag,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class CourseFeedback(db.Model):
+    """课后反馈，一节课一条。"""
+    __tablename__ = 'course_feedback'
+    __table_args__ = (
+        db.UniqueConstraint('schedule_id', 'teacher_id', name='uq_course_feedback_schedule_teacher'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    summary = db.Column(db.Text)
+    homework = db.Column(db.Text)
+    next_focus = db.Column(db.Text)
+    status = db.Column(db.String(20), default='draft')  # draft / submitted
+    submitted_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    teacher = db.relationship('User', foreign_keys=[teacher_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'schedule_id': self.schedule_id,
+            'teacher_id': self.teacher_id,
+            'teacher_name': self.teacher.display_name if self.teacher else None,
+            'summary': self.summary,
+            'homework': self.homework,
+            'next_focus': self.next_focus,
+            'status': self.status,
+            'submitted_at': self.submitted_at.isoformat() if self.submitted_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
