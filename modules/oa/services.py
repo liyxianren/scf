@@ -48,6 +48,12 @@ COLOR_TAG_TO_DELIVERY_MODE = {
     'teal': 'special',
 }
 
+COURSE_KEYWORDS = (
+    '项目', '课程', '辅导', '竞赛', '训练', '面试', '工作坊', '技术课', '工程',
+    'USACO', 'USABO', 'BBO', 'AMC', 'AIME', 'AI', '科研', '编程', '数学',
+    '物理', '化学', '生物', '口语', '写作', '夏校',
+)
+
 TEACHER_ALIAS_MAP = {
     '田老师': '田鹏',
     '范老师': '范晓东',
@@ -231,9 +237,148 @@ def _normalize_teacher_token(value):
     return normalized
 
 
+def _strip_inline_annotation(value):
+    if value is None:
+        return ''
+    return re.sub(r'[（(][^）)]*[）)]', '', str(value)).strip()
+
+
+def _get_known_teacher_names():
+    from modules.auth.models import User
+
+    names = set(TEACHER_ALIAS_MAP.keys()) | set(TEACHER_ALIAS_MAP.values())
+    try:
+        users = User.query.filter(
+            User.is_active == True,
+            User.role.in_(['teacher', 'admin']),
+        ).all()
+        names.update(user.display_name for user in users if user.display_name)
+        names.update(user.username for user in users if user.username)
+    except Exception:
+        pass
+    return names
+
+
+def _split_people_tokens(value):
+    base = _strip_inline_annotation(value)
+    return [token.strip() for token in re.split(r'[、，,]+', base) if token.strip()]
+
+
+def _is_name_like_token(value):
+    token = str(value or '').strip().strip('-—')
+    if not token:
+        return False
+    if token.endswith('老师'):
+        return True
+    if re.fullmatch(r'[\u4e00-\u9fff]{2,4}', token):
+        return True
+    if re.fullmatch(r'[A-Za-z][A-Za-z .-]{0,20}', token):
+        return True
+    return False
+
+
+def _looks_like_course_line(value):
+    text = str(value or '').strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    return any(keyword.casefold() in lowered for keyword in COURSE_KEYWORDS)
+
+
+def _looks_like_teacher_line(value):
+    text = _normalize_teacher_token(_strip_inline_annotation(value))
+    if not text:
+        return False
+
+    known_names = _get_known_teacher_names()
+    if text in known_names:
+        return True
+    if text in TEACHER_ALIAS_MAP:
+        return True
+    if '老师' in text:
+        return True
+
+    tokens = _split_people_tokens(text)
+    if not tokens:
+        return False
+    if all(token in known_names or token in TEACHER_ALIAS_MAP or token.endswith('老师') for token in tokens):
+        return True
+    return any(token in known_names for token in tokens)
+
+
+def _looks_like_student_line(value):
+    text = str(value or '').strip()
+    if not text or _looks_like_course_line(text) or _looks_like_teacher_line(text):
+        return False
+
+    tokens = _split_people_tokens(text)
+    if not tokens:
+        return False
+    if len(tokens) >= 2:
+        return all(_is_name_like_token(token) for token in tokens)
+    return _is_name_like_token(tokens[0])
+
+
+def _extract_teacher_and_metadata(extra_lines, inline_teacher=''):
+    teacher = inline_teacher.strip()
+    remaining_lines = [line.strip() for line in extra_lines if str(line or '').strip()]
+
+    if not teacher:
+        for index, line in enumerate(remaining_lines):
+            if _looks_like_teacher_line(line):
+                teacher = line.strip()
+                remaining_lines = remaining_lines[:index] + remaining_lines[index + 1:]
+                break
+
+    course_lines = []
+    student_lines = []
+    unknown_lines = []
+
+    for line in remaining_lines:
+        if _looks_like_course_line(line):
+            course_lines.append(line)
+        elif _looks_like_student_line(line):
+            student_lines.append(line)
+        else:
+            unknown_lines.append(line)
+
+    if not course_lines and unknown_lines:
+        course_lines.append(unknown_lines.pop(0))
+    if not student_lines and unknown_lines:
+        student_lines.append(unknown_lines.pop(-1))
+
+    course_name = ' / '.join(course_lines).strip()
+    students = '、'.join(student_lines).strip()
+    return teacher, course_name, students
+
+
+def _extract_time_ranges(line):
+    matches = list(TIME_PATTERN.finditer(line))
+    if not matches:
+        return [], ''
+
+    time_ranges = [
+        (normalize_time(match.group(1)), normalize_time(match.group(2)))
+        for match in matches
+    ]
+    trailing_text = line[matches[-1].end():].strip()
+    return time_ranges, trailing_text
+
+
 def normalize_teacher_name(value):
     normalized = _normalize_teacher_token(value)
+    base = _normalize_teacher_token(_strip_inline_annotation(normalized))
+    known_names = _get_known_teacher_names()
+
     canonical = TEACHER_ALIAS_MAP.get(normalized, normalized)
+    if canonical == normalized and base:
+        canonical = TEACHER_ALIAS_MAP.get(base, base)
+
+    if canonical.endswith('老师'):
+        stripped = canonical[:-2]
+        if stripped in known_names:
+            canonical = stripped
+
     alias_hit = normalized if normalized and canonical != normalized else None
     return canonical, alias_hit
 
@@ -307,18 +452,9 @@ def parse_course_cell(cell_value):
 
     while i < len(lines):
         line = lines[i]
-        match = TIME_PATTERN.search(line)
+        time_ranges, inline_teacher = _extract_time_ranges(line)
 
-        if match:
-            time_start = normalize_time(match.group(1))
-            time_end = normalize_time(match.group(2))
-
-            after_time = line[match.end():].strip()
-            teacher = after_time if after_time else ''
-
-            course_name = ''
-            students = ''
-
+        if time_ranges:
             j = i + 1
             extra_lines = []
             while j < len(lines):
@@ -327,18 +463,15 @@ def parse_course_cell(cell_value):
                 extra_lines.append(lines[j])
                 j += 1
 
-            if extra_lines:
-                course_name = extra_lines[0]
-                if len(extra_lines) > 1:
-                    students = extra_lines[1]
-
-            courses.append({
-                'time_start': time_start,
-                'time_end': time_end,
-                'teacher': teacher,
-                'course_name': course_name,
-                'students': students,
-            })
+            teacher, course_name, students = _extract_teacher_and_metadata(extra_lines, inline_teacher=inline_teacher)
+            for time_start, time_end in time_ranges:
+                courses.append({
+                    'time_start': time_start,
+                    'time_end': time_end,
+                    'teacher': teacher,
+                    'course_name': course_name,
+                    'students': students,
+                })
 
             i = j
         else:
@@ -457,33 +590,34 @@ def import_schedule_from_excel(file_path, original_filename=None):
                     if alias_hit:
                         teacher_alias_hits[f'{alias_hit}->{teacher_name}'] += 1
 
-                    if not teacher_name:
-                        warnings.append(
-                            f'{sheet_name}!{cell.coordinate} {course_date.isoformat()} {course["time_start"]}-{course["time_end"]} 缺少教师姓名，已跳过'
-                        )
-                        continue
-
-                    teacher_user, teacher_error = resolve_schedule_teacher_user(teacher_name)
-                    if teacher_error:
-                        warnings.append(
-                            f'{sheet_name}!{cell.coordinate} 教师“{teacher_name}”无法匹配正式账号，已跳过'
-                        )
-                        continue
-
                     course_name = (course['course_name'] or '').strip()
                     if not course_name:
                         warnings.append(
-                            f'{sheet_name}!{cell.coordinate} {course_date.isoformat()} {course["time_start"]}-{course["time_end"]} 缺少课程名称，已跳过'
+                            f'{sheet_name}!{cell.coordinate} {course_date.isoformat()} {course["time_start"]}-{course["time_end"]} 缺少课程名称，已使用“未命名课程”'
                         )
-                        continue
+                        course_name = '未命名课程'
+
+                    if not teacher_name:
+                        warnings.append(
+                            f'{sheet_name}!{cell.coordinate} {course_date.isoformat()} {course["time_start"]}-{course["time_end"]} 缺少教师姓名，已标记为待匹配教师'
+                        )
+                        teacher_name = '待匹配教师'
+                        teacher_user = None
+                    else:
+                        teacher_user, teacher_error = resolve_schedule_teacher_user(teacher_name)
+                        if teacher_error:
+                            warnings.append(
+                                f'{sheet_name}!{cell.coordinate} 教师“{teacher_name}”无法匹配正式账号，已按文本导入'
+                            )
+                            teacher_user = None
 
                     schedules.append({
                         'date': course_date,
                         'day_of_week': course_date.weekday(),
                         'time_start': course['time_start'],
                         'time_end': course['time_end'],
-                        'teacher': teacher_user.display_name,
-                        'teacher_id': teacher_user.id,
+                        'teacher': teacher_user.display_name if teacher_user else teacher_name,
+                        'teacher_id': teacher_user.id if teacher_user else None,
                         'course_name': course_name,
                         'students': (course['students'] or '').strip(),
                         'color_tag': color_tag,
