@@ -14,3 +14,4 @@ __pycache__/
 flask.log
 .claude/
 *.xlsx
+!backups/database.db
