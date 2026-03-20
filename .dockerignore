@@ -1,0 +1,12 @@
+.git
+.gitignore
+__pycache__/
+.pytest_cache/
+.tmp/
+pytest-temp/
+.codex-local/
+tests/
+demo-landing/
+tmp-mobile-*.png
+node_modules/
+video/
