@@ -134,8 +134,16 @@
     .import-result.error { color: #dc2626; }
 
     @media (max-width: 640px) {
+        .oa-page { padding: 22px 14px 32px; }
+        .oa-header { margin-bottom: 24px; }
+        .oa-header h1 { font-size: 1.5rem; }
         .oa-stats-row { grid-template-columns: 1fr; }
         .oa-nav-grid { grid-template-columns: 1fr; }
+        .oa-stat-card, .import-section { padding: 18px 16px; }
+        .oa-nav-card { align-items: flex-start; text-align: left; padding: 22px 18px; }
+        .schedule-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+        .schedule-item .time-badge { align-self: flex-start; }
+        .import-btn { width: 100%; justify-content: center; }
     }
 </style>
 {% endblock %}
@@ -260,7 +268,9 @@ document.getElementById('importFile').addEventListener('change', async function(
         const json = await res.json();
 
         if (json.success) {
-            result.textContent = `导入成功: ${json.data.schedules_count} 条课程, ${json.data.todos_count} 条待办`;
+            const warningCount = Array.isArray(json.data.warnings) ? json.data.warnings.length : 0;
+            const aliasHits = json.data.teacher_alias_hits ? Object.values(json.data.teacher_alias_hits).reduce((sum, count) => sum + Number(count || 0), 0) : 0;
+            result.textContent = `导入成功: ${json.data.schedules_count} 条课程, ${json.data.todos_count} 条待办${warningCount ? `，${warningCount} 条警告` : ''}${aliasHits ? `，${aliasHits} 个教师别名被归一化` : ''}`;
             result.className = 'import-result success';
             loadDashboard();
         } else {

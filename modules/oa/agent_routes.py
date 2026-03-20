@@ -113,6 +113,8 @@ def schedule_agent_confirm():
 # ------------------------------------------------------------------
 
 def _confirm_create(data):
+    from modules.oa.services import delivery_mode_from_color_tag
+
     schedules = data.get('schedules', [])
     if not schedules:
         return jsonify({'success': False, 'error': '没有要创建的课程'}), 400
@@ -133,6 +135,7 @@ def _confirm_create(data):
                 location=s.get('location', ''),
                 notes=s.get('notes', ''),
                 color_tag=s.get('color_tag', 'blue'),
+                delivery_mode=delivery_mode_from_color_tag(s.get('color_tag', 'blue')),
             )
             db.session.add(course)
             created += 1

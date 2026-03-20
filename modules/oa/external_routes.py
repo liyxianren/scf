@@ -1,7 +1,5 @@
 """External OA API routes."""
 import json
-import os
-import tempfile
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 
@@ -25,7 +23,11 @@ from modules.auth.services import (
 from modules.oa import oa_bp
 from modules.oa.external_api import external_api_required, external_error, external_success
 from modules.oa.models import CourseSchedule, OATodo
-from modules.oa.services import deduplicate_todo_payloads, import_schedule_from_excel
+from modules.oa.services import (
+    apply_schedule_excel_import,
+    delivery_mode_from_color_tag,
+    resolve_schedule_teacher_reference,
+)
 
 
 def _get_json_payload():
@@ -54,12 +56,10 @@ def _resolve_teacher_from_payload(data):
         return teacher_user, teacher_user.display_name, None
 
     if teacher_name:
-        teacher_user = User.query.filter(
-            or_(User.display_name == teacher_name, User.username == teacher_name)
-        ).first()
-        if not teacher_user:
-            return None, None, external_error(f'未找到老师: {teacher_name}')
-        return teacher_user, teacher_user.display_name, None
+        teacher_user, canonical_name, _, error = resolve_schedule_teacher_reference(teacher_name)
+        if error or not teacher_user:
+            return None, None, external_error(error or f'未找到老师: {teacher_name}')
+        return teacher_user, canonical_name, None
 
     return None, None, external_error('缺少 teacher_id 或 teacher_name')
 
@@ -224,6 +224,7 @@ def external_create_schedule():
         location=data.get('location', ''),
         notes=data.get('notes', ''),
         color_tag=data.get('color_tag', 'blue'),
+        delivery_mode=delivery_mode_from_color_tag(data.get('color_tag', 'blue')),
     )
     db.session.add(schedule)
     db.session.commit()
@@ -258,6 +259,8 @@ def external_update_schedule(schedule_id):
     for field in ['time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag', 'enrollment_id']:
         if field in data:
             setattr(schedule, field, data[field])
+    if 'color_tag' in data:
+        schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
 
     db.session.commit()
     return external_success(schedule.to_dict())
@@ -490,33 +493,12 @@ def external_import_excel():
     if not file.filename.endswith(('.xlsx', '.xls')):
         return external_error('仅支持 .xlsx 或 .xls 文件')
 
-    fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
-    file.save(tmp_path)
-    os.close(fd)
-
     try:
-        schedules, todos = import_schedule_from_excel(tmp_path, original_filename=file.filename)
-        todos, removed_todo_duplicates = deduplicate_todo_payloads(todos)
-
-        CourseSchedule.query.delete()
-        OATodo.query.delete()
-
-        for schedule_payload in schedules:
-            db.session.add(CourseSchedule(**schedule_payload))
-        for todo_payload in todos:
-            db.session.add(OATodo(**todo_payload))
-
-        db.session.commit()
-        return external_success({
-            'schedules_count': len(schedules),
-            'todos_count': len(todos),
-            'removed_todo_duplicates': removed_todo_duplicates,
-        })
+        _, summary = apply_schedule_excel_import(file)
+        return external_success(summary)
     except Exception as exc:
         db.session.rollback()
         return external_error(f'导入失败: {str(exc)}', status=500)
-    finally:
-        os.unlink(tmp_path)
 
 
 @oa_bp.route('/api/external/teachers/<int:teacher_id>/availability', methods=['GET'])

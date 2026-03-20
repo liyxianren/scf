@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from extensions import db
 
@@ -19,6 +20,8 @@ class CourseSchedule(db.Model):
     location = db.Column(db.String(200))
     notes = db.Column(db.Text)
     color_tag = db.Column(db.String(20), default='blue')
+    delivery_mode = db.Column(db.String(20), default='unknown')
+    import_run_id = db.Column(db.Integer, db.ForeignKey('schedule_import_runs.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -53,8 +56,53 @@ class CourseSchedule(db.Model):
             'location': self.location,
             'notes': self.notes,
             'color_tag': self.color_tag,
+            'delivery_mode': self.delivery_mode,
+            'import_run_id': self.import_run_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class ScheduleImportRun(db.Model):
+    """课表导入记录，用于保存原始 Excel 与导入摘要。"""
+    __tablename__ = 'schedule_import_runs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_path = db.Column(db.String(500))
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    status = db.Column(db.String(30), default='pending', nullable=False)
+    summary_json = db.Column(db.Text)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    uploader = db.relationship('User', foreign_keys=[uploaded_by])
+    schedules = db.relationship('CourseSchedule', backref='import_run', lazy=True)
+
+    def get_summary_data(self):
+        if not self.summary_json:
+            return {}
+        try:
+            data = json.loads(self.summary_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_summary_data(self, value):
+        if value is None:
+            self.summary_json = None
+            return
+        self.summary_json = json.dumps(value, ensure_ascii=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'original_filename': self.original_filename,
+            'stored_path': self.stored_path,
+            'uploaded_by': self.uploaded_by,
+            'uploader_name': self.uploader.display_name if self.uploader else None,
+            'status': self.status,
+            'summary': self.get_summary_data(),
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
         }
 
 
@@ -98,6 +146,18 @@ class OATodo(db.Model):
     """OA待办事项模型"""
     __tablename__ = 'oa_todos'
 
+    TODO_TYPE_GENERIC = 'generic'
+    TODO_TYPE_EXCEL_IMPORT = 'excel_import'
+    TODO_TYPE_ENROLLMENT_REPLAN = 'enrollment_replan'
+    TODO_TYPE_LEAVE_MAKEUP = 'leave_makeup'
+    TODO_TYPE_SCHEDULE_FEEDBACK = 'schedule_feedback'
+
+    WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL = 'waiting_teacher_proposal'
+    WORKFLOW_STATUS_WAITING_ADMIN_REVIEW = 'waiting_admin_review'
+    WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM = 'waiting_student_confirm'
+    WORKFLOW_STATUS_COMPLETED = 'completed'
+    WORKFLOW_STATUS_CANCELLED = 'cancelled'
+
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(300), nullable=False)
     description = db.Column(db.Text)
@@ -107,8 +167,53 @@ class OATodo(db.Model):
     priority = db.Column(db.Integer, default=2)  # 1=高 2=中 3=低
     notes = db.Column(db.Text)
     schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=True)
+    todo_type = db.Column(db.String(50), default=TODO_TYPE_GENERIC, nullable=False)
+    workflow_status = db.Column(db.String(50))
+    enrollment_id = db.Column(db.Integer, db.ForeignKey('enrollments.id'), nullable=True)
+    leave_request_id = db.Column(db.Integer, db.ForeignKey('leave_requests.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    completed_at = db.Column(db.DateTime)
+    payload = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id], lazy=True)
+    leave_request = db.relationship('LeaveRequest', foreign_keys=[leave_request_id], lazy=True)
+    creator = db.relationship('User', foreign_keys=[created_by], lazy=True)
+
+    @classmethod
+    def workflow_types(cls):
+        return {
+            cls.TODO_TYPE_ENROLLMENT_REPLAN,
+            cls.TODO_TYPE_LEAVE_MAKEUP,
+            cls.TODO_TYPE_SCHEDULE_FEEDBACK,
+        }
+
+    @property
+    def is_workflow(self):
+        return (self.todo_type or self.TODO_TYPE_GENERIC) in self.workflow_types()
+
+    @property
+    def is_open_workflow(self):
+        return self.is_workflow and not self.is_completed and self.workflow_status not in {
+            self.WORKFLOW_STATUS_COMPLETED,
+            self.WORKFLOW_STATUS_CANCELLED,
+        }
+
+    def get_payload_data(self):
+        if not self.payload:
+            return {}
+        try:
+            data = json.loads(self.payload)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_payload_data(self, value):
+        if value is None:
+            self.payload = None
+            return
+        self.payload = json.dumps(value, ensure_ascii=False)
 
     @staticmethod
     def parse_responsible_people(value):
@@ -150,6 +255,16 @@ class OATodo(db.Model):
             'priority': self.priority,
             'notes': self.notes,
             'schedule_id': self.schedule_id,
+            'todo_type': self.todo_type or self.TODO_TYPE_GENERIC,
+            'workflow_status': self.workflow_status,
+            'enrollment_id': self.enrollment_id,
+            'leave_request_id': self.leave_request_id,
+            'created_by': self.created_by,
+            'creator_name': self.creator.display_name if self.creator else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'payload': self.get_payload_data(),
+            'is_workflow': self.is_workflow,
+            'is_open_workflow': self.is_open_workflow,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

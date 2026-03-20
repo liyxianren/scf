@@ -15,6 +15,16 @@ def run_once_migrations():
         _mark_applied('fix_teacher_names_and_colors_v1')
         print('[migration] 教师姓名 + 课表颜色修复完成')
 
+    if not _is_applied('oa_workflow_todos_v1'):
+        _backfill_oa_workflow_todos()
+        _mark_applied('oa_workflow_todos_v1')
+        print('[migration] OA workflow todo 字段回填完成')
+
+    if not _is_applied('oa_schedule_semantics_v2'):
+        _backfill_schedule_semantics()
+        _mark_applied('oa_schedule_semantics_v2')
+        print('[migration] OA 课表教师归一化与 delivery_mode 回填完成')
+
 
 # ========== 基础设施 ==========
 
@@ -40,6 +50,22 @@ def _mark_applied(name):
         {'n': name}
     )
     db.session.commit()
+
+
+def _backfill_oa_workflow_todos():
+    db.session.execute(
+        db.text(
+            "UPDATE oa_todos SET todo_type = 'generic' "
+            "WHERE todo_type IS NULL OR TRIM(todo_type) = ''"
+        )
+    )
+    db.session.commit()
+
+
+def _backfill_schedule_semantics():
+    from modules.oa.services import backfill_schedule_semantics
+
+    backfill_schedule_semantics()
 
 
 # ========== 教师姓名修复 ==========

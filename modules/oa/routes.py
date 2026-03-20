@@ -11,7 +11,11 @@ from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.auth.services import build_schedule_payload, get_business_today, sync_enrollment_status
 from modules.oa import oa_bp
 from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
-from modules.oa.services import deduplicate_todo_payloads, import_schedule_from_excel
+from modules.oa.services import (
+    apply_schedule_excel_import,
+    delivery_mode_from_color_tag,
+    resolve_schedule_teacher_reference,
+)
 
 
 def _get_staff_options():
@@ -38,10 +42,8 @@ def _time_ranges_overlap(start_a, end_a, start_b, end_b):
 
 
 def _resolve_teacher_or_error(teacher_value):
-    teacher_user = User.query.filter(
-        (User.display_name == teacher_value) | (User.username == teacher_value)
-    ).first()
-    if not teacher_user:
+    teacher_user, teacher_name, _, error = resolve_schedule_teacher_reference(teacher_value)
+    if error or not teacher_user:
         return None, '授课教师不存在，请先创建教师账号'
     return teacher_user, None
 
@@ -82,6 +84,52 @@ def _schedule_locked_by_leave(schedule, updates):
         return False
     protected_fields = {'date', 'time_start', 'time_end', 'teacher', 'enrollment_id'}
     return any(field in updates for field in protected_fields)
+
+
+def _direct_schedule_enrollment_error(enrollment):
+    if not enrollment:
+        return None
+    if enrollment.status in {'pending_info', 'pending_schedule', 'pending_student_confirm'}:
+        return '该报名仍在排课工作流中，请通过工作流发送给学生确认后再生成正式课次'
+
+    from modules.auth.workflow_services import has_open_process_workflow
+
+    if has_open_process_workflow(enrollment_id=enrollment.id):
+        return '该报名存在未完成的排课/补课工作流，请先完成工作流再直接改课表'
+    return None
+
+
+def _direct_schedule_update_workflow_error(schedule, updates):
+    if not schedule:
+        return None
+
+    from modules.auth.workflow_services import has_open_process_workflow, has_open_workflow
+
+    touched_fields = {field for field in (updates or {})}
+    if not touched_fields:
+        return None
+
+    target_enrollment_id = (updates or {}).get('enrollment_id', schedule.enrollment_id)
+    process_locked_fields = {'date', 'time_start', 'time_end', 'teacher', 'enrollment_id', 'course_name', 'students'}
+    if (
+        touched_fields & process_locked_fields
+        and has_open_process_workflow(schedule_id=schedule.id, enrollment_id=target_enrollment_id)
+    ):
+        return '该课程关联未完成的工作流，仅允许修改备注、地点或颜色'
+
+    relationship_locked_fields = {'enrollment_id'}
+    if (
+        touched_fields & relationship_locked_fields
+        and has_open_workflow(schedule_id=schedule.id, enrollment_id=target_enrollment_id)
+    ):
+        return '该课程关联未完成的工作流，不能直接改绑报名'
+    return None
+
+
+def _guard_generic_todo_mutation(todo):
+    if todo and todo.is_workflow:
+        return jsonify({'success': False, 'error': '工作流待办不能通过通用待办接口修改，请使用对应工作流动作'}), 400
+    return None
 
 
 # ========== 页面路由 ==========
@@ -197,6 +245,8 @@ def api_get_schedule(schedule_id):
 @oa_bp.route('/api/schedules', methods=['POST'])
 @role_required('admin')
 def api_create_schedule():
+    from modules.auth.workflow_services import ensure_schedule_feedback_todo
+
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': '请提供 JSON 数据'}), 400
@@ -222,6 +272,9 @@ def api_create_schedule():
             return jsonify({'success': False, 'error': '报名记录不存在'}), 404
         if enrollment.teacher_id != teacher_user.id:
             return jsonify({'success': False, 'error': '所选教师与报名绑定教师不一致'}), 400
+        enrollment_error = _direct_schedule_enrollment_error(enrollment)
+        if enrollment_error:
+            return jsonify({'success': False, 'error': enrollment_error}), 400
     else:
         enrollment = None
 
@@ -248,9 +301,11 @@ def api_create_schedule():
         location=data.get('location', ''),
         notes=data.get('notes', ''),
         color_tag=data.get('color_tag', 'blue'),
+        delivery_mode=delivery_mode_from_color_tag(data.get('color_tag', 'blue')),
     )
     db.session.add(schedule)
     db.session.flush()
+    ensure_schedule_feedback_todo(schedule, created_by=current_user.id)
     if enrollment:
         sync_enrollment_status(enrollment)
     db.session.commit()
@@ -261,6 +316,8 @@ def api_create_schedule():
 @oa_bp.route('/api/schedules/<int:schedule_id>', methods=['PUT'])
 @role_required('admin')
 def api_update_schedule(schedule_id):
+    from modules.auth.workflow_services import sync_schedule_feedback_todo
+
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
@@ -271,6 +328,9 @@ def api_update_schedule(schedule_id):
         return jsonify({'success': False, 'error': '请提供 JSON 数据'}), 400
     if _schedule_locked_by_leave(schedule, data):
         return jsonify({'success': False, 'error': '该课程已有请假记录，请通过调课流程处理，不能直接覆盖'}), 400
+    workflow_error = _direct_schedule_update_workflow_error(schedule, data)
+    if workflow_error:
+        return jsonify({'success': False, 'error': workflow_error}), 400
 
     next_date = schedule.date
     if 'date' in data:
@@ -291,6 +351,9 @@ def api_update_schedule(schedule_id):
             return jsonify({'success': False, 'error': '报名记录不存在'}), 404
         if enrollment.teacher_id != teacher_user.id:
             return jsonify({'success': False, 'error': '所选教师与报名绑定教师不一致'}), 400
+        enrollment_error = _direct_schedule_enrollment_error(enrollment)
+        if enrollment_error:
+            return jsonify({'success': False, 'error': enrollment_error}), 400
     else:
         enrollment = None
 
@@ -318,6 +381,7 @@ def api_update_schedule(schedule_id):
     schedule.location = data.get('location', schedule.location)
     schedule.notes = data.get('notes', schedule.notes)
     schedule.color_tag = data.get('color_tag', schedule.color_tag)
+    schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
     schedule.enrollment_id = next_enrollment_id
     db.session.flush()
     if original_enrollment_id:
@@ -326,6 +390,7 @@ def api_update_schedule(schedule_id):
             sync_enrollment_status(original_enrollment)
     if enrollment:
         sync_enrollment_status(enrollment)
+    sync_schedule_feedback_todo(schedule)
     db.session.commit()
 
     return jsonify({'success': True, 'data': build_schedule_payload(schedule, current_user)})
@@ -427,6 +492,10 @@ def api_list_todos():
     if priority:
         query = query.filter(OATodo.priority == priority)
 
+    todo_type = request.args.get('todo_type')
+    if todo_type:
+        query = query.filter(OATodo.todo_type == todo_type)
+
     todos = query.order_by(OATodo.is_completed, OATodo.priority, OATodo.due_date.asc().nullslast()).all()
     return jsonify({'success': True, 'data': [todo.to_dict() for todo in todos], 'total': len(todos)})
 
@@ -448,6 +517,8 @@ def api_create_todo():
         return jsonify({'success': False, 'error': '请提供 JSON 数据'}), 400
     if not data.get('title'):
         return jsonify({'success': False, 'error': '缺少必填字段: title'}), 400
+    if data.get('todo_type') and data.get('todo_type') != OATodo.TODO_TYPE_GENERIC:
+        return jsonify({'success': False, 'error': '工作流待办不能通过通用待办接口创建'}), 400
 
     due_date = None
     if data.get('due_date'):
@@ -467,6 +538,7 @@ def api_create_todo():
         priority=data.get('priority', 2),
         notes=data.get('notes', ''),
         schedule_id=data.get('schedule_id'),
+        todo_type=OATodo.TODO_TYPE_GENERIC,
     )
     db.session.add(todo)
     db.session.commit()
@@ -479,6 +551,9 @@ def api_update_todo(todo_id):
     todo = db.session.get(OATodo, todo_id)
     if not todo:
         return jsonify({'success': False, 'error': '待办不存在'}), 404
+    guarded = _guard_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     data = request.get_json()
     if not data:
@@ -515,6 +590,9 @@ def api_delete_todo(todo_id):
     todo = db.session.get(OATodo, todo_id)
     if not todo:
         return jsonify({'success': False, 'error': '待办不存在'}), 404
+    guarded = _guard_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     db.session.delete(todo)
     db.session.commit()
@@ -527,6 +605,9 @@ def api_toggle_todo(todo_id):
     todo = db.session.get(OATodo, todo_id)
     if not todo:
         return jsonify({'success': False, 'error': '待办不存在'}), 404
+    guarded = _guard_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     todo.is_completed = not todo.is_completed
     db.session.commit()
@@ -548,6 +629,8 @@ def api_batch_todos():
     todos = OATodo.query.filter(OATodo.id.in_(ids)).all()
     if not todos:
         return jsonify({'success': False, 'error': '未找到匹配的待办'}), 404
+    if any(todo.is_workflow for todo in todos):
+        return jsonify({'success': False, 'error': '批量操作仅支持普通待办，工作流待办请使用对应动作'}), 400
 
     if action == 'complete':
         for todo in todos:
@@ -577,41 +660,18 @@ def api_import_excel():
     if not file.filename.endswith(('.xlsx', '.xls')):
         return jsonify({'success': False, 'error': '仅支持 .xlsx 或 .xls 文件'}), 400
 
-    import os
-    import tempfile
-
-    fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
-    file.save(tmp_path)
-    os.close(fd)
-
     try:
-        schedules, todos = import_schedule_from_excel(tmp_path, original_filename=file.filename)
-        todos, removed_todo_duplicates = deduplicate_todo_payloads(todos)
-
-        CourseFeedback.query.delete()
-        LeaveRequest.query.delete()
-        CourseSchedule.query.delete()
-        OATodo.query.delete()
-
-        for payload in schedules:
-            db.session.add(CourseSchedule(**payload))
-        for payload in todos:
-            db.session.add(OATodo(**payload))
-
-        db.session.commit()
+        _, summary = apply_schedule_excel_import(
+            file,
+            uploaded_by=current_user.id if getattr(current_user, 'is_authenticated', False) else None,
+        )
         return jsonify({
             'success': True,
-            'data': {
-                'schedules_count': len(schedules),
-                'todos_count': len(todos),
-                'removed_todo_duplicates': removed_todo_duplicates,
-            }
+            'data': summary,
         })
     except Exception as exc:
         db.session.rollback()
         return jsonify({'success': False, 'error': f'导入失败: {str(exc)}'}), 500
-    finally:
-        os.unlink(tmp_path)
 
 
 # ========== 仪表盘统计 API ==========

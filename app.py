@@ -79,7 +79,16 @@ def _migrate_add_columns():
     migrations = [
         "ALTER TABLE course_schedules ADD COLUMN teacher_id INTEGER REFERENCES users(id)",
         "ALTER TABLE course_schedules ADD COLUMN enrollment_id INTEGER REFERENCES enrollments(id)",
+        "ALTER TABLE course_schedules ADD COLUMN delivery_mode TEXT DEFAULT 'unknown'",
+        "ALTER TABLE course_schedules ADD COLUMN import_run_id INTEGER REFERENCES schedule_import_runs(id)",
         "ALTER TABLE student_profiles ADD COLUMN excluded_dates TEXT",
+        "ALTER TABLE oa_todos ADD COLUMN todo_type TEXT DEFAULT 'generic'",
+        "ALTER TABLE oa_todos ADD COLUMN workflow_status TEXT",
+        "ALTER TABLE oa_todos ADD COLUMN enrollment_id INTEGER REFERENCES enrollments(id)",
+        "ALTER TABLE oa_todos ADD COLUMN leave_request_id INTEGER REFERENCES leave_requests(id)",
+        "ALTER TABLE oa_todos ADD COLUMN created_by INTEGER REFERENCES users(id)",
+        "ALTER TABLE oa_todos ADD COLUMN completed_at TIMESTAMP",
+        "ALTER TABLE oa_todos ADD COLUMN payload TEXT",
     ]
     for sql in migrations:
         try:
