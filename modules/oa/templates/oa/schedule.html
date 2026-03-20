@@ -575,8 +575,9 @@
                 </div>
                 <div class="form-group">
                     <label>授课教师</label>
-                    <input type="text" id="courseTeacher" list="teacherList" required placeholder="输入教师姓名">
-                    <datalist id="teacherList"></datalist>
+                    <select id="courseTeacher" required>
+                        <option value="">请选择授课教师</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>课程 / 项目名称</label>
@@ -797,10 +798,30 @@ async function loadTeachers() {
         const res = await fetch('/oa/api/schedules/teachers');
         const json = await res.json();
         if (json.success) {
-            const dl = document.getElementById('teacherList');
-            dl.innerHTML = json.data.map(t => `<option value="${t}">`).join('');
+            const select = document.getElementById('courseTeacher');
+            const currentValue = select.value;
+            const options = ['<option value="">请选择授课教师</option>']
+                .concat(json.data.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`));
+            select.innerHTML = options.join('');
+            if (currentValue) {
+                ensureTeacherOption(currentValue);
+                select.value = currentValue;
+            }
         }
     } catch(e) {}
+}
+
+function ensureTeacherOption(teacherName) {
+    const select = document.getElementById('courseTeacher');
+    if (!select || !teacherName) return;
+    const exists = Array.from(select.options).some(option => option.value === teacherName);
+    if (exists) return;
+
+    const option = document.createElement('option');
+    option.value = teacherName;
+    option.textContent = `${teacherName}（当前课表）`;
+    option.dataset.dynamic = 'true';
+    select.appendChild(option);
 }
 
 // ===== Week Navigation =====
@@ -1140,6 +1161,7 @@ function openAddModal(preDate) {
     document.getElementById('courseModalTitle').textContent = '添加课程';
     document.getElementById('deleteBtn').style.display = 'none';
     document.getElementById('courseForm').reset();
+    document.getElementById('courseTeacher').value = '';
     if (preDate) {
         document.getElementById('courseDate').value = preDate;
     }
@@ -1165,6 +1187,7 @@ async function openEditModal(id) {
         document.getElementById('courseDate').value = s.date;
         document.getElementById('courseTimeStart').value = s.time_start;
         document.getElementById('courseTimeEnd').value = s.time_end;
+        ensureTeacherOption(s.teacher);
         document.getElementById('courseTeacher').value = s.teacher;
         document.getElementById('courseName').value = s.course_name;
         document.getElementById('courseStudents').value = s.students || '';
