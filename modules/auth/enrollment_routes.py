@@ -20,6 +20,7 @@ from modules.auth.services import (
     get_business_today,
     propose_enrollment_schedule,
     reject_enrollment_schedule,
+    save_manual_enrollment_plan,
     send_leave_status_notification,
     sync_enrollment_status,
     student_confirm_schedule,
@@ -244,6 +245,23 @@ def api_confirm_slot(enrollment_id):
         return jsonify({'success': False, 'error': f'确认失败: {str(exc)}'}), 500
 
 
+@auth_bp.route('/api/enrollments/<int:enrollment_id>/manual-plan', methods=['POST'])
+@role_required('admin')
+def api_save_manual_plan(enrollment_id):
+    data = request.get_json() or {}
+    try:
+        result = save_manual_enrollment_plan(
+            enrollment_id,
+            data.get('session_dates') or [],
+            force_save=bool(data.get('force_save')),
+        )
+        status_code = result.pop('status_code', 200)
+        return jsonify(result), status_code
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': f'保存失败: {str(exc)}'}), 500
+
+
 @auth_bp.route('/api/enrollments/<int:enrollment_id>/student-confirm', methods=['POST'])
 @role_required('student')
 def api_student_confirm(enrollment_id):
@@ -417,6 +435,8 @@ def api_create_leave_request():
 @auth_bp.route('/api/leave-requests/<int:request_id>/approve', methods=['PUT'])
 @role_required('teacher', 'admin')
 def api_approve_leave(request_id):
+    from modules.auth.workflow_services import cancel_schedule_feedback_todo, ensure_leave_makeup_workflow
+
     leave_request = db.session.get(LeaveRequest, request_id)
     if not leave_request:
         return jsonify({'success': False, 'error': '请假记录不存在'}), 404
@@ -433,6 +453,9 @@ def api_approve_leave(request_id):
     )
     if linked_enrollment:
         sync_enrollment_status(linked_enrollment)
+    if leave_request.schedule_id:
+        cancel_schedule_feedback_todo(leave_request.schedule_id, reason='课程请假已批准')
+    ensure_leave_makeup_workflow(leave_request, actor_user=current_user)
     db.session.commit()
     return jsonify({'success': True, 'data': build_leave_request_payload(leave_request, current_user)})
 

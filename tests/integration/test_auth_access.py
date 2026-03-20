@@ -1,7 +1,9 @@
+from datetime import datetime
+
 import pytest
 
 from extensions import db
-from modules.auth.models import Enrollment, User
+from modules.auth.models import ChatMessage, Enrollment, User
 from tests.factories import create_chat_message, create_enrollment, create_student_profile, create_user
 
 
@@ -65,12 +67,35 @@ def test_chat_unread_count_and_mark_read(client, login_as):
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['data'][0]['content'] == '老师您好'
+    assert payload['data'][0]['created_at'].endswith('+08:00')
 
     response = client.get('/auth/api/chat/conversations')
     payload = response.get_json()
     conversation = payload['data'][0]
     assert conversation['unread'] == 0
     assert conversation['unread_count'] == 0
+
+
+def test_chat_timestamps_are_serialized_as_business_time(client, login_as):
+    teacher = create_user(username='time-teacher', display_name='时间老师', role='teacher')
+    student = create_user(username='time-student', display_name='时间学生', role='student')
+    profile = create_student_profile(user=student, name='时间学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='时间学生',
+        course_name='时间课程',
+        student_profile=profile,
+        status='active',
+    )
+    message = create_chat_message(sender=student, receiver=teacher, enrollment=enrollment, content='测试时区')
+    message.created_at = datetime(2026, 3, 19, 2, 30, 0)
+    db.session.commit()
+
+    login_as(teacher)
+    response = client.get(f'/auth/api/chat/messages?with={student.id}')
+    payload = response.get_json()
+    assert payload['success'] is True
+    assert payload['data'][0]['created_at'] == '2026-03-19T10:30:00+08:00'
 
 
 def test_chat_send_and_message_access_are_relationship_scoped(client, login_as, logout):
@@ -192,6 +217,8 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
 
     assert first_account['user_id'] != second_account['user_id']
     assert first_account['username'] != second_account['username']
+    assert first_account['username'] == '重名学生'
+    assert second_account['username'] == '重名学生2'
 
     first_student = db.session.get(User, first_account['user_id'])
     second_student = db.session.get(User, second_account['user_id'])
@@ -219,3 +246,43 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
     assert '/auth/enrollments' in html
     assert '/oa/schedule' not in html
     assert '/oa/todos' not in html
+
+
+def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, logout):
+    admin = create_user(username='template-admin', display_name='模板管理员', role='admin')
+    teacher = create_user(username='template-teacher', display_name='模板老师', role='teacher')
+    student = create_user(username='template-student', display_name='模板学生', role='student')
+    profile = create_student_profile(user=student, name='模板学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='模板学生',
+        course_name='模板课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        total_hours=4,
+        hours_per_session=2.0,
+        confirmed_slot={
+            'weekly_slots': [{'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'}],
+            'session_dates': [
+                {'date': '2026-03-17', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+                {'date': '2026-03-24', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+            ],
+            'is_manual': True,
+        },
+    )
+
+    login_as(student)
+    html = client.get('/auth/chat').get_data(as_text=True)
+    assert 'msg-card' in html
+    assert 'white-space:pre-wrap' in html
+
+    html = client.get('/auth/student/dashboard').get_data(as_text=True)
+    assert 'pending-plan-calendar' in html
+    assert 'renderPendingPlanCalendars' in html
+    logout()
+
+    login_as(admin)
+    html = client.get(f'/auth/enrollments/{enrollment.id}').get_data(as_text=True)
+    assert 'manualPlanModal' in html
+    assert '/manual-plan' in html
+    assert '手动微调' in html

@@ -3,7 +3,7 @@
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
-.chat-page{display:flex;height:calc(100vh - 64px);max-width:1200px;margin:0 auto;padding:0;overflow:hidden}
+.chat-page{display:flex;height:calc(100dvh - 64px);min-height:calc(100vh - 64px);max-width:1200px;margin:0 auto;padding:0;overflow:hidden}
 .chat-sidebar{width:280px;min-width:280px;background:rgba(255,255,255,.75);backdrop-filter:blur(12px);border-right:1px solid #e5e7eb;display:flex;flex-direction:column}
 .sidebar-header{padding:16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between}
 .sidebar-header h2{margin:0;font-size:1rem;color:#111827;display:flex;align-items:center;gap:6px}
@@ -24,7 +24,7 @@
 .conv-role.admin{background:#e0f2fe;color:#0369a1}
 .conv-preview{font-size:.78rem;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .conv-unread{background:#ef4444;color:#fff;font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:999px;flex-shrink:0}
-.chat-main{flex:1;display:flex;flex-direction:column;background:#fafbfc}
+.chat-main{flex:1;min-width:0;display:flex;flex-direction:column;background:#fafbfc}
 .chat-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;background:rgba(255,255,255,.75);backdrop-filter:blur(12px)}
 .chat-header h3{margin:0;font-size:1rem;color:#111827}
 .chat-header .partner-role{font-size:.78rem;color:#6b7280;margin-top:2px}
@@ -32,12 +32,13 @@
 .msg-row{display:flex}
 .msg-row.sent{justify-content:flex-end}
 .msg-row.received{justify-content:flex-start}
-.msg-bubble{max-width:65%;padding:10px 14px;border-radius:16px;font-size:.9rem;line-height:1.5;word-break:break-word}
+.msg-card{display:flex;flex-direction:column;max-width:min(65%,420px);min-width:120px;width:fit-content}
+.msg-bubble{max-width:100%;padding:10px 14px;border-radius:16px;font-size:.9rem;line-height:1.5;white-space:pre-wrap;word-break:normal;overflow-wrap:break-word}
 .msg-row.sent .msg-bubble{background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;border-bottom-right-radius:4px}
 .msg-row.received .msg-bubble{background:#fff;color:#111827;border:1px solid #e5e7eb;border-bottom-left-radius:4px}
 .msg-time{font-size:.68rem;color:#9ca3af;margin-top:4px}
 .msg-row.sent .msg-time{text-align:right}
-.chat-input-bar{padding:14px 20px;border-top:1px solid #e5e7eb;background:rgba(255,255,255,.85);backdrop-filter:blur(12px);display:flex;gap:10px;align-items:center}
+.chat-input-bar{padding:14px 20px calc(14px + env(safe-area-inset-bottom, 0px));border-top:1px solid #e5e7eb;background:rgba(255,255,255,.85);backdrop-filter:blur(12px);display:flex;gap:10px;align-items:center}
 .chat-input-bar input{flex:1;padding:10px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.9rem;outline:none}
 .chat-input-bar input:focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.12)}
 .send-btn{padding:10px 18px;border:none;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px}
@@ -58,10 +59,18 @@
 .modal-close{margin-top:14px;width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#374151;font-size:.88rem;cursor:pointer}
 .modal-close:hover{background:#f8fafc}
 @media(max-width:768px){
+  .chat-page{position:relative}
   .chat-sidebar{width:100%;min-width:auto;position:absolute;z-index:10;height:100%}
   .chat-sidebar.hidden{display:none}
   .chat-main{width:100%}
   .back-btn{display:inline-flex!important}
+  .msg-card{max-width:82%;min-width:96px}
+  .chat-header{padding:14px 16px}
+  .message-list{padding:16px 14px}
+  .chat-input-bar{padding:12px 14px calc(12px + env(safe-area-inset-bottom, 0px))}
+  .chat-input-bar input{min-width:0}
+  .send-btn{padding:10px 14px}
+  .modal-box{width:min(360px, calc(100vw - 24px))}
 }
 .back-btn{display:none;align-items:center;gap:4px;background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:.85rem;padding:0;margin-right:8px}
 </style>
@@ -126,6 +135,14 @@ const CURRENT_USER_ID = {{ current_user.id }};
 const CURRENT_ROLE = '{{ current_user.role }}';
 let activePartnerId = null;
 let pollTimer = null;
+const CHAT_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
 
 document.addEventListener('DOMContentLoaded', function(){
   loadConversations();
@@ -135,6 +152,13 @@ function getRoleMeta(role){
   if(role === 'teacher') return {cls: 'teacher', label: '老师'};
   if(role === 'student') return {cls: 'student', label: '学生'};
   return {cls: 'admin', label: '管理员'};
+}
+
+function formatChatTime(value){
+  if(!value) return '';
+  const dt = new Date(value);
+  if(Number.isNaN(dt.getTime())) return value;
+  return CHAT_TIME_FORMATTER.format(dt);
 }
 
 async function loadConversations(){
@@ -210,10 +234,10 @@ async function loadMessages(){
     }
     ml.innerHTML = json.data.map(m => {
       const isSent = m.sender_id === CURRENT_USER_ID;
-      const time = m.created_at ? new Date(m.created_at).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      const time = formatChatTime(m.created_at);
       return `
         <div class="msg-row ${isSent ? 'sent' : 'received'}">
-          <div>
+          <div class="msg-card">
             <div class="msg-bubble">${escHtml(m.content)}</div>
             <div class="msg-time">${time}</div>
           </div>

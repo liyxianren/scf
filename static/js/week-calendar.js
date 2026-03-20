@@ -18,13 +18,15 @@ class WeekCalendar {
     this.onCourseClick = options.onCourseClick || null;
     this.teacherFilter = options.teacherFilter || null; // filter courses by teacher name
     this.emptyText = options.emptyText || '本周暂无课程'; // shown when no courses
+    this.injectedEvents = Array.isArray(options.events) ? [...options.events] : null;
 
     this.GRID_START = 8;
     this.GRID_END = 21;
     this.HOUR_HEIGHT = 56;
     this.DAY_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
 
-    this.weekStart = this._getWeekStart(new Date());
+    const initialDate = options.initialDate || this._getFirstEventDate(this.injectedEvents);
+    this.weekStart = this._getWeekStart(initialDate || new Date());
     this.scheduleData = [];
 
     this._injectStyles();
@@ -45,6 +47,14 @@ class WeekCalendar {
   today() { this.weekStart = this._getWeekStart(new Date()); this.render(); }
 
   setProgressMap(pm) { this.progressMap = pm; }
+  async setEvents(events, options = {}) {
+    this.injectedEvents = Array.isArray(events) ? [...events] : [];
+    const focusDate = options.focusDate || this._getFirstEventDate(this.injectedEvents);
+    if (focusDate) {
+      this.weekStart = this._getWeekStart(focusDate);
+    }
+    await this.render();
+  }
 
   /* ===== DOM ===== */
   _buildDOM() {
@@ -89,6 +99,14 @@ class WeekCalendar {
     const days = this._getWeekDays();
     const start = this._fmt(days[0]);
     const end = this._fmt(days[6]);
+    if (Array.isArray(this.injectedEvents)) {
+      let data = this.injectedEvents.filter(item => item.date >= start && item.date <= end);
+      if (this.teacherFilter) {
+        data = data.filter(s => s.teacher === this.teacherFilter || s.teacher_name === this.teacherFilter);
+      }
+      this.scheduleData = data;
+      return;
+    }
     try {
       const separator = this.fetchUrl.includes('?') ? '&' : '?';
       const res = await fetch(`${this.fetchUrl}${separator}start=${start}&end=${end}`);
@@ -286,6 +304,18 @@ class WeekCalendar {
     return dt;
   }
 
+  _getFirstEventDate(events) {
+    if (!Array.isArray(events) || events.length === 0) return null;
+    const first = [...events]
+      .filter(item => item && item.date)
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        return (a.time_start || '').localeCompare(b.time_start || '');
+      })[0];
+    if (!first || !first.date) return null;
+    return new Date(`${first.date}T00:00:00`);
+  }
+
   _getWeekDays() {
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -316,7 +346,7 @@ class WeekCalendar {
     style.id = 'wc-styles';
     style.textContent = `
 .wc-root{position:relative}
-.wc-nav{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.wc-nav{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .wc-nav-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer;transition:.15s}
 .wc-nav-btn:hover{border-color:#0ea5e9;color:#0ea5e9}
 .wc-text-btn{width:auto;padding:0 14px;font-size:.82rem;font-weight:700}
@@ -358,7 +388,7 @@ class WeekCalendar {
 .wct-students{color:#6b7280;font-size:.78rem}
 .wc-empty-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(248,250,252,.85);z-index:5;border-radius:0 0 14px 14px}
 .wc-empty-overlay p{margin:8px 0 0;font-size:.95rem;color:#94a3b8;font-weight:600}
-@media(max-width:640px){.wc-header,.wc-body{grid-template-columns:40px repeat(7,1fr)}.wc-block{font-size:.65rem;padding:2px 3px}}
+@media(max-width:640px){.wc-nav{gap:6px}.wc-week-label{margin-left:0;width:100%;font-size:.86rem}.wc-header,.wc-body{grid-template-columns:40px repeat(7,1fr)}.wc-body-scroll{max-height:420px}.wc-block{font-size:.65rem;padding:2px 3px}}
 `;
     document.head.appendChild(style);
   }

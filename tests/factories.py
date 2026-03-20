@@ -183,8 +183,15 @@ def create_todo(
     due_date=None,
     priority=2,
     schedule=None,
+    enrollment=None,
+    leave_request=None,
     is_completed=False,
     notes='',
+    todo_type=OATodo.TODO_TYPE_GENERIC,
+    workflow_status=None,
+    created_by=None,
+    completed_at=None,
+    payload=None,
 ):
     todo = OATodo(
         title=title,
@@ -192,8 +199,15 @@ def create_todo(
         due_date=due_date,
         priority=priority,
         schedule_id=schedule.id if schedule else None,
+        enrollment_id=enrollment.id if enrollment else None,
+        leave_request_id=leave_request.id if leave_request else None,
         is_completed=is_completed,
         notes=notes,
+        todo_type=todo_type,
+        workflow_status=workflow_status,
+        created_by=created_by.id if hasattr(created_by, 'id') else created_by,
+        completed_at=completed_at,
+        payload=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
     )
     return _persist(todo)
 

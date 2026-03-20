@@ -56,7 +56,25 @@
 .empty-msg{text-align:center;padding:54px 20px;border:1px dashed #cbd5e1;border-radius:18px;background:#f8fafc;color:#94a3b8}
 .toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
 .toast.show{display:block}
-@media(max-width:640px){.oa-page{padding-inline:14px}.page-header{flex-direction:column}.enrollment-grid{grid-template-columns:1fr}.form-row{grid-template-columns:1fr}}
+@media(max-width:640px){
+  .oa-page{padding-inline:14px}
+  .page-header{flex-direction:column;align-items:stretch}
+  .page-header .btn-primary{width:100%;justify-content:center}
+  .filters{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+  .filters::-webkit-scrollbar{display:none}
+  .filter-tab{white-space:nowrap;flex:0 0 auto}
+  .enrollment-grid{grid-template-columns:1fr}
+  .enrollment-card{padding:18px 16px}
+  .card-top{flex-direction:column;align-items:flex-start}
+  .card-actions{flex-direction:column}
+  .intake-link-box{flex-direction:column;align-items:stretch}
+  .copy-btn{width:100%}
+  .form-row{grid-template-columns:1fr}
+  .modal-overlay{padding:12px}
+  .modal-header,.modal-body{padding-left:16px;padding-right:16px}
+  .modal-actions{flex-direction:column}
+  .modal-actions .btn-primary{width:100%;justify-content:center}
+}
 </style>
 {% endblock %}
 {% block content %}

@@ -5,7 +5,7 @@
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
     .pp-page { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
-    .pp-header { margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between; }
+    .pp-header { margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .pp-header h1 { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; margin: 0; }
     .pp-header .back-link {
         display: inline-flex; align-items: center; gap: 4px;
@@ -86,7 +86,7 @@
 
 
     /* ---- History section ---- */
-    .pp-history-section { display: flex; flex-direction: column; gap: 16px; }
+    .pp-history-section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     .pp-history-header {
         display: flex; align-items: center; justify-content: space-between;
     }
@@ -170,7 +170,28 @@
 
     @media (max-width: 900px) {
         .pp-layout { grid-template-columns: 1fr; }
-        .pp-chat-section { height: 560px; }
+        .pp-chat-section { height: auto; min-height: 560px; }
+        .pp-history-list { max-height: none; }
+    }
+
+    @media (max-width: 640px) {
+        .pp-page { padding: 22px 14px calc(28px + env(safe-area-inset-bottom, 0px)); }
+        .pp-header { align-items: flex-start; flex-direction: column; margin-bottom: 20px; }
+        .pp-header h1 { font-size: 1.4rem; }
+        .pp-chat-section { min-height: calc(100dvh - 250px); }
+        .pp-chat-header, .pp-name-bar, .pp-input-area { padding-left: 14px; padding-right: 14px; }
+        .pp-name-bar { flex-direction: column; align-items: stretch; }
+        .pp-name-bar label { white-space: normal; }
+        .pp-messages { padding: 14px; }
+        .pp-msg { max-width: 100%; }
+        .pp-filter-tabs { overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; width: 100%; }
+        .pp-filter-tabs::-webkit-scrollbar { display: none; }
+        .pp-filter-tabs .tab { white-space: nowrap; flex: 0 0 auto; }
+        .pp-card-header { align-items: flex-start; }
+        .pp-card-actions { flex-wrap: wrap; }
+        .pp-card-actions .act-delete { margin-left: 0; width: 100%; }
+        .report-confirm-card { flex-wrap: wrap; max-width: 100%; }
+        .pp-toast { max-width: calc(100vw - 24px); padding: 10px 16px; }
     }
 
     /* Report confirm card */

@@ -31,7 +31,7 @@
     .btn-primary:hover { background: #1d4ed8; }
 
     .schedule-nav {
-        display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+        display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
     }
     .nav-btn {
         display: inline-flex; align-items: center; justify-content: center;
@@ -42,6 +42,13 @@
     .nav-btn:hover { border-color: #2563eb; color: #2563eb; }
     .nav-btn.text { width: auto; padding: 0 14px; font-size: 0.85rem; }
     #currentWeek { font-size: 1.15rem; font-weight: 600; margin: 0; min-width: 240px; text-align: center; }
+    .schedule-nav-actions {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .sidebar-toggle-btn { display: none; }
 
     /* === Week Layout === */
     .week-layout {
@@ -110,7 +117,9 @@
         background: white;
         border: 1px solid #e5e7eb;
         border-radius: 12px;
-        overflow: hidden;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+        max-height: calc(100vh - 220px);
     }
 
     .week-header {
@@ -255,7 +264,7 @@
     .modal-overlay {
         display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
         background: rgba(0,0,0,0.4); z-index: 1000;
-        justify-content: center; align-items: center;
+        justify-content: center; align-items: center; padding: 20px;
     }
     .modal-overlay.active { display: flex; }
     .modal-content {
@@ -439,7 +448,70 @@
         .chat-panel { width: calc(100vw - 16px); right: 8px; bottom: 8px; height: 70vh; }
     }
     @media (max-width: 768px) {
-        .modal-content { width: 95vw; }
+        .oa-page { padding: 20px 14px calc(26px + env(safe-area-inset-bottom, 0px)); }
+        .schedule-header { flex-direction: column; align-items: stretch; gap: 12px; }
+        .schedule-header .btn-primary { width: 100%; justify-content: center; }
+        .schedule-nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            align-items: stretch;
+        }
+        #currentWeek {
+            grid-column: 1 / -1;
+            min-width: 0;
+            order: -1;
+            font-size: 1rem;
+            line-height: 1.4;
+            padding: 0 6px;
+        }
+        .nav-btn.text,
+        .sidebar-toggle-btn {
+            width: 100%;
+            min-width: 0;
+            padding: 0 10px;
+        }
+        .schedule-nav-actions {
+            grid-column: 1 / -1;
+            margin-left: 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .zoom-btn {
+            width: 100%;
+            height: 36px;
+        }
+        .sidebar-toggle-btn { display: inline-flex; }
+        .sidebar {
+            display: none;
+            margin-bottom: 12px;
+            max-height: 56vh;
+            overflow-y: auto;
+        }
+        .sidebar.mobile-open { display: block; }
+        .week-grid-container {
+            max-height: none;
+            border-radius: 14px;
+        }
+        .week-header,
+        .week-body { min-width: 720px; }
+        .modal-overlay { padding: 12px; }
+        .modal-content { width: 100%; max-width: 100%; border-radius: 18px; }
+        .modal-header,
+        .modal-body { padding-left: 16px; padding-right: 16px; }
+        .form-row { grid-template-columns: 1fr; }
+        .modal-actions { flex-direction: column; }
+        .modal-actions .btn-primary,
+        .btn-danger { width: 100%; justify-content: center; }
+        .quick-note-popup {
+            width: calc(100vw - 24px);
+            left: 12px !important;
+            right: 12px;
+            top: auto !important;
+            bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        }
+        .course-tooltip { display: none !important; }
     }
 </style>
 {% endblock %}
@@ -462,7 +534,8 @@
         <h2 id="currentWeek"></h2>
         <button class="nav-btn" onclick="nextWeek()"><span class="material-icons">chevron_right</span></button>
         <button class="nav-btn text" onclick="goToday()">今天</button>
-        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;">
+        <button class="nav-btn text sidebar-toggle-btn" id="sidebarToggleBtn" type="button" onclick="toggleSidebar()" aria-expanded="false">本周概览</button>
+        <span class="schedule-nav-actions">
             <button class="zoom-btn" onclick="setZoom(-10)" title="缩小">−</button>
             <button class="zoom-btn" onclick="setZoom(10)" title="放大">+</button>
         </span>
@@ -470,7 +543,7 @@
 
     <div class="week-layout">
         <aside class="sidebar" id="sidebar"></aside>
-        <div class="week-grid-container" style="overflow-y:auto; max-height:calc(100vh - 220px);">
+        <div class="week-grid-container">
             <div class="week-header" id="weekHeader" style="position:sticky;top:0;z-index:4;"></div>
             <div class="week-body" id="weekBody"></div>
         </div>
@@ -903,6 +976,36 @@ function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function syncSidebarState() {
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebarToggleBtn');
+    if (!sidebar || !toggleBtn) return;
+
+    if (window.innerWidth > 768) {
+        sidebar.classList.remove('mobile-open');
+    }
+
+    const expanded = sidebar.classList.contains('mobile-open');
+    toggleBtn.textContent = expanded ? '收起概览' : '本周概览';
+    toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar || window.innerWidth > 768) return;
+    sidebar.classList.toggle('mobile-open');
+    syncSidebarState();
+}
+
+function closeSidebarOnMobile() {
+    if (window.innerWidth > 768) return;
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.classList.remove('mobile-open');
+        syncSidebarState();
+    }
+}
+
 // ===== Render Sidebar =====
 function renderSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -1027,10 +1130,12 @@ function renderSidebar() {
     }
 
     sidebar.innerHTML = html;
+    syncSidebarState();
 }
 
 // ===== Course Modal =====
 function openAddModal(preDate) {
+    closeSidebarOnMobile();
     editingId = null;
     document.getElementById('courseModalTitle').textContent = '添加课程';
     document.getElementById('deleteBtn').style.display = 'none';
@@ -1052,6 +1157,7 @@ async function openEditModal(id) {
         const json = await res.json();
         if (!json.success) return;
         const s = json.data;
+        closeSidebarOnMobile();
         editingId = id;
 
         document.getElementById('courseModalTitle').textContent = '编辑课程';
@@ -1278,13 +1384,22 @@ function _openQuickNote(dateStr, clientX, clientY, timeStart, timeEnd) {
 
     // Position popup near mouse
     const popup  = document.getElementById('quickNotePopup');
-    const popupW = 280, popupH = 210;
-    let left = clientX - popupW / 2;
-    let top  = clientY + 12;
-    left = Math.max(8, Math.min(left, window.innerWidth  - popupW - 8));
-    top  = Math.max(8, Math.min(top,  window.innerHeight - popupH - 8));
-    popup.style.left    = left + 'px';
-    popup.style.top     = top  + 'px';
+    if (window.innerWidth <= 768) {
+        popup.style.left = '12px';
+        popup.style.right = '12px';
+        popup.style.top = 'auto';
+        popup.style.bottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
+    } else {
+        const popupW = 280, popupH = 210;
+        let left = clientX - popupW / 2;
+        let top  = clientY + 12;
+        left = Math.max(8, Math.min(left, window.innerWidth  - popupW - 8));
+        top  = Math.max(8, Math.min(top,  window.innerHeight - popupH - 8));
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+        popup.style.right = 'auto';
+        popup.style.bottom = 'auto';
+    }
     popup.style.display = 'block';
 
     // Focus content input
@@ -1649,5 +1764,7 @@ loadDateRange();
 loadSchedules();
 loadTeachers();
 loadProgress();
+syncSidebarState();
+window.addEventListener('resize', syncSidebarState);
 </script>
 {% endblock %}

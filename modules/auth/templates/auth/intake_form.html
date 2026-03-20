@@ -19,11 +19,26 @@
 #intakeTimeGrid{background:#f8fafc;border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:20px}
 .exclude-section{margin-top:4px}
 .exclude-section .section-hint{font-size:.82rem;color:#6b7280;margin:0 0 10px}
-.exclude-add-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-.exclude-add-row input[type="date"]{flex:1;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:.9rem}
-.exclude-add-row input[type="date"]:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
-.exclude-add-btn{padding:10px 16px;border:none;border-radius:10px;background:#f97316;color:#fff;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s}
-.exclude-add-btn:hover{opacity:.85}
+.exclude-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.exclude-toolbar .summary{font-size:.84rem;color:#475569;font-weight:700}
+.exclude-clear-btn,.exclude-nav-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border:none;border-radius:10px;cursor:pointer;font-weight:700}
+.exclude-clear-btn{padding:8px 14px;background:#fff7ed;color:#c2410c;font-size:.82rem;border:1px solid #fed7aa}
+.exclude-clear-btn:hover{background:#ffedd5}
+.exclude-calendar-shell{border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:14px}
+.exclude-calendar-nav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.exclude-nav-btn{width:38px;height:38px;background:#eff6ff;color:#0369a1}
+.exclude-nav-btn:hover{background:#dbeafe}
+.exclude-calendar-caption{font-size:.9rem;font-weight:700;color:#111827;text-align:center;flex:1}
+.exclude-month-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.exclude-month{border:1px solid #f1f5f9;border-radius:14px;background:#f8fafc;padding:12px}
+.exclude-month-title{font-size:.88rem;font-weight:700;color:#0f172a;text-align:center;margin-bottom:10px}
+.exclude-weekdays,.exclude-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.exclude-weekday{font-size:.72rem;color:#94a3b8;text-align:center;font-weight:700}
+.exclude-day.empty{visibility:hidden}
+.exclude-day-btn{width:100%;aspect-ratio:1;border:1px solid transparent;border-radius:10px;background:#fff;color:#334155;font-size:.82rem;font-weight:700;cursor:pointer;transition:all .15s}
+.exclude-day-btn:hover{border-color:#7dd3fc;background:#f0f9ff}
+.exclude-day-btn.today{border-color:#bae6fd;color:#0369a1}
+.exclude-day-btn.selected{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:#ea580c;box-shadow:0 8px 18px rgba(249,115,22,.2)}
 .exclude-chips{display:flex;flex-wrap:wrap;gap:8px}
 .exclude-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:999px;font-size:.82rem;color:#c2410c;font-weight:600}
 .exclude-chip .remove-date{border:none;background:none;color:#c2410c;cursor:pointer;font-size:1.1rem;line-height:1;padding:0;opacity:.7}
@@ -40,7 +55,15 @@
 .form-container{}
 .error-msg{display:none;margin-bottom:16px;padding:10px 14px;border-radius:10px;background:#fee2e2;color:#991b1b;font-size:.88rem;text-align:center}
 .error-msg.show{display:block}
-@media(max-width:640px){.intake-page{padding:20px 14px}.form-row{grid-template-columns:1fr}}
+@media(max-width:640px){
+  .intake-page{padding:20px 14px}
+  .intake-card{padding:22px 16px}
+  .form-row{grid-template-columns:1fr}
+  .exclude-month-grid{grid-template-columns:1fr}
+  .exclude-calendar-shell{padding:12px}
+  .exclude-weekdays,.exclude-days{gap:4px}
+  .exclude-day-btn{font-size:.78rem}
+}
 </style>
 {% endblock %}
 {% block content %}
@@ -87,16 +110,28 @@
         </div>
 
         <div class="form-group">
-          <label class="time-grid-label">意向上课时间 <span class="required">*</span>（点击选择每周可上课的时段）</label>
+          <label class="time-grid-label">意向上课时间 <span class="required">*</span>（点击或滑动选择每周可上课的时段）</label>
           <div id="intakeTimeGrid"></div>
         </div>
 
         <div class="form-group exclude-section">
           <label class="time-grid-label">不可上课的日期 <span style="color:#9ca3af;font-weight:400;font-size:.82rem">(选填，如节假日、旅行等)</span></label>
-          <p class="section-hint">如果有特定日期无法上课，请在下方添加</p>
-          <div class="exclude-add-row">
-            <input type="date" id="excludeDateInput">
-            <button type="button" class="exclude-add-btn" onclick="addExcludeDate()">添加</button>
+          <p class="section-hint">点击下方日历可直接多选多个日期，无需一次只确认一天</p>
+          <div class="exclude-toolbar">
+            <div class="summary" id="excludeSelectionSummary">点击日期可多选</div>
+            <button type="button" class="exclude-clear-btn" onclick="clearExcludeDates()">清空选择</button>
+          </div>
+          <div class="exclude-calendar-shell">
+            <div class="exclude-calendar-nav">
+              <button type="button" class="exclude-nav-btn" onclick="shiftExcludeCalendar(-1)">
+                <span class="material-icons" style="font-size:1.1rem">chevron_left</span>
+              </button>
+              <div class="exclude-calendar-caption" id="excludeCalendarCaption"></div>
+              <button type="button" class="exclude-nav-btn" onclick="shiftExcludeCalendar(1)">
+                <span class="material-icons" style="font-size:1.1rem">chevron_right</span>
+              </button>
+            </div>
+            <div class="exclude-month-grid" id="excludeCalendarGrid"></div>
           </div>
           <div class="exclude-chips" id="excludeChips"></div>
         </div>
@@ -138,6 +173,7 @@ const INITIAL_SLOTS = {{ (enrollment.student_profile.available_slots if enrollme
 const INITIAL_EXCLUDED_DATES = {{ (enrollment.student_profile.excluded_dates if enrollment.student_profile and enrollment.student_profile.excluded_dates else []) | tojson }};
 let grid = null;
 let excludedDates = [];
+let excludeCalendarMonth = getMonthStart(new Date());
 
 document.addEventListener('DOMContentLoaded', function(){
   grid = new TimeGrid(document.getElementById('intakeTimeGrid'), {
@@ -148,25 +184,43 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   excludedDates = Array.isArray(INITIAL_EXCLUDED_DATES) ? [...INITIAL_EXCLUDED_DATES] : [];
   renderExcludeChips();
+  renderExcludeCalendar();
 });
 
-function addExcludeDate(){
-  const input = document.getElementById('excludeDateInput');
-  const val = input.value;
-  if(!val) return;
-  if(excludedDates.includes(val)){
-    input.value = '';
-    return;
+function getMonthStart(value){
+  return new Date(value.getFullYear(), value.getMonth(), 1);
+}
+
+function shiftExcludeCalendar(offset){
+  excludeCalendarMonth = new Date(
+    excludeCalendarMonth.getFullYear(),
+    excludeCalendarMonth.getMonth() + offset,
+    1
+  );
+  renderExcludeCalendar();
+}
+
+function toggleExcludeDate(dateStr){
+  if(excludedDates.includes(dateStr)){
+    excludedDates = excludedDates.filter(item => item !== dateStr);
+  }else{
+    excludedDates.push(dateStr);
+    excludedDates.sort();
   }
-  excludedDates.push(val);
-  excludedDates.sort();
-  input.value = '';
   renderExcludeChips();
+  renderExcludeCalendar();
 }
 
 function removeExcludeDate(dateStr){
   excludedDates = excludedDates.filter(d => d !== dateStr);
   renderExcludeChips();
+  renderExcludeCalendar();
+}
+
+function clearExcludeDates(){
+  excludedDates = [];
+  renderExcludeChips();
+  renderExcludeCalendar();
 }
 
 function renderExcludeChips(){
@@ -178,6 +232,67 @@ function renderExcludeChips(){
     const label = `${dt.getMonth()+1}月${dt.getDate()}日（周${dayNames[dt.getDay()]}）`;
     return `<span class="exclude-chip">${label}<button type="button" class="remove-date" onclick="removeExcludeDate('${d}')">&times;</button></span>`;
   }).join('');
+}
+
+function renderExcludeCalendar(){
+  const gridEl = document.getElementById('excludeCalendarGrid');
+  const captionEl = document.getElementById('excludeCalendarCaption');
+  const summaryEl = document.getElementById('excludeSelectionSummary');
+  if(!gridEl || !captionEl || !summaryEl) return;
+
+  const months = [0, 1].map(offset => new Date(
+    excludeCalendarMonth.getFullYear(),
+    excludeCalendarMonth.getMonth() + offset,
+    1
+  ));
+
+  captionEl.textContent = `${months[0].getFullYear()}年${months[0].getMonth()+1}月 - ${months[1].getFullYear()}年${months[1].getMonth()+1}月`;
+  summaryEl.textContent = excludedDates.length ? `已选择 ${excludedDates.length} 个不可上课日期` : '点击日期可多选';
+  gridEl.innerHTML = months.map(buildExcludeMonthHtml).join('');
+}
+
+function buildExcludeMonthHtml(monthDate){
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const monthTitle = `${year}年${month + 1}月`;
+  const weekdayLabels = ['一','二','三','四','五','六','日']
+    .map(label => `<div class="exclude-weekday">${label}</div>`)
+    .join('');
+
+  const firstDay = new Date(year, month, 1);
+  const firstWeekday = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dayCells = [];
+
+  for(let i = 0; i < firstWeekday; i++){
+    dayCells.push('<div class="exclude-day empty"></div>');
+  }
+
+  for(let day = 1; day <= daysInMonth; day++){
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const classes = ['exclude-day-btn'];
+    if(dateStr === todayStr) classes.push('today');
+    if(excludedDates.includes(dateStr)) classes.push('selected');
+    dayCells.push(`
+      <div class="exclude-day">
+        <button
+          type="button"
+          class="${classes.join(' ')}"
+          onclick="toggleExcludeDate('${dateStr}')"
+          aria-pressed="${excludedDates.includes(dateStr) ? 'true' : 'false'}"
+        >${day}</button>
+      </div>
+    `);
+  }
+
+  return `
+    <div class="exclude-month">
+      <div class="exclude-month-title">${monthTitle}</div>
+      <div class="exclude-weekdays">${weekdayLabels}</div>
+      <div class="exclude-days">${dayCells.join('')}</div>
+    </div>
+  `;
 }
 
 async function submitForm(ev){

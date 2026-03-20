@@ -4,7 +4,20 @@ from sqlalchemy import or_, and_, func
 from extensions import db
 from modules.auth import auth_bp
 from modules.auth.models import User, ChatMessage
-from modules.auth.services import user_can_chat_with
+from modules.auth.services import serialize_business_datetime, user_can_chat_with
+
+
+def _build_chat_message_payload(message):
+    return {
+        'id': message.id,
+        'sender_id': message.sender_id,
+        'sender_name': message.sender.display_name if message.sender else None,
+        'receiver_id': message.receiver_id,
+        'receiver_name': message.receiver.display_name if message.receiver else None,
+        'content': message.content,
+        'is_read': message.is_read,
+        'created_at': serialize_business_datetime(message.created_at),
+    }
 
 
 @auth_bp.route('/chat')
@@ -51,7 +64,7 @@ def api_chat_conversations():
             'display_name': partner.display_name,
             'role': partner.role,
             'last_message': last_msg.content[:50] if last_msg else '',
-            'last_time': last_msg.created_at.isoformat() if last_msg else None,
+            'last_time': serialize_business_datetime(last_msg.created_at) if last_msg else None,
             'unread': unread,
             'unread_count': unread,
         })
@@ -87,7 +100,7 @@ def api_chat_messages():
     ).update({'is_read': True})
     db.session.commit()
 
-    return jsonify({'success': True, 'data': [m.to_dict() for m in messages]})
+    return jsonify({'success': True, 'data': [_build_chat_message_payload(m) for m in messages]})
 
 
 @auth_bp.route('/api/chat/send', methods=['POST'])
@@ -120,7 +133,7 @@ def api_chat_send():
     )
     db.session.add(msg)
     db.session.commit()
-    return jsonify({'success': True, 'data': msg.to_dict()}), 201
+    return jsonify({'success': True, 'data': _build_chat_message_payload(msg)}), 201
 
 
 @auth_bp.route('/api/chat/unread-count')

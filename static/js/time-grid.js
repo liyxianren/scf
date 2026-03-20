@@ -55,16 +55,22 @@ class TimeGrid {
     const days = this._dayNames();
     const style = document.createElement("style");
     style.textContent = `
-      .tg-wrapper{overflow-x:auto}
-      .tg-table{border-collapse:collapse;width:100%;min-width:480px;user-select:none;touch-action:none}
+      .tg-wrapper{overflow:auto;-webkit-overflow-scrolling:touch;border-radius:12px}
+      .tg-table{border-collapse:collapse;width:100%;min-width:560px;user-select:none}
       .tg-table th{padding:8px 4px;font-size:.78rem;font-weight:700;color:#6b7280;text-align:center;background:#f8fafc;border:1px solid #e5e7eb}
       .tg-table td{padding:0;border:1px solid #e5e7eb;text-align:center}
       .tg-time-label{padding:6px 8px!important;font-size:.78rem;font-weight:600;color:#6b7280;background:#f8fafc;white-space:nowrap;min-width:52px}
-      .tg-cell{width:100%;height:36px;cursor:pointer;transition:background .1s;position:relative}
+      .tg-cell{width:100%;height:36px;cursor:pointer;transition:background .1s;position:relative;touch-action:none}
       .tg-cell:hover{opacity:.88}
       .tg-cell[data-state="available"]{background:#bae6fd}
       .tg-cell[data-state="preferred"]{background:#bbf7d0}
       .tg-cell.tg-readonly{cursor:default}
+      @media (max-width:640px){
+        .tg-table{min-width:420px}
+        .tg-table th{padding:8px 2px;font-size:.72rem}
+        .tg-time-label{min-width:46px;padding:6px 4px!important;font-size:.72rem}
+        .tg-cell{height:32px}
+      }
     `;
     this.container.innerHTML = "";
     this.container.appendChild(style);
@@ -164,37 +170,42 @@ class TimeGrid {
     this._activePointerId = null;
   }
 
+  _cellFromPoint(clientX, clientY) {
+    const element = document.elementFromPoint(clientX, clientY);
+    return element && element.closest(".tg-cell");
+  }
+
+  _paintFromPoint(clientX, clientY) {
+    if (!this._isPainting) return;
+    const cell = this._cellFromPoint(clientX, clientY);
+    if (!cell) return;
+    this._paintCell(cell);
+  }
+
   _bindPointerEvents() {
     this._table.addEventListener("pointerdown", (event) => {
       const cell = event.target.closest(".tg-cell");
       if (!cell) return;
       event.preventDefault();
       this._startPaint(cell, event.pointerId);
-      if (this._table.setPointerCapture) {
-        try {
-          this._table.setPointerCapture(event.pointerId);
-        } catch (err) {
-          // Ignore browsers that reject capture on table elements.
-        }
-      }
     });
 
-    this._table.addEventListener("pointerover", (event) => {
-      if (!this._isPainting) return;
-      const cell = event.target.closest(".tg-cell");
-      if (!cell) return;
-      this._paintCell(cell);
-    });
-
-    this._table.addEventListener("pointerup", (event) => {
-      this._stopPaint(event.pointerId);
-    });
-
-    this._table.addEventListener("pointercancel", (event) => {
-      this._stopPaint(event.pointerId);
-    });
+    document.addEventListener(
+      "pointermove",
+      (event) => {
+        if (!this._isPainting) return;
+        if (this._activePointerId !== null && event.pointerId !== this._activePointerId) return;
+        event.preventDefault();
+        this._paintFromPoint(event.clientX, event.clientY);
+      },
+      { passive: false }
+    );
 
     document.addEventListener("pointerup", (event) => {
+      this._stopPaint(event.pointerId);
+    });
+
+    document.addEventListener("pointercancel", (event) => {
       this._stopPaint(event.pointerId);
     });
   }
@@ -207,11 +218,9 @@ class TimeGrid {
       this._startPaint(cell);
     });
 
-    this._table.addEventListener("mouseover", (event) => {
+    document.addEventListener("mousemove", (event) => {
       if (!this._isPainting) return;
-      const cell = event.target.closest(".tg-cell");
-      if (!cell) return;
-      this._paintCell(cell);
+      this._paintFromPoint(event.clientX, event.clientY);
     });
 
     document.addEventListener("mouseup", () => {
@@ -223,8 +232,7 @@ class TimeGrid {
       (event) => {
         const touch = event.touches[0];
         if (!touch) return;
-        const element = document.elementFromPoint(touch.clientX, touch.clientY);
-        const cell = element && element.closest(".tg-cell");
+        const cell = this._cellFromPoint(touch.clientX, touch.clientY);
         if (!cell) return;
         event.preventDefault();
         this._startPaint(cell);
@@ -232,22 +240,23 @@ class TimeGrid {
       { passive: false }
     );
 
-    this._table.addEventListener(
+    document.addEventListener(
       "touchmove",
       (event) => {
         if (!this._isPainting) return;
         const touch = event.touches[0];
         if (!touch) return;
-        const element = document.elementFromPoint(touch.clientX, touch.clientY);
-        const cell = element && element.closest(".tg-cell");
-        if (!cell) return;
         event.preventDefault();
-        this._paintCell(cell);
+        this._paintFromPoint(touch.clientX, touch.clientY);
       },
       { passive: false }
     );
 
-    this._table.addEventListener("touchend", () => {
+    document.addEventListener("touchend", () => {
+      this._stopPaint();
+    });
+
+    document.addEventListener("touchcancel", () => {
       this._stopPaint();
     });
   }

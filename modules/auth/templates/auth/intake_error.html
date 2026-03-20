@@ -3,11 +3,18 @@
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
-.error-page{max-width:500px;margin:0 auto;padding:80px 20px;text-align:center}
+.error-page{max-width:500px;margin:0 auto;padding:80px 20px;text-align:center;min-height:min(70vh,calc(100dvh - 140px));display:flex;flex-direction:column;justify-content:center}
 .error-icon{width:80px;height:80px;margin:0 auto 20px;background:#fee2e2;border-radius:50%;display:flex;align-items:center;justify-content:center}
 .error-icon .material-icons{font-size:2.4rem;color:#dc2626}
 .error-page h1{font-size:1.4rem;color:#111827;margin:0 0 8px}
 .error-page p{color:#6b7280;font-size:.95rem;margin:0}
+@media(max-width:640px){
+  .error-page{padding:32px 16px calc(40px + env(safe-area-inset-bottom, 0px))}
+  .error-icon{width:68px;height:68px;margin-bottom:16px}
+  .error-icon .material-icons{font-size:2rem}
+  .error-page h1{font-size:1.26rem}
+  .error-page p{font-size:.9rem;line-height:1.7}
+}
 </style>
 {% endblock %}
 {% block content %}

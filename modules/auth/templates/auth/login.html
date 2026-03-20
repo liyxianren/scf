@@ -3,7 +3,7 @@
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
-.login-page{min-height:80vh;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+.login-page{min-height:min(80vh,calc(100dvh - 124px));display:flex;align-items:center;justify-content:center;padding:40px 20px}
 .login-card{width:400px;max-width:100%;padding:40px 36px;background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12);border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 .login-card h1{margin:0 0 8px;font-size:1.6rem;color:#111827;text-align:center}
 .login-card .subtitle{margin:0 0 28px;color:#6b7280;font-size:.9rem;text-align:center}
@@ -15,6 +15,14 @@
 .login-btn:hover{opacity:.92;box-shadow:0 12px 28px rgba(14,165,233,.35)}
 .error-msg{margin-bottom:16px;padding:10px 14px;border-radius:10px;background:#fee2e2;color:#991b1b;font-size:.88rem;display:none;text-align:center}
 .error-msg.show{display:block}
+@media(max-width:640px){
+  .login-page{padding:18px 14px calc(28px + env(safe-area-inset-bottom, 0px));align-items:stretch}
+  .login-card{margin:auto 0;padding:30px 20px;border-radius:20px}
+  .login-card h1{font-size:1.42rem}
+  .login-card .subtitle{margin-bottom:22px;font-size:.86rem}
+  .form-group input{padding:13px 14px;font-size:1rem}
+  .login-btn{padding:14px}
+}
 </style>
 {% endblock %}
 {% block content %}

@@ -3,9 +3,11 @@ import io
 import json
 import re
 import secrets
-from datetime import datetime, date, timedelta, time
+import unicodedata
+from datetime import datetime, date, timedelta, time, timezone
 from itertools import product
 from math import ceil
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_
 
@@ -14,11 +16,27 @@ from extensions import db
 
 FEEDBACK_PREFIX = "[排课反馈]"
 SCHEDULE_PREFIX = "[排课方案]"
+BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
+UTC = timezone.utc
 
 
 def get_business_now():
     """返回系统当前使用的本地业务时间。"""
-    return datetime.now()
+    return datetime.now(BUSINESS_TIMEZONE).replace(tzinfo=None)
+
+
+def serialize_business_datetime(value, *, assume_utc=True):
+    """把数据库中的时间值格式化成带业务时区偏移的 ISO 字符串。"""
+    if value is None:
+        return None
+
+    if value.tzinfo is None:
+        source_tz = UTC if assume_utc else BUSINESS_TIMEZONE
+        aware_value = value.replace(tzinfo=source_tz)
+    else:
+        aware_value = value
+
+    return aware_value.astimezone(BUSINESS_TIMEZONE).isoformat()
 
 
 def get_business_today():
@@ -54,6 +72,7 @@ def _serialize_json_field(value):
 
 def _resolve_teacher_user(teacher_id=None, teacher_name=None):
     from modules.auth.models import User
+    from modules.oa.services import resolve_schedule_teacher_reference
 
     if teacher_id:
         teacher = db.session.get(User, teacher_id)
@@ -62,11 +81,9 @@ def _resolve_teacher_user(teacher_id=None, teacher_name=None):
         return teacher, None
 
     if teacher_name:
-        teacher = User.query.filter(
-            or_(User.display_name == teacher_name, User.username == teacher_name)
-        ).first()
-        if not teacher:
-            return None, f'未找到老师: {teacher_name}'
+        teacher, _, _, error = resolve_schedule_teacher_reference(teacher_name)
+        if error or not teacher:
+            return None, error or f'未找到老师: {teacher_name}'
         return teacher, None
 
     return None, '缺少 teacher_id 或 teacher_name'
@@ -114,14 +131,25 @@ def create_enrollment_record(data):
     return enrollment, f'/auth/intake/{token}', None
 
 
-def _build_student_username(enrollment_id):
+def _normalize_username_base(student_name):
+    normalized = unicodedata.normalize('NFKC', str(student_name or '').strip())
+    normalized = re.sub(r'\s+', '', normalized)
+    normalized = ''.join(
+        char for char in normalized
+        if char.isalnum() or char in {'-', '_', '.'}
+    )
+    return normalized[:100] or 'student'
+
+
+def _build_student_username(student_name):
     from modules.auth.models import User
 
-    base_username = f'student-{enrollment_id}'
+    base_username = _normalize_username_base(student_name)
     username = base_username
     suffix = 2
     while User.query.filter_by(username=username).first():
-        username = f'{base_username}-{suffix}'
+        suffix_text = str(suffix)
+        username = f'{base_username[:100-len(suffix_text)]}{suffix_text}'
         suffix += 1
     return username
 
@@ -152,7 +180,7 @@ def _resolve_or_create_student_account(enrollment, student_name, phone):
         }
         return linked_user, account_info
 
-    username = _build_student_username(enrollment.id)
+    username = _build_student_username(student_name)
     student_user = User(
         username=username,
         display_name=student_name,
@@ -359,7 +387,8 @@ def save_student_profile_record(data, profile=None):
 
 def reject_enrollment_schedule(enrollment_id, message_text, actor_user_id=None):
     """外部接口或脚本退回排课方案。"""
-    from modules.auth.models import ChatMessage, Enrollment
+    from modules.auth.models import ChatMessage, Enrollment, User
+    from modules.auth.workflow_services import ensure_enrollment_replan_workflow
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
@@ -381,6 +410,12 @@ def reject_enrollment_schedule(enrollment_id, message_text, actor_user_id=None):
         is_read=False,
     )
     db.session.add(msg)
+    ensure_enrollment_replan_workflow(
+        enrollment,
+        rejection_text=message_text,
+        actor_user=db.session.get(User, sender_id),
+    )
+    enrollment.confirmed_slot = None
     enrollment.status = 'pending_schedule'
     db.session.commit()
     return True, '已发送消息给老师'
@@ -535,6 +570,21 @@ def _apply_session_dates_to_plan(plan, session_dates, skipped_dates):
     return plan
 
 
+def _merge_plan_metadata(raw_plan, plan):
+    if not isinstance(raw_plan, dict):
+        return plan
+
+    preserved_keys = {
+        'is_manual',
+        'manual_note',
+        'manual_warnings',
+    }
+    for key in preserved_keys:
+        if key in raw_plan:
+            plan[key] = raw_plan[key]
+    return plan
+
+
 def normalize_plan(raw_plan, enrollment=None):
     """兼容旧单时段结构，统一为新的 multi-slot plan 结构。"""
     if not raw_plan:
@@ -555,7 +605,7 @@ def normalize_plan(raw_plan, enrollment=None):
                 session_dates,
                 skipped_dates or [],
             )
-        return plan
+        return _merge_plan_metadata(raw_plan, plan)
 
     if all(key in raw_plan for key in ('day_of_week', 'time_start', 'time_end')):
         weekly_slots = [{
@@ -581,7 +631,7 @@ def normalize_plan(raw_plan, enrollment=None):
                 'time_end': raw_plan['time_end'],
             } for item in raw_plan.get('skipped_dates', [])]
             plan = _apply_session_dates_to_plan(plan, session_dates, skipped_dates)
-        return plan
+        return _merge_plan_metadata(raw_plan, plan)
 
     return raw_plan
 
@@ -634,6 +684,228 @@ def _schedule_has_started(schedule, reference=None):
         return False
     reference = reference or get_business_now()
     return _schedule_start_datetime(schedule) <= reference
+
+
+def _parse_session_input(session, index):
+    if not isinstance(session, dict):
+        return None, f'第 {index} 节课程数据格式不正确'
+
+    session_date = (session.get('date') or '').strip()
+    time_start = (session.get('time_start') or '').strip()
+    time_end = (session.get('time_end') or '').strip()
+    if not session_date or not time_start or not time_end:
+        return None, f'第 {index} 节课程缺少日期或时间'
+
+    try:
+        session_day = date.fromisoformat(session_date)
+    except ValueError:
+        return None, f'第 {index} 节课程日期格式无效'
+
+    try:
+        start_dt = datetime.strptime(time_start, '%H:%M')
+        end_dt = datetime.strptime(time_end, '%H:%M')
+    except ValueError:
+        return None, f'第 {index} 节课程时间格式无效'
+
+    if end_dt <= start_dt:
+        return None, f'第 {index} 节课程结束时间必须晚于开始时间'
+
+    return {
+        'date': session_day.isoformat(),
+        'day_of_week': session_day.weekday(),
+        'time_start': time_start,
+        'time_end': time_end,
+    }, None
+
+
+def _normalize_manual_session_dates(session_dates):
+    normalized = []
+    errors = []
+    for index, session in enumerate(session_dates or [], start=1):
+        payload, error = _parse_session_input(session, index)
+        if error:
+            errors.append(error)
+            continue
+        normalized.append(payload)
+
+    normalized.sort(
+        key=lambda item: (
+            item['date'],
+            _time_to_minutes(item['time_start']),
+            _time_to_minutes(item['time_end']),
+        )
+    )
+    return normalized, errors
+
+
+def _slots_overlap(time_start, time_end, other_start, other_end):
+    return _compute_overlap(time_start, time_end, other_start, other_end, 1) is not None
+
+
+def _session_within_ranges(session, ranges):
+    for slot in ranges:
+        if slot['day_of_week'] != session['day_of_week']:
+            continue
+        if (
+            session['time_start'] >= slot['time_start']
+            and session['time_end'] <= slot['time_end']
+        ):
+            return True
+    return False
+
+
+def _load_student_available_ranges(student_profile):
+    if not student_profile or not student_profile.available_slots:
+        return []
+    try:
+        available_slots = json.loads(student_profile.available_slots) or []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    ranges = []
+    for slot in available_slots:
+        try:
+            day = int(slot.get('day'))
+        except (TypeError, ValueError):
+            continue
+        start = (slot.get('start') or '').strip()
+        end = (slot.get('end') or '').strip()
+        if not start or not end:
+            continue
+        ranges.append({
+            'day_of_week': day,
+            'time_start': start,
+            'time_end': end,
+        })
+    return ranges
+
+
+def _load_teacher_available_ranges(teacher_id):
+    from modules.auth.models import TeacherAvailability
+
+    slots = TeacherAvailability.query.filter_by(user_id=teacher_id).all()
+    return [
+        {
+            'day_of_week': slot.day_of_week,
+            'time_start': slot.time_start,
+            'time_end': slot.time_end,
+        }
+        for slot in slots
+    ]
+
+
+def _build_weekly_slots_from_sessions(session_dates):
+    weekly_slots = {}
+    for session in session_dates:
+        key = (
+            session['day_of_week'],
+            session['time_start'],
+            session['time_end'],
+        )
+        if key not in weekly_slots:
+            weekly_slots[key] = {
+                'day_of_week': session['day_of_week'],
+                'time_start': session['time_start'],
+                'time_end': session['time_end'],
+                'score': 0,
+                'is_preferred': False,
+                'conflicts': [],
+            }
+    return sorted(weekly_slots.values(), key=_slot_sort_key)
+
+
+def _build_manual_plan(session_dates):
+    weekly_slots = _build_weekly_slots_from_sessions(session_dates)
+    plan = _build_plan(weekly_slots, len(session_dates), set())
+    plan = _apply_session_dates_to_plan(plan, session_dates, [])
+    plan['is_manual'] = True
+    return plan
+
+
+def _collect_manual_plan_issues(enrollment, session_dates):
+    from modules.oa.models import CourseSchedule
+
+    errors = []
+    warnings = []
+
+    expected_sessions = _get_total_sessions(enrollment)
+    if len(session_dates) != expected_sessions:
+        errors.append(f'课次数量必须为 {expected_sessions} 节，当前为 {len(session_dates)} 节')
+
+    if not session_dates:
+        errors.append('至少需要保留一节课程')
+        return errors, warnings
+
+    now = get_business_now()
+    for session in session_dates:
+        start_at = datetime.combine(
+            date.fromisoformat(session['date']),
+            datetime.strptime(session['time_start'], '%H:%M').time(),
+        )
+        if start_at < now:
+            errors.append(f'{session["date"]} {session["time_start"]}-{session["time_end"]} 已是过去时间，不能保存')
+
+    for current, nxt in zip(session_dates, session_dates[1:]):
+        if current['date'] != nxt['date']:
+            continue
+        if _slots_overlap(
+            current['time_start'],
+            current['time_end'],
+            nxt['time_start'],
+            nxt['time_end'],
+        ):
+            errors.append(
+                f'{current["date"]} 存在课次时间重叠：'
+                f'{current["time_start"]}-{current["time_end"]} 与 {nxt["time_start"]}-{nxt["time_end"]}'
+            )
+
+    teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
+    ignore_ids = [schedule.id for schedule in _linked_schedule_query(enrollment.id).all()]
+    session_dates_set = {item['date'] for item in session_dates}
+    teacher_conflict_query = CourseSchedule.query.filter(
+        CourseSchedule.date.in_(session_dates_set),
+        or_(
+            CourseSchedule.teacher_id == enrollment.teacher_id,
+            CourseSchedule.teacher == teacher_name,
+        ),
+    )
+    if ignore_ids:
+        teacher_conflict_query = teacher_conflict_query.filter(~CourseSchedule.id.in_(ignore_ids))
+
+    existing_by_date = {}
+    for schedule in teacher_conflict_query.all():
+        existing_by_date.setdefault(schedule.date.isoformat(), []).append(schedule)
+
+    for session in session_dates:
+        for existing in existing_by_date.get(session['date'], []):
+            if _slots_overlap(
+                session['time_start'],
+                session['time_end'],
+                existing.time_start,
+                existing.time_end,
+            ):
+                errors.append(
+                    f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
+                    f'与老师现有课程冲突：{existing.course_name} {existing.time_start}-{existing.time_end}'
+                )
+
+    teacher_ranges = _load_teacher_available_ranges(enrollment.teacher_id)
+    student_ranges = _load_student_available_ranges(enrollment.student_profile)
+    excluded_dates = _load_student_excluded_dates(enrollment.student_profile)
+
+    for session in session_dates:
+        if teacher_ranges and not _session_within_ranges(session, teacher_ranges):
+            warnings.append(
+                f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出老师原始可用时间'
+            )
+        if student_ranges and not _session_within_ranges(session, student_ranges):
+            warnings.append(
+                f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出学生填写的可上课时间'
+            )
+        if session['date'] in excluded_dates:
+            warnings.append(f'{session["date"]} 命中学生标记的不可上课日期')
+
+    return list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
 
 
 def _linked_schedule_query(enrollment_id):
@@ -801,6 +1073,8 @@ def build_feedback_payload(feedback, actor=None):
 
 
 def build_schedule_payload(schedule, actor=None):
+    from modules.auth.workflow_services import get_schedule_workflow_todos
+
     payload = schedule.to_dict()
     latest_leave = _latest_leave_request(schedule)
     feedback = getattr(schedule, 'feedback', None)
@@ -820,11 +1094,14 @@ def build_schedule_payload(schedule, actor=None):
         'can_request_leave': bool(actor and user_can_request_leave(actor, schedule)),
         'can_approve_leave': bool(actor and latest_leave and latest_leave.status == 'pending' and user_can_approve_leave(actor, latest_leave)),
         'can_submit_feedback': bool(actor and user_can_submit_feedback(actor, schedule)),
+        'workflow_todos': get_schedule_workflow_todos(schedule.id, actor),
     })
     return payload
 
 
 def build_leave_request_payload(leave_request, actor=None):
+    from modules.auth.workflow_services import get_leave_request_workflow
+
     payload = leave_request.to_dict()
     payload.update({
         'can_edit': False,
@@ -837,6 +1114,7 @@ def build_leave_request_payload(leave_request, actor=None):
             and user_can_approve_leave(actor, leave_request)
         ),
         'can_submit_feedback': False,
+        'makeup_workflow': get_leave_request_workflow(leave_request.id, actor),
     })
     return payload
 
@@ -914,6 +1192,8 @@ def get_enrollment_feedback_meta(enrollment):
 
 
 def build_enrollment_payload(enrollment, actor=None):
+    from modules.auth.workflow_services import get_enrollment_workflow_todos
+
     payload = enrollment.to_dict()
     payload['proposed_slots'] = [
         normalize_plan(plan, enrollment)
@@ -923,6 +1203,7 @@ def build_enrollment_payload(enrollment, actor=None):
     payload.update(get_enrollment_feedback_meta(enrollment))
     payload.update(_get_enrollment_delivery_meta(enrollment))
     payload.update({
+        'expected_session_count': _get_total_sessions(enrollment),
         'can_edit': bool(actor and user_can_edit_enrollment_intake(actor, enrollment)),
         'can_confirm': bool(
             actor
@@ -943,6 +1224,9 @@ def build_enrollment_payload(enrollment, actor=None):
         'can_submit_feedback': False,
         'edit_intake_url': f'/auth/enrollments/{enrollment.id}/intake-edit',
     })
+    workflow_todos = get_enrollment_workflow_todos(enrollment.id, actor)
+    payload['workflow_todos'] = workflow_todos
+    payload['active_workflow_todo'] = workflow_todos[0] if workflow_todos else None
     return payload
 
 
@@ -1148,6 +1432,67 @@ def propose_enrollment_schedule(enrollment_id, slot_index):
     return True, msg, plan['session_dates']
 
 
+def save_manual_enrollment_plan(enrollment_id, session_dates, *, force_save=False):
+    from modules.auth.models import Enrollment
+
+    enrollment = db.session.get(Enrollment, enrollment_id)
+    if not enrollment:
+        return {
+            'success': False,
+            'status_code': 404,
+            'error': '报名记录不存在',
+        }
+
+    if enrollment.status not in {'pending_schedule', 'pending_student_confirm'}:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前状态不允许手动调整排课方案',
+        }
+
+    normalized_dates, parse_errors = _normalize_manual_session_dates(session_dates)
+    if parse_errors:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '；'.join(parse_errors),
+            'errors': parse_errors,
+        }
+
+    errors, warnings = _collect_manual_plan_issues(enrollment, normalized_dates)
+    if errors:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '；'.join(errors),
+            'errors': errors,
+        }
+
+    if warnings and not force_save:
+        return {
+            'success': False,
+            'status_code': 200,
+            'error': '方案存在提示项，请确认是否继续保存',
+            'warnings': warnings,
+            'can_force_save': True,
+        }
+
+    plan = _build_manual_plan(normalized_dates)
+    if warnings:
+        plan['manual_warnings'] = warnings
+    enrollment.confirmed_slot = json.dumps(plan, ensure_ascii=False)
+    enrollment.status = 'pending_student_confirm'
+    _send_schedule_notification(enrollment, plan)
+    db.session.commit()
+
+    return {
+        'success': True,
+        'status_code': 200,
+        'message': '手动排课方案已保存，并已重新通知学生确认',
+        'plan': plan,
+    }
+
+
 def _send_schedule_notification(enrollment, plan):
     """通过 ChatMessage 通知学生查看排课方案。"""
     from modules.auth.models import ChatMessage
@@ -1188,7 +1533,9 @@ def student_confirm_schedule(enrollment_id):
     """学生确认排课 -> 创建全部具体课次。"""
     from modules.auth.models import Enrollment
     from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
+    from modules.oa.services import delivery_mode_from_color_tag
     from modules.auth.models import LeaveRequest
+    from modules.auth.workflow_services import complete_replan_workflows_for_enrollment, ensure_schedule_feedback_todo
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
@@ -1233,14 +1580,18 @@ def student_confirm_schedule(enrollment_id):
             enrollment_id=enrollment.id,
             students=student_name,
             color_tag='green',
+            delivery_mode=delivery_mode_from_color_tag('green'),
             notes=f'自动排课 - 报名#{enrollment.id}',
         )
         db.session.add(schedule)
+        db.session.flush()
+        ensure_schedule_feedback_todo(schedule, created_by=enrollment.teacher_id)
         created_count += 1
 
     enrollment.status = 'confirmed'
     db.session.flush()
     sync_enrollment_status(enrollment)
+    complete_replan_workflows_for_enrollment(enrollment.id)
     db.session.commit()
     return True, f'已生成 {created_count} 节课程', created_count
 
@@ -1271,6 +1622,7 @@ def send_leave_status_notification(leave_request):
 
 def save_course_feedback(schedule, teacher_id, data, *, submit=False):
     from modules.oa.models import CourseFeedback
+    from modules.auth.workflow_services import complete_schedule_feedback_todo
 
     feedback = CourseFeedback.query.filter_by(
         schedule_id=schedule.id,
@@ -1293,8 +1645,10 @@ def save_course_feedback(schedule, teacher_id, data, *, submit=False):
         feedback.status = 'draft'
 
     db.session.flush()
-    if submit and schedule.enrollment:
-        sync_enrollment_status(schedule.enrollment)
+    if submit:
+        complete_schedule_feedback_todo(schedule.id)
+        if schedule.enrollment:
+            sync_enrollment_status(schedule.enrollment)
     db.session.commit()
     return True, '反馈已提交' if submit else '反馈草稿已保存', feedback
 

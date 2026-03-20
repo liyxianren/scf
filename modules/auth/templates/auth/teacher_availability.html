@@ -9,6 +9,7 @@
 .page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px;flex-wrap:wrap}
 .page-header h1{margin:0;display:flex;align-items:center;gap:10px;font-size:1.8rem;color:#111827}
 .page-header h1 .material-icons{color:#0ea5e9}
+.page-hint{margin:-8px 0 18px;color:#6b7280;font-size:.9rem;line-height:1.6}
 .controls-bar{display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap}
 .controls-bar select{padding:10px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;min-width:200px}
 .controls-bar select:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
@@ -24,7 +25,16 @@
 #timeGridContainer{background:#fff;border-radius:16px;padding:20px;box-shadow:0 10px 24px rgba(15,23,42,.04);border:1px solid #e5e7eb;overflow-x:auto}
 .toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;background:#0f172a;color:#fff;font-size:.92rem;z-index:2000}
 .toast.show{display:block}
-@media(max-width:640px){.oa-page{padding-inline:14px}.controls-bar{flex-direction:column;align-items:stretch}}
+@media(max-width:640px){
+  .oa-page{padding-inline:14px}
+  .page-header{flex-direction:column;align-items:stretch}
+  .page-header .btn-primary{width:100%;justify-content:center}
+  .page-hint{font-size:.88rem;margin-top:-6px}
+  .controls-bar{flex-direction:column;align-items:stretch}
+  .controls-bar select{min-width:0;width:100%}
+  .pref-toggle{justify-content:center}
+  #timeGridContainer{padding:14px}
+}
 </style>
 {% endblock %}
 {% block content %}
@@ -34,6 +44,7 @@
     <h1><span class="material-icons">schedule</span> 教师时间管理</h1>
     <button class="btn-primary" onclick="saveAvailability()"><span class="material-icons" style="font-size:1.1rem;">save</span> 保存</button>
   </div>
+  <p class="page-hint">点击或滑动网格即可连续选择时段。手机端会保留局部横向滚动，方便查看完整一周。</p>
   <div class="controls-bar">
     <select id="teacherSelect">
       <option value="">-- 选择教师 --</option>
