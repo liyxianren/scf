@@ -244,7 +244,7 @@ def test_enrollment_lifecycle_reject_then_confirm(client, login_as, logout):
     assert len(schedules) == 3
     assert all(schedule.teacher_id == teacher.id for schedule in schedules)
     assert all(schedule.enrollment_id == enrollment_id for schedule in schedules)
-    assert db.session.get(Enrollment, enrollment_id).status == 'active'
+    assert db.session.get(Enrollment, enrollment_id).status == 'confirmed'
 
 
 def test_schedule_matching_creates_multi_session_records(app):

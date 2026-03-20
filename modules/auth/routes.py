@@ -490,7 +490,7 @@ def api_get_schedule_feedback(schedule_id):
 
 
 @auth_bp.route('/api/schedules/<int:schedule_id>/feedback', methods=['POST'])
-@role_required('teacher')
+@role_required('teacher', 'admin')
 def api_save_schedule_feedback(schedule_id):
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
@@ -507,7 +507,7 @@ def api_save_schedule_feedback(schedule_id):
 
 
 @auth_bp.route('/api/schedules/<int:schedule_id>/feedback/submit', methods=['POST'])
-@role_required('teacher')
+@role_required('teacher', 'admin')
 def api_submit_schedule_feedback(schedule_id):
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:

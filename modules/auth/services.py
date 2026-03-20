@@ -794,6 +794,106 @@ def _load_teacher_available_ranges(teacher_id):
     ]
 
 
+def _actor_can_manage_schedule_feedback(actor, schedule=None, *, teacher_id=None):
+    target_teacher_id = teacher_id if teacher_id is not None else getattr(schedule, 'teacher_id', None)
+    return bool(
+        actor
+        and getattr(actor, 'is_authenticated', False)
+        and actor.role in {'teacher', 'admin'}
+        and target_teacher_id is not None
+        and actor.id == target_teacher_id
+    )
+
+
+def _collect_teacher_schedule_conflicts(enrollment, session_dates, *, ignore_schedule_ids=None):
+    from modules.oa.models import CourseSchedule
+
+    if not enrollment or not session_dates:
+        return []
+
+    ignore_ids = set(ignore_schedule_ids or [])
+    teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
+    teacher_filters = [CourseSchedule.teacher_id == enrollment.teacher_id]
+    if teacher_name:
+        teacher_filters.append(CourseSchedule.teacher == teacher_name)
+
+    session_dates_by_date = {}
+    for session in session_dates:
+        session_dates_by_date.setdefault(session['date'], []).append(session)
+
+    query = CourseSchedule.query.filter(
+        CourseSchedule.date.in_([date.fromisoformat(value) for value in session_dates_by_date]),
+        or_(*teacher_filters),
+    )
+    if ignore_ids:
+        query = query.filter(~CourseSchedule.id.in_(ignore_ids))
+
+    conflicts = []
+    existing_by_date = {}
+    for schedule in query.all():
+        existing_by_date.setdefault(schedule.date.isoformat(), []).append(schedule)
+
+    for session in session_dates:
+        for existing in existing_by_date.get(session['date'], []):
+            if _slots_overlap(
+                session['time_start'],
+                session['time_end'],
+                existing.time_start,
+                existing.time_end,
+            ):
+                conflicts.append(
+                    f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
+                    f'与老师现有课程冲突：{existing.course_name} {existing.time_start}-{existing.time_end}'
+                )
+
+    return conflicts
+
+
+def _collect_student_schedule_conflicts(enrollment, session_dates, *, ignore_schedule_ids=None):
+    from modules.auth.models import Enrollment
+    from modules.oa.models import CourseSchedule
+
+    if not enrollment or not enrollment.student_profile_id or not session_dates:
+        return []
+
+    ignore_ids = set(ignore_schedule_ids or [])
+    session_dates_by_date = {}
+    for session in session_dates:
+        session_dates_by_date.setdefault(session['date'], []).append(session)
+
+    query = CourseSchedule.query.join(
+        Enrollment,
+        CourseSchedule.enrollment_id == Enrollment.id,
+    ).filter(
+        Enrollment.student_profile_id == enrollment.student_profile_id,
+        CourseSchedule.date.in_([date.fromisoformat(value) for value in session_dates_by_date]),
+    )
+    if ignore_ids:
+        query = query.filter(~CourseSchedule.id.in_(ignore_ids))
+    if enrollment.id:
+        query = query.filter(Enrollment.id != enrollment.id)
+
+    conflicts = []
+    existing_by_date = {}
+    for schedule in query.all():
+        existing_by_date.setdefault(schedule.date.isoformat(), []).append(schedule)
+
+    for session in session_dates:
+        for existing in existing_by_date.get(session['date'], []):
+            if _slots_overlap(
+                session['time_start'],
+                session['time_end'],
+                existing.time_start,
+                existing.time_end,
+            ):
+                conflicts.append(
+                    f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
+                    f'涓庡鐢熺幇鏈夎绋嬪啿绐侊細{existing.course_name} {existing.time_start}-{existing.time_end}'
+                )
+
+    return conflicts
+
+
 def _build_weekly_slots_from_sessions(session_dates):
     weekly_slots = {}
     for session in session_dates:
@@ -823,8 +923,6 @@ def _build_manual_plan(session_dates):
 
 
 def _collect_manual_plan_issues(enrollment, session_dates):
-    from modules.oa.models import CourseSchedule
-
     errors = []
     warnings = []
 
@@ -859,35 +957,24 @@ def _collect_manual_plan_issues(enrollment, session_dates):
                 f'{current["time_start"]}-{current["time_end"]} 与 {nxt["time_start"]}-{nxt["time_end"]}'
             )
 
-    teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
-    ignore_ids = [schedule.id for schedule in _linked_schedule_query(enrollment.id).all()]
-    session_dates_set = {item['date'] for item in session_dates}
-    teacher_conflict_query = CourseSchedule.query.filter(
-        CourseSchedule.date.in_(session_dates_set),
-        or_(
-            CourseSchedule.teacher_id == enrollment.teacher_id,
-            CourseSchedule.teacher == teacher_name,
-        ),
+    ignore_ids = []
+    if enrollment and enrollment.id:
+        ignore_ids = [schedule.id for schedule in _linked_schedule_query(enrollment.id).all()]
+
+    errors.extend(
+        _collect_teacher_schedule_conflicts(
+            enrollment,
+            session_dates,
+            ignore_schedule_ids=ignore_ids,
+        )
     )
-    if ignore_ids:
-        teacher_conflict_query = teacher_conflict_query.filter(~CourseSchedule.id.in_(ignore_ids))
-
-    existing_by_date = {}
-    for schedule in teacher_conflict_query.all():
-        existing_by_date.setdefault(schedule.date.isoformat(), []).append(schedule)
-
-    for session in session_dates:
-        for existing in existing_by_date.get(session['date'], []):
-            if _slots_overlap(
-                session['time_start'],
-                session['time_end'],
-                existing.time_start,
-                existing.time_end,
-            ):
-                errors.append(
-                    f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
-                    f'与老师现有课程冲突：{existing.course_name} {existing.time_start}-{existing.time_end}'
-                )
+    errors.extend(
+        _collect_student_schedule_conflicts(
+            enrollment,
+            session_dates,
+            ignore_schedule_ids=ignore_ids,
+        )
+    )
 
     teacher_ranges = _load_teacher_available_ranges(enrollment.teacher_id)
     student_ranges = _load_student_available_ranges(enrollment.student_profile)
@@ -1043,9 +1130,8 @@ def user_can_submit_feedback(user, schedule):
     if not (
         user
         and getattr(user, 'is_authenticated', False)
-        and user.role == 'teacher'
         and schedule
-        and schedule.teacher_id == user.id
+        and _actor_can_manage_schedule_feedback(user, schedule)
     ):
         return False
     if not _schedule_has_started(schedule):
@@ -1066,10 +1152,19 @@ def build_feedback_payload(feedback, actor=None):
     payload['can_submit_feedback'] = bool(
         actor
         and getattr(actor, 'is_authenticated', False)
-        and actor.role == 'teacher'
-        and feedback.teacher_id == actor.id
+        and _actor_can_manage_schedule_feedback(actor, teacher_id=feedback.teacher_id)
     )
     return payload
+
+
+def _filter_workflow_todos_for_actor(workflow_todos, actor=None):
+    if not (actor and getattr(actor, 'is_authenticated', False) and actor.role == 'student'):
+        return workflow_todos
+    visible_todo_types = {'enrollment_replan', 'leave_makeup'}
+    return [
+        todo for todo in (workflow_todos or [])
+        if todo.get('todo_type') in visible_todo_types
+    ]
 
 
 def build_schedule_payload(schedule, actor=None):
@@ -1078,9 +1173,11 @@ def build_schedule_payload(schedule, actor=None):
     payload = schedule.to_dict()
     latest_leave = _latest_leave_request(schedule)
     feedback = getattr(schedule, 'feedback', None)
+    workflow_todos = get_schedule_workflow_todos(schedule.id, actor)
     if actor and getattr(actor, 'is_authenticated', False) and actor.role == 'student':
         if feedback and feedback.status != 'submitted':
             feedback = None
+        workflow_todos = _filter_workflow_todos_for_actor(workflow_todos, actor)
     payload.update({
         'leave_request': latest_leave.to_dict() if latest_leave else None,
         'leave_status': latest_leave.status if latest_leave else None,
@@ -1094,7 +1191,7 @@ def build_schedule_payload(schedule, actor=None):
         'can_request_leave': bool(actor and user_can_request_leave(actor, schedule)),
         'can_approve_leave': bool(actor and latest_leave and latest_leave.status == 'pending' and user_can_approve_leave(actor, latest_leave)),
         'can_submit_feedback': bool(actor and user_can_submit_feedback(actor, schedule)),
-        'workflow_todos': get_schedule_workflow_todos(schedule.id, actor),
+        'workflow_todos': workflow_todos,
     })
     return payload
 
@@ -1224,7 +1321,10 @@ def build_enrollment_payload(enrollment, actor=None):
         'can_submit_feedback': False,
         'edit_intake_url': f'/auth/enrollments/{enrollment.id}/intake-edit',
     })
-    workflow_todos = get_enrollment_workflow_todos(enrollment.id, actor)
+    workflow_todos = _filter_workflow_todos_for_actor(
+        get_enrollment_workflow_todos(enrollment.id, actor),
+        actor,
+    )
     payload['workflow_todos'] = workflow_todos
     payload['active_workflow_todo'] = workflow_todos[0] if workflow_todos else None
     return payload
@@ -1232,7 +1332,7 @@ def build_enrollment_payload(enrollment, actor=None):
 
 def sync_enrollment_status(enrollment):
     """根据课表与交付情况重新计算报名状态。"""
-    from modules.oa.models import CourseSchedule
+    from modules.oa.models import CourseFeedback, CourseSchedule
 
     if not enrollment:
         return None
@@ -1256,12 +1356,20 @@ def sync_enrollment_status(enrollment):
         return enrollment.status
 
     has_future_schedule = any(_schedule_start_datetime(schedule) > now for schedule in schedules)
+    submitted_feedback_schedule_ids = set()
+    if started_schedules:
+        submitted_feedback_schedule_ids = {
+            row[0]
+            for row in db.session.query(CourseFeedback.schedule_id).filter(
+                CourseFeedback.schedule_id.in_([schedule.id for schedule in started_schedules]),
+                CourseFeedback.status == 'submitted',
+            ).all()
+        }
     has_open_delivery = False
     for schedule in started_schedules:
         latest_leave = _latest_leave_request(schedule)
         approved_leave = bool(latest_leave and latest_leave.status == 'approved')
-        feedback = getattr(schedule, 'feedback', None)
-        delivered = bool(feedback and feedback.status == 'submitted')
+        delivered = schedule.id in submitted_feedback_schedule_ids
         if not delivered and not approved_leave:
             has_open_delivery = True
             break
@@ -1394,7 +1502,21 @@ def find_matching_slots(enrollment_id):
             plans_by_signature[signature] = plan
 
     plans = sorted(plans_by_signature.values(), key=_plan_sort_key)
-    return plans[:3], None
+    valid_plans = []
+    for plan in plans:
+        normalized_plan = normalize_plan(plan, enrollment)
+        plan_errors, _ = _collect_manual_plan_issues(
+            enrollment,
+            normalized_plan.get('session_dates', []),
+        )
+        if not plan_errors:
+            valid_plans.append(plan)
+        if len(valid_plans) >= 3:
+            break
+
+    if not valid_plans:
+        return plans[:3], None
+    return valid_plans, None
 
 
 def propose_enrollment_schedule(enrollment_id, slot_index):
@@ -1556,6 +1678,13 @@ def student_confirm_schedule(enrollment_id):
     if not session_dates:
         return False, '排课方案没有具体课次', 0
 
+    errors, _ = _collect_manual_plan_issues(enrollment, session_dates)
+    if errors:
+        enrollment.confirmed_slot = None
+        enrollment.status = 'pending_schedule'
+        db.session.commit()
+        return False, '；'.join(dict.fromkeys(errors)), 0
+
     teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
     student_name = enrollment.student_name
 
@@ -1622,6 +1751,7 @@ def send_leave_status_notification(leave_request):
 
 def save_course_feedback(schedule, teacher_id, data, *, submit=False):
     from modules.oa.models import CourseFeedback
+    from modules.auth.models import Enrollment
     from modules.auth.workflow_services import complete_schedule_feedback_todo
 
     feedback = CourseFeedback.query.filter_by(
@@ -1647,8 +1777,10 @@ def save_course_feedback(schedule, teacher_id, data, *, submit=False):
     db.session.flush()
     if submit:
         complete_schedule_feedback_todo(schedule.id)
-        if schedule.enrollment:
-            sync_enrollment_status(schedule.enrollment)
+        db.session.flush()
+        enrollment = db.session.get(Enrollment, schedule.enrollment_id) if schedule.enrollment_id else None
+        if enrollment:
+            sync_enrollment_status(enrollment)
     db.session.commit()
     return True, '反馈已提交' if submit else '反馈草稿已保存', feedback
 

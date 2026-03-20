@@ -56,7 +56,7 @@ def _payload_rejections(payload):
 
 def _append_rejection(payload, user, message_text):
     rejections = _payload_rejections(payload)
-    message = (message_text or '').strip() or '学生对当前方案有疑问，请重新调整。'
+    message = (message_text or '').strip() or '?????????????'
     rejections.append({
         'message': message,
         'reason': message,
@@ -67,6 +67,23 @@ def _append_rejection(payload, user, message_text):
     payload['rejections'] = rejections
     payload['latest_rejection'] = rejections[-1]
     return rejections
+
+
+def _append_system_rejection(payload, message_text):
+    rejections = _payload_rejections(payload)
+    message = (message_text or '').strip() or '当前方案已失效，请重新提案'
+    rejection = {
+        'message': message,
+        'reason': message,
+        'actor_user_id': None,
+        'actor_name': 'system',
+        'source': 'system',
+        'created_at': _now().isoformat(),
+    }
+    rejections.append(rejection)
+    payload['rejections'] = rejections
+    payload['latest_rejection'] = rejection
+    return rejection
 
 
 def _teacher_admin_responsible_people(enrollment):
@@ -156,6 +173,8 @@ def user_can_access_workflow_todo(user, todo):
         return bool(todo.schedule and todo.schedule.teacher_id == user.id)
 
     if user.role == 'student':
+        if todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK:
+            return False
         profile = getattr(user, 'student_profile', None)
         return bool(profile and enrollment and enrollment.student_profile_id == profile.id)
 
@@ -188,7 +207,10 @@ def list_workflow_todos_for_user(user, *, status='open', todo_type=None, enrollm
         profile = getattr(user, 'student_profile', None)
         if not profile:
             return []
-        query = query.filter(OATodo.enrollment.has(Enrollment.student_profile_id == profile.id))
+        query = query.filter(
+            OATodo.todo_type.in_(tuple(PROCESS_WORKFLOW_TYPES)),
+            OATodo.enrollment.has(Enrollment.student_profile_id == profile.id),
+        )
 
     return query.order_by(
         OATodo.is_completed,
@@ -288,6 +310,8 @@ def get_enrollment_workflow_todos(enrollment_id, actor=None, *, include_closed=F
     )
     if not include_closed:
         query = query.filter(OATodo.is_completed == False)
+    if actor and getattr(actor, 'role', None) == 'student':
+        query = query.filter(OATodo.todo_type.in_(tuple(PROCESS_WORKFLOW_TYPES)))
     todos = query.order_by(OATodo.created_at.desc()).all()
     return [build_workflow_todo_payload(todo, actor) for todo in todos]
 
@@ -299,6 +323,8 @@ def get_schedule_workflow_todos(schedule_id, actor=None, *, include_closed=False
     )
     if not include_closed:
         query = query.filter(OATodo.is_completed == False)
+    if actor and getattr(actor, 'role', None) == 'student':
+        query = query.filter(OATodo.todo_type.in_(tuple(PROCESS_WORKFLOW_TYPES)))
     todos = query.order_by(OATodo.created_at.desc()).all()
     return [build_workflow_todo_payload(todo, actor) for todo in todos]
 
@@ -499,8 +525,84 @@ def _collect_makeup_plan_issues(leave_request, session_dates):
     return list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
 
 
+def _collect_student_profile_conflicts(enrollment, session_dates):
+    if not enrollment or not getattr(enrollment, 'student_profile_id', None) or not session_dates:
+        return []
+
+    session_dates_set = {session['date'] for session in session_dates if session.get('date')}
+    if not session_dates_set:
+        return []
+
+    query = db.session.query(CourseSchedule).join(
+        Enrollment,
+        CourseSchedule.enrollment_id == Enrollment.id,
+    ).filter(
+        Enrollment.student_profile_id == enrollment.student_profile_id,
+        Enrollment.id != enrollment.id,
+        CourseSchedule.date.in_(session_dates_set),
+    )
+
+    existing_by_date = {}
+    for schedule in query.all():
+        existing_by_date.setdefault(schedule.date.isoformat(), []).append(schedule)
+
+    errors = []
+    for session in session_dates:
+        for existing in existing_by_date.get(session.get('date'), []):
+            if auth_services._slots_overlap(
+                session['time_start'],
+                session['time_end'],
+                existing.time_start,
+                existing.time_end,
+            ):
+                errors.append(
+                    f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
+                    f'与同一学生跨报名课次冲突：{existing.course_name} {existing.time_start}-{existing.time_end}'
+                )
+    return list(dict.fromkeys(errors))
+
+
+def _current_proposal_session_dates(todo):
+    payload = todo.get_payload_data()
+    current_proposal = payload.get('current_proposal') or {}
+    session_dates = current_proposal.get('session_dates') or []
+    if session_dates:
+        return _copy_jsonable(session_dates), None
+
+    if todo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN and todo.enrollment:
+        confirmed_plan = _load_enrollment_confirmed_slot(todo.enrollment)
+        if confirmed_plan and confirmed_plan.get('session_dates'):
+            return _copy_jsonable(confirmed_plan.get('session_dates') or []), None
+
+    return [], '当前方案无可用课次'
+
+
+def _restore_workflow_to_teacher_proposal(todo, message_text, *, clear_confirmed_slot=False):
+    payload = _workflow_base_payload(todo)
+    message = (message_text or '').strip() or '当前方案已失效，请老师重新提案。'
+    _append_system_rejection(payload, message)
+    payload['revision'] = int(payload.get('revision') or 0) + 1
+    payload['current_proposal'] = _copy_jsonable(payload.get('current_proposal'))
+    todo.description = message
+    todo.notes = message
+    todo.responsible_person = _teacher_admin_responsible_people(todo.enrollment)
+    _set_todo_state(todo, OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL)
+    todo.set_payload_data(payload)
+    if clear_confirmed_slot and todo.enrollment:
+        todo.enrollment.confirmed_slot = None
+        todo.enrollment.status = 'pending_schedule'
+
+
 def _proposal_validation(todo, session_dates):
     normalized_dates, errors, warnings = _normalize_proposal_session_dates(session_dates)
+    if not errors:
+        linked_enrollment = todo.enrollment
+        if todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP and todo.leave_request:
+            linked_enrollment = todo.leave_request.enrollment or (
+                todo.leave_request.schedule.enrollment if todo.leave_request.schedule else linked_enrollment
+            )
+        errors.extend(_collect_student_profile_conflicts(linked_enrollment, normalized_dates))
+
     if errors:
         return None, errors, warnings
 
@@ -675,7 +777,7 @@ def admin_send_workflow_to_student(todo, actor, *, session_dates=None, note='', 
     }
 
 
-def _create_makeup_schedule(todo):
+def _create_makeup_schedule(todo, plan=None):
     from modules.oa.services import delivery_mode_from_color_tag
 
     leave_request = todo.leave_request
@@ -683,7 +785,7 @@ def _create_makeup_schedule(todo):
     if not leave_request or not enrollment:
         return None, '补课工作流缺少关联数据'
 
-    proposal = (todo.get_payload_data().get('current_proposal') or {})
+    proposal = plan or (todo.get_payload_data().get('current_proposal') or {})
     session_dates = proposal.get('session_dates') or []
     if len(session_dates) != 1:
         return None, '当前补课方案无效'
@@ -727,8 +829,30 @@ def student_confirm_workflow_todo(todo, actor):
         }
 
     if todo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN:
+        session_dates, error = _current_proposal_session_dates(todo)
+        if error:
+            _restore_workflow_to_teacher_proposal(todo, error, clear_confirmed_slot=True)
+            db.session.commit()
+            return {
+                'success': False,
+                'status_code': 400,
+                'error': error,
+            }
+        plan, errors, warnings = _proposal_validation(todo, session_dates)
+        if errors or not plan:
+            message = '；'.join(errors) if errors else '当前排课方案已失效，请重新提案'
+            _restore_workflow_to_teacher_proposal(todo, message, clear_confirmed_slot=True)
+            db.session.commit()
+            return {
+                'success': False,
+                'status_code': 400,
+                'error': message,
+                'errors': errors,
+            }
         success, message, created_count = auth_services.student_confirm_schedule(todo.enrollment_id)
         if not success:
+            _restore_workflow_to_teacher_proposal(todo, message, clear_confirmed_slot=True)
+            db.session.commit()
             return {
                 'success': False,
                 'status_code': 400,
@@ -745,8 +869,30 @@ def student_confirm_workflow_todo(todo, actor):
         }
 
     if todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP:
-        schedule, error = _create_makeup_schedule(todo)
+        session_dates, error = _current_proposal_session_dates(todo)
         if error:
+            _restore_workflow_to_teacher_proposal(todo, error, clear_confirmed_slot=False)
+            db.session.commit()
+            return {
+                'success': False,
+                'status_code': 400,
+                'error': error,
+            }
+        plan, errors, warnings = _proposal_validation(todo, session_dates)
+        if errors or not plan:
+            message = '；'.join(errors) if errors else '当前补课方案已失效，请重新提案'
+            _restore_workflow_to_teacher_proposal(todo, message, clear_confirmed_slot=False)
+            db.session.commit()
+            return {
+                'success': False,
+                'status_code': 400,
+                'error': message,
+                'errors': errors,
+            }
+        schedule, error = _create_makeup_schedule(todo, plan=plan)
+        if error:
+            _restore_workflow_to_teacher_proposal(todo, error, clear_confirmed_slot=False)
+            db.session.commit()
             return {
                 'success': False,
                 'status_code': 400,

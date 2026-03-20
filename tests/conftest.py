@@ -12,7 +12,7 @@ from extensions import db
 
 @pytest.fixture
 def frozen_time():
-    with freeze_time('2026-03-16 09:00:00'):
+    with freeze_time('2026-03-16 09:00:00+08:00'):
         yield
 
 

@@ -74,16 +74,51 @@ def _validate_schedule_conflicts(*, schedule_id=None, course_date=None, time_sta
         for existing in enrollment_query.all():
             if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
                 return '该报名在相同时段已有课程安排'
+
+        enrollment = db.session.get(Enrollment, enrollment_id)
+        if enrollment and enrollment.student_profile_id:
+            student_query = CourseSchedule.query.join(
+                Enrollment,
+                CourseSchedule.enrollment_id == Enrollment.id,
+            ).filter(
+                Enrollment.student_profile_id == enrollment.student_profile_id,
+                CourseSchedule.date == course_date,
+                Enrollment.id != enrollment_id,
+            )
+            if schedule_id:
+                student_query = student_query.filter(CourseSchedule.id != schedule_id)
+            for existing in student_query.all():
+                if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
+                    return '该学生在其他报名里同一时段已有课程安排'
     return None
 
 
 def _schedule_locked_by_leave(schedule, updates):
     if not schedule:
         return False
-    if not LeaveRequest.query.filter_by(schedule_id=schedule.id).count():
+    protected_fields = {'date', 'time_start', 'time_end', 'teacher', 'teacher_id', 'enrollment_id'}
+    if not any(field in (updates or {}) for field in protected_fields):
         return False
-    protected_fields = {'date', 'time_start', 'time_end', 'teacher', 'enrollment_id'}
-    return any(field in updates for field in protected_fields)
+    latest_leave = LeaveRequest.query.filter_by(schedule_id=schedule.id).order_by(
+        LeaveRequest.created_at.desc()
+    ).first()
+    if not latest_leave:
+        return False
+    if latest_leave.status == 'pending':
+        return True
+    if latest_leave.status != 'approved':
+        return False
+
+    open_makeup = OATodo.query.filter(
+        OATodo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP,
+        OATodo.leave_request_id == latest_leave.id,
+        OATodo.is_completed == False,
+        ~OATodo.workflow_status.in_([
+            OATodo.WORKFLOW_STATUS_COMPLETED,
+            OATodo.WORKFLOW_STATUS_CANCELLED,
+        ]),
+    ).count()
+    return open_makeup > 0
 
 
 def _direct_schedule_enrollment_error(enrollment):
@@ -377,7 +412,10 @@ def api_update_schedule(schedule_id):
     schedule.teacher = teacher_user.display_name
     schedule.teacher_id = teacher_user.id
     schedule.course_name = data.get('course_name', schedule.course_name)
-    schedule.students = data.get('students', schedule.students or (enrollment.student_name if enrollment else ''))
+    if 'students' in data:
+        schedule.students = data['students']
+    elif next_enrollment_id != original_enrollment_id:
+        schedule.students = enrollment.student_name if enrollment else ''
     schedule.location = data.get('location', schedule.location)
     schedule.notes = data.get('notes', schedule.notes)
     schedule.color_tag = data.get('color_tag', schedule.color_tag)
@@ -701,6 +739,140 @@ def api_dashboard_stats():
             'today_count': today_count,
             'pending_todos': pending_count,
             'week_count': week_count,
-            'today_schedules': [build_schedule_payload(schedule, current_user) for schedule in today_schedules],
+        'today_schedules': [build_schedule_payload(schedule, current_user) for schedule in today_schedules],
         }
     })
+
+
+# --- OA route overrides and request-scoped helpers ---
+
+from flask import has_request_context
+from sqlalchemy import event, inspect
+from sqlalchemy.orm import Session
+
+
+def _schedule_has_open_leave_workflow(schedule):
+    if not schedule:
+        return False
+
+    approved_leave_ids = [
+        row[0]
+        for row in db.session.query(LeaveRequest.id).filter(
+            LeaveRequest.schedule_id == schedule.id,
+            LeaveRequest.status == 'approved',
+        ).all()
+    ]
+    if not approved_leave_ids:
+        return False
+
+    return OATodo.query.filter(
+        OATodo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP,
+        OATodo.leave_request_id.in_(approved_leave_ids),
+        OATodo.is_completed == False,
+        ~OATodo.workflow_status.in_([
+            OATodo.WORKFLOW_STATUS_COMPLETED,
+            OATodo.WORKFLOW_STATUS_CANCELLED,
+        ]),
+    ).count() > 0
+
+
+def _validate_schedule_conflicts(
+    *,
+    schedule_id=None,
+    course_date=None,
+    time_start=None,
+    time_end=None,
+    teacher_id=None,
+    enrollment_id=None,
+    student_profile_id=None,
+):
+    if not course_date or not time_start or not time_end or not teacher_id:
+        return '缂哄皯鍐茬獊鏍￠獙鎵€闇€鐨勬棩鏈熴€佹椂闂存垨鏁欏笀淇℃伅'
+    if _time_to_minutes(time_end) <= _time_to_minutes(time_start):
+        return '缁撴潫鏃堕棿蹇呴』鏅氫簬寮€濮嬫椂闂?'
+
+    teacher_query = CourseSchedule.query.filter(
+        CourseSchedule.teacher_id == teacher_id,
+        CourseSchedule.date == course_date,
+    )
+    if schedule_id:
+        teacher_query = teacher_query.filter(CourseSchedule.id != schedule_id)
+    for existing in teacher_query.all():
+        if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
+            return '璇ヨ€佸笀鍦ㄧ浉鍚屾椂娈靛凡鏈夎绋嬪畨鎺?'
+
+    if enrollment_id:
+        enrollment_query = CourseSchedule.query.filter(
+            CourseSchedule.enrollment_id == enrollment_id,
+            CourseSchedule.date == course_date,
+        )
+        if schedule_id:
+            enrollment_query = enrollment_query.filter(CourseSchedule.id != schedule_id)
+        for existing in enrollment_query.all():
+            if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
+                return '璇ユ姤鍚嶅湪鐩稿悓鏃舵宸叉湁璇剧▼瀹夋帓'
+
+    if student_profile_id is None and enrollment_id:
+        enrollment = db.session.get(Enrollment, enrollment_id)
+        student_profile_id = enrollment.student_profile_id if enrollment else None
+
+    if student_profile_id:
+        student_query = CourseSchedule.query.filter(
+            CourseSchedule.date == course_date,
+            CourseSchedule.enrollment.has(Enrollment.student_profile_id == student_profile_id),
+        )
+        if schedule_id:
+            student_query = student_query.filter(CourseSchedule.id != schedule_id)
+        for existing in student_query.all():
+            if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
+                return '璇ユ瀛︾敓鍦ㄧ浉鍚屾椂娈靛凡鏈夎绋嬪畨鎺?'
+    return None
+
+
+def _schedule_locked_by_leave(schedule, updates):
+    if not schedule:
+        return False
+
+    touched_fields = {field for field in (updates or {})}
+    protected_fields = {'date', 'time_start', 'time_end', 'teacher', 'enrollment_id'}
+    if not (touched_fields & protected_fields):
+        return False
+
+    pending_leave_exists = LeaveRequest.query.filter(
+        LeaveRequest.schedule_id == schedule.id,
+        LeaveRequest.status == 'pending',
+    ).count() > 0
+    if pending_leave_exists:
+        return True
+
+    return _schedule_has_open_leave_workflow(schedule)
+
+
+@event.listens_for(Session, 'before_flush')
+def _oa_sync_schedule_students(session, flush_context, instances):
+    if not has_request_context():
+        return
+    if request.method not in {'POST', 'PUT'}:
+        return
+    if not (request.path or '').startswith('/oa/api/schedules'):
+        return
+
+    data = request.get_json(silent=True) or {}
+    if 'students' in data:
+        return
+
+    targets = list(session.new) + list(session.dirty)
+    for obj in targets:
+        if not isinstance(obj, CourseSchedule):
+            continue
+
+        state = inspect(obj)
+        if not state.attrs.enrollment_id.history.has_changes():
+            continue
+
+        enrollment_id = obj.enrollment_id
+        if enrollment_id:
+            enrollment = session.get(Enrollment, enrollment_id)
+            obj.students = enrollment.student_name if enrollment else ''
+        else:
+            obj.students = ''

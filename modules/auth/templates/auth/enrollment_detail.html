@@ -636,7 +636,9 @@ function renderWorkflowPanel(){
   const actionLabel = CURRENT_USER_ROLE === 'teacher'
     ? '提交老师提案'
     : '保存并发送给学生';
-  const canEditWorkflow = ['enrollment_replan', 'leave_makeup'].includes(active.todo_type);
+  const canTeacherPropose = CURRENT_USER_ROLE === 'teacher' && !!active.can_teacher_propose;
+  const canAdminSend = CURRENT_USER_ROLE === 'admin' && !!active.can_admin_send;
+  const canEditWorkflow = canTeacherPropose || canAdminSend;
   panel.style.display = '';
   panel.innerHTML = `
     <div class="workflow-head">
@@ -654,7 +656,7 @@ function renderWorkflowPanel(){
     </div>
     <div class="workflow-actions">
       ${canEditWorkflow ? `
-      <button class="btn-secondary" onclick="openManualEditor(${JSON.stringify(plan || {}).replace(/</g, '\\u003c')}, '${escapeJs(active.title || workflowTypeLabel(active.todo_type))}', {mode: '${CURRENT_USER_ROLE === 'teacher' ? 'teacher-proposal' : 'admin-send'}', workflowTodoId: ${active.id}})">
+      <button class="btn-secondary" onclick="openManualEditor(${JSON.stringify(plan || {}).replace(/</g, '\\u003c')}, '${escapeJs(active.title || workflowTypeLabel(active.todo_type))}', {mode: '${canTeacherPropose ? 'teacher-proposal' : 'admin-send'}', workflowTodoId: ${active.id}})">
         <span class="material-icons" style="font-size:1rem">tune</span> ${actionLabel}
       </button>` : `<span class="slot-chip" style="background:#fff;border-color:#dbeafe;color:#1d4ed8">当前流程无需排课提案</span>`}
       ${payload.rejections && payload.rejections.length ? `<span class="slot-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c">退回原因：${escapeHtml(payload.rejections[payload.rejections.length - 1])}</span>` : ''}

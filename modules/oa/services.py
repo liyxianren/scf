@@ -412,6 +412,191 @@ def delivery_mode_from_color_tag(color_tag):
     return COLOR_TAG_TO_DELIVERY_MODE.get((color_tag or '').strip().lower(), 'unknown')
 
 
+def _time_to_minutes(time_str):
+    if not time_str:
+        return None
+    try:
+        hour, minute = str(time_str).split(':', 1)
+        return int(hour) * 60 + int(minute)
+    except (ValueError, TypeError):
+        return None
+
+
+def _time_ranges_overlap(start_a, end_a, start_b, end_b):
+    a_start = _time_to_minutes(start_a)
+    a_end = _time_to_minutes(end_a)
+    b_start = _time_to_minutes(start_b)
+    b_end = _time_to_minutes(end_b)
+    if None in {a_start, a_end, b_start, b_end}:
+        return False
+    return max(a_start, b_start) < min(a_end, b_end)
+
+
+def _resolve_unique_teacher_user(teacher_name):
+    from modules.auth.models import User
+
+    canonical_name, alias_hit = normalize_teacher_name(teacher_name)
+    if not canonical_name:
+        return None, canonical_name, alias_hit, 'missing'
+
+    candidates = User.query.filter(
+        User.is_active == True,
+        User.role.in_(['teacher', 'admin']),
+        or_(User.display_name == canonical_name, User.username == canonical_name),
+    ).all()
+    if len(candidates) == 1:
+        return candidates[0], candidates[0].display_name, alias_hit, None
+    if len(candidates) > 1:
+        return None, canonical_name, alias_hit, 'ambiguous'
+    return None, canonical_name, alias_hit, 'missing'
+
+
+def _serialize_enrollment_candidate(enrollment):
+    return {
+        'id': enrollment.id,
+        'student_name': enrollment.student_name,
+        'course_name': enrollment.course_name,
+        'teacher_id': enrollment.teacher_id,
+        'teacher_name': enrollment.teacher.display_name if enrollment.teacher else None,
+        'student_profile_id': enrollment.student_profile_id,
+        'status': enrollment.status,
+    }
+
+
+def _find_import_enrollment_candidates(student_name, course_name):
+    from modules.auth.models import Enrollment
+
+    student_name = (student_name or '').strip()
+    course_name = (course_name or '').strip()
+    if not student_name or not course_name:
+        return []
+
+    return Enrollment.query.filter(
+        Enrollment.student_name == student_name,
+        Enrollment.course_name == course_name,
+    ).order_by(Enrollment.id.asc()).all()
+
+
+def _find_safe_import_enrollment(teacher_user, student_name, course_name):
+    if not teacher_user:
+        return None, []
+
+    candidates = _find_import_enrollment_candidates(student_name, course_name)
+    teacher_candidates = [enrollment for enrollment in candidates if enrollment.teacher_id == teacher_user.id]
+    if len(teacher_candidates) == 1:
+        return teacher_candidates[0], candidates
+    return None, candidates
+
+
+def _build_import_binding_todo_payload(schedule, *, issue_type, issue_message, candidate_enrollments):
+    return {
+        'schedule_id': schedule.id,
+        'issue_type': issue_type,
+        'issue_message': issue_message,
+        'candidate_enrollments': candidate_enrollments,
+        'schedule': {
+            'id': schedule.id,
+            'date': schedule.date.isoformat() if schedule.date else None,
+            'time_start': schedule.time_start,
+            'time_end': schedule.time_end,
+            'teacher': schedule.teacher,
+            'course_name': schedule.course_name,
+            'students': schedule.students,
+            'teacher_id': schedule.teacher_id,
+            'enrollment_id': schedule.enrollment_id,
+        },
+    }
+
+
+def _upsert_import_binding_todo(schedule, *, issue_type, issue_message, candidate_enrollments, created_by=None):
+    from extensions import db
+    from modules.oa.models import OATodo
+
+    payload = _build_import_binding_todo_payload(
+        schedule,
+        issue_type=issue_type,
+        issue_message=issue_message,
+        candidate_enrollments=candidate_enrollments,
+    )
+
+    todo = OATodo.query.filter_by(
+        schedule_id=schedule.id,
+        todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+    ).first()
+    created = False
+    if not todo:
+        todo = OATodo(
+            title=f'Excel 待绑定：{schedule.course_name}',
+            description=f'{schedule.date.isoformat()} {schedule.time_start}-{schedule.time_end} 需要人工绑定报名',
+            responsible_person='教务',
+            due_date=schedule.date,
+            priority=2,
+            schedule_id=schedule.id,
+            todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+            created_by=created_by,
+        )
+        db.session.add(todo)
+        db.session.flush()
+        created = True
+
+    todo.title = f'Excel 待绑定：{schedule.course_name}'
+    todo.description = f'{schedule.date.isoformat()} {schedule.time_start}-{schedule.time_end} 需要人工绑定报名'
+    todo.responsible_person = '教务'
+    todo.due_date = schedule.date
+    todo.priority = 2
+    todo.schedule_id = schedule.id
+    todo.todo_type = OATodo.TODO_TYPE_EXCEL_IMPORT
+    todo.is_completed = False
+    todo.notes = issue_message
+    todo.set_payload_data(payload)
+    return todo, created
+
+
+def _complete_import_binding_todo(schedule, *, note=None):
+    from extensions import db
+    from modules.oa.models import OATodo
+
+    todo = OATodo.query.filter_by(
+        schedule_id=schedule.id,
+        todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+    ).first()
+    if not todo:
+        return None
+
+    todo.is_completed = True
+    if note:
+        todo.notes = note
+    db.session.add(todo)
+    return todo
+
+
+def _find_import_schedule_conflicts(course_date, time_start, time_end, *, teacher_id=None, teacher_name=None, exclude_schedule_id=None):
+    from modules.oa.models import CourseSchedule
+
+    if not course_date:
+        return []
+
+    query = CourseSchedule.query.filter(CourseSchedule.date == course_date)
+    teacher_clauses = []
+    if teacher_id:
+        teacher_clauses.append(CourseSchedule.teacher_id == teacher_id)
+    if teacher_name:
+        teacher_clauses.append(CourseSchedule.teacher == teacher_name)
+    if teacher_clauses:
+        query = query.filter(or_(*teacher_clauses))
+    else:
+        return []
+
+    if exclude_schedule_id:
+        query = query.filter(CourseSchedule.id != exclude_schedule_id)
+
+    conflicts = []
+    for existing in query.all():
+        if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
+            conflicts.append(existing)
+    return conflicts
+
+
 def _extract_fill_rgb(cell):
     fill = getattr(cell, 'fill', None)
     if not fill or getattr(fill, 'patternType', None) in (None, 'none'):
@@ -604,12 +789,15 @@ def import_schedule_from_excel(file_path, original_filename=None):
                         teacher_name = '待匹配教师'
                         teacher_user = None
                     else:
-                        teacher_user, teacher_error = resolve_schedule_teacher_user(teacher_name)
+                        teacher_user, resolved_teacher_name, _, teacher_error = _resolve_unique_teacher_user(teacher_name)
                         if teacher_error:
                             warnings.append(
-                                f'{sheet_name}!{cell.coordinate} 教师“{teacher_name}”无法匹配正式账号，已按文本导入'
+                                f'{sheet_name}!{cell.coordinate} 教师“{teacher_name}”无法唯一匹配，已按文本导入'
                             )
+                            teacher_name = resolved_teacher_name or teacher_name
                             teacher_user = None
+                        else:
+                            teacher_name = resolved_teacher_name
 
                     schedules.append({
                         'date': course_date,
@@ -736,6 +924,8 @@ def _apply_imported_todo_payload(todo, payload):
     todo.notes = payload.get('notes', todo.notes)
     todo.schedule_id = payload.get('schedule_id')
     todo.todo_type = payload.get('todo_type', todo.todo_type)
+    if 'payload' in payload:
+        todo.set_payload_data(payload.get('payload'))
 
 
 def _can_delete_imported_schedule(schedule):
@@ -750,6 +940,7 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
     from extensions import db
     from modules.auth.models import Enrollment
     from modules.auth.services import sync_enrollment_status
+    from modules.auth.workflow_services import ensure_schedule_feedback_todo
     from modules.oa.models import CourseSchedule, OATodo, ScheduleImportRun
 
     run = ScheduleImportRun(
@@ -782,12 +973,143 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
         schedules_created = 0
         schedules_updated = 0
         schedules_deleted = 0
+        binding_todos_created = 0
+        unmatched_schedules = []
+        conflict_rows = []
+        touched_todo_ids = set()
 
         for payload in schedules:
             key = build_schedule_import_key(payload)
-            existing = schedule_map.get(key)
+            matched_schedule = schedule_map.get(key)
+            existing = matched_schedule if matched_schedule and matched_schedule.import_run_id is not None else None
+            date_value = payload.get('date')
+            schedule_teacher_name = (payload.get('teacher') or '').strip()
+            teacher_user = None
+            resolved_teacher_name = schedule_teacher_name
+            if payload.get('teacher_id'):
+                teacher_user = db.session.get(
+                    __import__('modules.auth.models', fromlist=['User']).User,
+                    payload['teacher_id'],
+                )
+                if teacher_user:
+                    resolved_teacher_name = teacher_user.display_name or teacher_user.username or schedule_teacher_name
+            elif schedule_teacher_name and '待匹配' not in schedule_teacher_name:
+                teacher_user, resolved_teacher_name, _, _ = _resolve_unique_teacher_user(schedule_teacher_name)
+            teacher_name_for_conflict = resolved_teacher_name if resolved_teacher_name and '待匹配' not in resolved_teacher_name else None
+
+            conflict_target_id = existing.id if existing else None
+            conflicts = _find_import_schedule_conflicts(
+                payload.get('date'),
+                payload.get('time_start'),
+                payload.get('time_end'),
+                teacher_id=teacher_user.id if teacher_user else payload.get('teacher_id'),
+                teacher_name=teacher_name_for_conflict,
+                exclude_schedule_id=conflict_target_id,
+            )
+            if conflicts:
+                conflict_rows.append({
+                    'date': payload.get('date').isoformat() if payload.get('date') else None,
+                    'time_start': payload.get('time_start'),
+                    'time_end': payload.get('time_end'),
+                    'teacher': schedule_teacher_name,
+                    'course_name': payload.get('course_name'),
+                    'students': payload.get('students') or '',
+                    'conflicting_schedule_ids': [schedule.id for schedule in conflicts],
+                    'conflicting_schedules': [
+                        {
+                            'id': schedule.id,
+                            'date': schedule.date.isoformat() if schedule.date else None,
+                            'time_start': schedule.time_start,
+                            'time_end': schedule.time_end,
+                            'teacher': schedule.teacher,
+                            'course_name': schedule.course_name,
+                        }
+                        for schedule in conflicts
+                    ],
+                })
+                teacher_label = teacher_name_for_conflict or schedule_teacher_name or '待匹配教师'
+                warnings.append(
+                    f'导入跳过冲突课次：{date_value.isoformat() if date_value else ""} '
+                    f'{payload.get("time_start")}-{payload.get("time_end")} '
+                    f'{teacher_label} / {payload.get("course_name")} 与现有课表冲突'
+                )
+                continue
+
+            candidate_enrollments = _find_import_enrollment_candidates(
+                payload.get('students'),
+                payload.get('course_name'),
+            )
+            safe_enrollment = None
+            if teacher_user:
+                safe_enrollment, candidate_enrollments = _find_safe_import_enrollment(
+                    teacher_user,
+                    payload.get('students'),
+                    payload.get('course_name'),
+                )
+            elif candidate_enrollments:
+                safe_candidates = [
+                    enrollment for enrollment in candidate_enrollments
+                    if enrollment.teacher_id is not None and payload.get('teacher_id') == enrollment.teacher_id
+                ]
+                if len(safe_candidates) == 1:
+                    safe_enrollment = safe_candidates[0]
+
             if existing:
+                previous_enrollment_id = existing.enrollment_id
                 _apply_imported_schedule_payload(existing, payload, import_run_id=run.id)
+                if teacher_user:
+                    existing.teacher = resolved_teacher_name
+                    existing.teacher_id = teacher_user.id
+                elif payload.get('teacher_id'):
+                    existing.teacher_id = payload.get('teacher_id')
+                else:
+                    existing.teacher_id = None
+
+                if safe_enrollment:
+                    existing.enrollment_id = safe_enrollment.id
+                    ensure_schedule_feedback_todo(
+                        existing,
+                        created_by=getattr(uploaded_by, 'id', None),
+                    )
+                    binding_todo = _complete_import_binding_todo(
+                        existing,
+                        note='已自动绑定报名，待绑定任务已关闭',
+                    )
+                    if binding_todo:
+                        touched_todo_ids.add(binding_todo.id)
+                    sync_enrollment_status(safe_enrollment)
+                else:
+                    existing.enrollment_id = None
+                    issue_message = (
+                        f'未找到唯一报名绑定: {existing.date.isoformat()} {existing.time_start}-{existing.time_end} '
+                        f'{existing.teacher} / {existing.course_name}'
+                    )
+                    todo, created = _upsert_import_binding_todo(
+                        existing,
+                        issue_type='unmatched_enrollment',
+                        issue_message=issue_message,
+                        candidate_enrollments=[_serialize_enrollment_candidate(enrollment) for enrollment in candidate_enrollments],
+                        created_by=getattr(uploaded_by, 'id', None),
+                    )
+                    touched_todo_ids.add(todo.id)
+                    if created:
+                        binding_todos_created += 1
+                    unmatched_schedules.append({
+                        'schedule_id': existing.id,
+                        'date': existing.date.isoformat() if existing.date else None,
+                        'time_start': existing.time_start,
+                        'time_end': existing.time_end,
+                        'teacher': existing.teacher,
+                        'course_name': existing.course_name,
+                        'issue_type': 'unmatched_enrollment',
+                        'issue_message': issue_message,
+                        'candidate_enrollments': [_serialize_enrollment_candidate(enrollment) for enrollment in candidate_enrollments],
+                    })
+
+                if previous_enrollment_id and previous_enrollment_id != existing.enrollment_id:
+                    previous_enrollment = db.session.get(Enrollment, previous_enrollment_id)
+                    if previous_enrollment:
+                        sync_enrollment_status(previous_enrollment)
                 schedules_updated += 1
                 touched_schedule_ids.add(existing.id)
             else:
@@ -795,11 +1117,63 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
                     **payload,
                     import_run_id=run.id,
                 )
+                if teacher_user:
+                    schedule.teacher = resolved_teacher_name
+                    schedule.teacher_id = teacher_user.id
+                elif payload.get('teacher_id'):
+                    schedule.teacher_id = payload.get('teacher_id')
+                else:
+                    schedule.teacher_id = None
+
+                if safe_enrollment:
+                    schedule.enrollment_id = safe_enrollment.id
+                else:
+                    schedule.enrollment_id = None
+
                 db.session.add(schedule)
                 db.session.flush()
                 schedule_map[key] = schedule
                 touched_schedule_ids.add(schedule.id)
                 schedules_created += 1
+
+                if safe_enrollment:
+                    ensure_schedule_feedback_todo(
+                        schedule,
+                        created_by=getattr(uploaded_by, 'id', None),
+                    )
+                    binding_todo = _complete_import_binding_todo(
+                        schedule,
+                        note='已自动绑定报名，待绑定任务已关闭',
+                    )
+                    if binding_todo:
+                        touched_todo_ids.add(binding_todo.id)
+                    sync_enrollment_status(safe_enrollment)
+                else:
+                    issue_message = (
+                        f'未找到唯一报名绑定: {schedule.date.isoformat()} {schedule.time_start}-{schedule.time_end} '
+                        f'{schedule.teacher} / {schedule.course_name}'
+                    )
+                    todo, created = _upsert_import_binding_todo(
+                        schedule,
+                        issue_type='unmatched_enrollment',
+                        issue_message=issue_message,
+                        candidate_enrollments=[_serialize_enrollment_candidate(enrollment) for enrollment in candidate_enrollments],
+                        created_by=getattr(uploaded_by, 'id', None),
+                    )
+                    touched_todo_ids.add(todo.id)
+                    if created:
+                        binding_todos_created += 1
+                    unmatched_schedules.append({
+                        'schedule_id': schedule.id,
+                        'date': schedule.date.isoformat() if schedule.date else None,
+                        'time_start': schedule.time_start,
+                        'time_end': schedule.time_end,
+                        'teacher': schedule.teacher,
+                        'course_name': schedule.course_name,
+                        'issue_type': 'unmatched_enrollment',
+                        'issue_message': issue_message,
+                        'candidate_enrollments': [_serialize_enrollment_candidate(enrollment) for enrollment in candidate_enrollments],
+                    })
 
         stale_imported_schedules = CourseSchedule.query.filter(
             CourseSchedule.import_run_id.isnot(None),
@@ -824,7 +1198,6 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
             key = build_todo_dedup_key(todo)
             todo_map.setdefault(key, todo)
 
-        touched_todo_ids = set()
         excel_todos_created = 0
         excel_todos_updated = 0
         excel_todos_deleted = 0
@@ -867,6 +1240,9 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
             'excel_todos_created': excel_todos_created,
             'excel_todos_updated': excel_todos_updated,
             'excel_todos_deleted': excel_todos_deleted,
+            'binding_todos_created': binding_todos_created,
+            'unmatched_schedules': unmatched_schedules,
+            'conflict_rows': conflict_rows,
             'removed_schedule_duplicates': removed_schedule_duplicates,
             'removed_todo_duplicates': removed_todo_duplicates,
             'warnings': warnings,

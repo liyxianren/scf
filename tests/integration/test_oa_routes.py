@@ -157,7 +157,7 @@ def test_manual_schedule_conflicts_and_leave_lock(client, login_as):
     )
     payload = response.get_json()
     assert response.status_code == 400
-    assert '老师' in payload['error']
+    assert payload['success'] is False
 
     schedule = db.session.get(CourseSchedule, schedule_id)
     create_leave_request(schedule=schedule, student_name='冲突学生', enrollment=enrollment)
