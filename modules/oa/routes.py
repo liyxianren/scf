@@ -15,6 +15,7 @@ from modules.oa.services import (
     apply_schedule_excel_import,
     delivery_mode_from_color_tag,
     resolve_schedule_teacher_reference,
+    validate_schedule_conflicts,
 )
 
 
@@ -49,48 +50,14 @@ def _resolve_teacher_or_error(teacher_value):
 
 
 def _validate_schedule_conflicts(*, schedule_id=None, course_date=None, time_start=None, time_end=None, teacher_id=None, enrollment_id=None):
-    if not course_date or not time_start or not time_end or not teacher_id:
-        return '缺少冲突校验所需的日期、时间或教师信息'
-    if _time_to_minutes(time_end) <= _time_to_minutes(time_start):
-        return '结束时间必须晚于开始时间'
-
-    teacher_query = CourseSchedule.query.filter(
-        CourseSchedule.teacher_id == teacher_id,
-        CourseSchedule.date == course_date,
+    return validate_schedule_conflicts(
+        schedule_id=schedule_id,
+        course_date=course_date,
+        time_start=time_start,
+        time_end=time_end,
+        teacher_id=teacher_id,
+        enrollment_id=enrollment_id,
     )
-    if schedule_id:
-        teacher_query = teacher_query.filter(CourseSchedule.id != schedule_id)
-    for existing in teacher_query.all():
-        if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-            return '该老师在相同时段已有课程安排'
-
-    if enrollment_id:
-        enrollment_query = CourseSchedule.query.filter(
-            CourseSchedule.enrollment_id == enrollment_id,
-            CourseSchedule.date == course_date,
-        )
-        if schedule_id:
-            enrollment_query = enrollment_query.filter(CourseSchedule.id != schedule_id)
-        for existing in enrollment_query.all():
-            if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-                return '该报名在相同时段已有课程安排'
-
-        enrollment = db.session.get(Enrollment, enrollment_id)
-        if enrollment and enrollment.student_profile_id:
-            student_query = CourseSchedule.query.join(
-                Enrollment,
-                CourseSchedule.enrollment_id == Enrollment.id,
-            ).filter(
-                Enrollment.student_profile_id == enrollment.student_profile_id,
-                CourseSchedule.date == course_date,
-                Enrollment.id != enrollment_id,
-            )
-            if schedule_id:
-                student_query = student_query.filter(CourseSchedule.id != schedule_id)
-            for existing in student_query.all():
-                if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-                    return '该学生在其他报名里同一时段已有课程安排'
-    return None
 
 
 def _schedule_locked_by_leave(schedule, updates):
@@ -774,59 +741,6 @@ def _schedule_has_open_leave_workflow(schedule):
             OATodo.WORKFLOW_STATUS_CANCELLED,
         ]),
     ).count() > 0
-
-
-def _validate_schedule_conflicts(
-    *,
-    schedule_id=None,
-    course_date=None,
-    time_start=None,
-    time_end=None,
-    teacher_id=None,
-    enrollment_id=None,
-    student_profile_id=None,
-):
-    if not course_date or not time_start or not time_end or not teacher_id:
-        return '缂哄皯鍐茬獊鏍￠獙鎵€闇€鐨勬棩鏈熴€佹椂闂存垨鏁欏笀淇℃伅'
-    if _time_to_minutes(time_end) <= _time_to_minutes(time_start):
-        return '缁撴潫鏃堕棿蹇呴』鏅氫簬寮€濮嬫椂闂?'
-
-    teacher_query = CourseSchedule.query.filter(
-        CourseSchedule.teacher_id == teacher_id,
-        CourseSchedule.date == course_date,
-    )
-    if schedule_id:
-        teacher_query = teacher_query.filter(CourseSchedule.id != schedule_id)
-    for existing in teacher_query.all():
-        if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-            return '璇ヨ€佸笀鍦ㄧ浉鍚屾椂娈靛凡鏈夎绋嬪畨鎺?'
-
-    if enrollment_id:
-        enrollment_query = CourseSchedule.query.filter(
-            CourseSchedule.enrollment_id == enrollment_id,
-            CourseSchedule.date == course_date,
-        )
-        if schedule_id:
-            enrollment_query = enrollment_query.filter(CourseSchedule.id != schedule_id)
-        for existing in enrollment_query.all():
-            if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-                return '璇ユ姤鍚嶅湪鐩稿悓鏃舵宸叉湁璇剧▼瀹夋帓'
-
-    if student_profile_id is None and enrollment_id:
-        enrollment = db.session.get(Enrollment, enrollment_id)
-        student_profile_id = enrollment.student_profile_id if enrollment else None
-
-    if student_profile_id:
-        student_query = CourseSchedule.query.filter(
-            CourseSchedule.date == course_date,
-            CourseSchedule.enrollment.has(Enrollment.student_profile_id == student_profile_id),
-        )
-        if schedule_id:
-            student_query = student_query.filter(CourseSchedule.id != schedule_id)
-        for existing in student_query.all():
-            if _time_ranges_overlap(time_start, time_end, existing.time_start, existing.time_end):
-                return '璇ユ瀛︾敓鍦ㄧ浉鍚屾椂娈靛凡鏈夎绋嬪畨鎺?'
-    return None
 
 
 def _schedule_locked_by_leave(schedule, updates):

@@ -269,7 +269,25 @@
       <div class="info-item"><div class="label">请假次数</div><div class="value">{{ enrollment.leave_count or 0 }}</div></div>
       <div class="info-item"><div class="label">待反馈课次</div><div class="value">{{ enrollment.pending_feedback_count or 0 }}</div></div>
     </div>
-    {% if enrollment.latest_teacher_feedback %}
+    {% if enrollment.latest_teacher_feedback_detail %}
+    <div class="feedback-box" style="margin-top:14px;background:#f0f9ff;border-color:#bae6fd">
+      <div class="feedback-label" style="color:#0369a1">最近一次老师反馈</div>
+      {% if enrollment.latest_teacher_feedback_detail.summary %}
+      <div class="feedback-text" style="color:#0f172a"><strong>课程总结：</strong>{{ enrollment.latest_teacher_feedback_detail.summary }}</div>
+      {% endif %}
+      {% if enrollment.latest_teacher_feedback_detail.homework %}
+      <div class="feedback-text" style="color:#0f172a;margin-top:8px"><strong>课后作业：</strong>{{ enrollment.latest_teacher_feedback_detail.homework }}</div>
+      {% endif %}
+      {% if enrollment.latest_teacher_feedback_detail.next_focus %}
+      <div class="feedback-text" style="color:#0f172a;margin-top:8px"><strong>下次重点：</strong>{{ enrollment.latest_teacher_feedback_detail.next_focus }}</div>
+      {% endif %}
+      {% if enrollment.latest_teacher_feedback_detail.submitted_at %}
+      <div class="feedback-meta" style="color:#0369a1">
+        <span>提交时间：{{ enrollment.latest_teacher_feedback_detail.submitted_at }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% elif enrollment.latest_teacher_feedback %}
     <div class="feedback-box" style="margin-top:14px;background:#f0f9ff;border-color:#bae6fd">
       <div class="feedback-label" style="color:#0369a1">最近一次老师反馈</div>
       <div class="feedback-text" style="color:#0f172a">{{ enrollment.latest_teacher_feedback }}</div>
@@ -598,17 +616,12 @@ function getWorkflowPlanSource(todo){
 function getWorkflowMetaText(todo){
   const payload = parseWorkflowPayload(todo);
   const parts = [];
-  if(payload.context) parts.push(payload.context);
+  if(todo.context_summary || payload.context_summary) parts.push(todo.context_summary || payload.context_summary);
   if(payload.revision !== undefined && payload.revision !== null) parts.push(`revision ${payload.revision}`);
-  if(Array.isArray(payload.rejections) && payload.rejections.length){
-    parts.push(`退回原因：${payload.rejections[payload.rejections.length - 1]}`);
-  }
-  if(payload.previous_confirmed_slot && payload.previous_confirmed_slot.session_dates){
-    parts.push(`上次方案 ${payload.previous_confirmed_slot.session_dates.length} 节`);
-  }
-  if(payload.current_proposal && payload.current_proposal.session_dates){
-    parts.push(`当前方案 ${payload.current_proposal.session_dates.length} 节`);
-  }
+  if(todo.current_plan_summary || payload.current_plan_summary) parts.push(`方案概览：${todo.current_plan_summary || payload.current_plan_summary}`);
+  if(todo.proposal_note || payload.proposal_note) parts.push(`备注：${todo.proposal_note || payload.proposal_note}`);
+  if(todo.proposal_warning_summary || payload.proposal_warning_summary) parts.push(`方案提醒：${todo.proposal_warning_summary || payload.proposal_warning_summary}`);
+  if(todo.latest_rejection_text || payload.latest_rejection_text) parts.push(`退回原因：${todo.latest_rejection_text || payload.latest_rejection_text}`);
   return parts.join(' · ');
 }
 
@@ -659,7 +672,8 @@ function renderWorkflowPanel(){
       <button class="btn-secondary" onclick="openManualEditor(${JSON.stringify(plan || {}).replace(/</g, '\\u003c')}, '${escapeJs(active.title || workflowTypeLabel(active.todo_type))}', {mode: '${canTeacherPropose ? 'teacher-proposal' : 'admin-send'}', workflowTodoId: ${active.id}})">
         <span class="material-icons" style="font-size:1rem">tune</span> ${actionLabel}
       </button>` : `<span class="slot-chip" style="background:#fff;border-color:#dbeafe;color:#1d4ed8">当前流程无需排课提案</span>`}
-      ${payload.rejections && payload.rejections.length ? `<span class="slot-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c">退回原因：${escapeHtml(payload.rejections[payload.rejections.length - 1])}</span>` : ''}
+      ${(active.proposal_warning_summary || payload.proposal_warning_summary) ? `<span class="slot-chip" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">方案提醒：${escapeHtml(active.proposal_warning_summary || payload.proposal_warning_summary)}</span>` : ''}
+      ${(active.latest_rejection_text || payload.latest_rejection_text) ? `<span class="slot-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c">退回原因：${escapeHtml(active.latest_rejection_text || payload.latest_rejection_text)}</span>` : ''}
     </div>
   `;
 }

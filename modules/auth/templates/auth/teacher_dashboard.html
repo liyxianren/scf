@@ -249,6 +249,57 @@
     </div>
 </div>
 
+<div id="proposalModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div>
+                <h3><span class="material-icons">event_note</span> 提交排课 / 补课建议</h3>
+                <div class="modal-subtitle" id="proposalModalSubtitle" style="margin-top:6px;font-size:.84rem;color:#64748b">老师只需要填写建议时间，教务会继续微调并发送给学生。</div>
+            </div>
+            <button class="close-btn" onclick="closeProposalModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="hint" id="proposalModalHint">请尽量填写您能稳定执行的时间段，备注里补充学生需要注意的信息。</p>
+            <div id="proposalContextSummary" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#f8fafc;color:#475569;font-size:.84rem;line-height:1.7"></div>
+            <div id="proposalWarningBox" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;font-size:.84rem;line-height:1.7"></div>
+            <div id="proposalSessionList"></div>
+            <div style="margin-top:12px;display:flex;justify-content:flex-start">
+                <button class="btn-ghost" id="proposalAddBtn" onclick="addProposalSessionRow()">
+                    <span class="material-icons" style="font-size:1rem">add</span> 增加一节
+                </button>
+            </div>
+            <div style="margin-top:14px">
+                <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">备注</div>
+                <textarea id="proposalNoteInput" placeholder="例如：先按这个时间尝试一周，如学生周三仍冲突可再微调。"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeProposalModal()">取消</button>
+            <button class="btn-save" onclick="saveProposalModal()"><span class="material-icons" style="font-size:1rem">send</span> 提交给教务</button>
+        </div>
+    </div>
+</div>
+
+<div id="leaveDecisionModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:620px">
+        <div class="modal-header">
+            <div>
+                <h3><span class="material-icons">edit</span> 驳回请假申请</h3>
+                <div class="modal-subtitle" id="leaveDecisionSubtitle" style="margin-top:6px;font-size:.84rem;color:#64748b">请填写学生可执行的处理说明。</div>
+            </div>
+            <button class="close-btn" onclick="closeLeaveDecisionModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="hint">学生会在请假记录和站内通知里看到这段说明，请尽量写清楚下一步应该怎么做。</p>
+            <textarea id="leaveDecisionCommentInput" placeholder="例如：本次请假时间距离上课太近，请先和教务确认是否改为顺延到下周再提交。" style="width:100%;min-height:130px;padding:12px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.92rem;resize:vertical;outline:none"></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeLeaveDecisionModal()">取消</button>
+            <button class="btn-save" onclick="submitLeaveDecisionModal()"><span class="material-icons" style="font-size:1rem">send</span> 提交驳回说明</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast" class="toast"></div>
 {% endblock %}
 {% block extra_js %}
@@ -261,14 +312,16 @@ let progressMap = {};
 let availGrid = null;
 let calendar = null;
 let workflowTodos = [];
+let teacherActionCenter = null;
 let feedbackDraft = {scheduleId: null, courseName: ''};
+let proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
+let leaveDecisionState = {id: null};
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
 document.addEventListener('DOMContentLoaded', async function(){
     await loadProgress();
     await loadUnreadCount();
-    await loadWorkflowTodos();
 
     calendar = new WeekCalendar(document.getElementById('myCalendar'), {
         progressMap: progressMap,
@@ -277,8 +330,7 @@ document.addEventListener('DOMContentLoaded', async function(){
     calendar.setProgressMap(progressMap);
     await calendar.render();
 
-    await loadTeacherSummary();
-    await loadLeaveRequests();
+    await loadTeacherActionCenter();
 
     {% if not has_availability %}
     openAvailModal();
@@ -309,52 +361,18 @@ async function loadProgress(){
     }catch(e){console.error(e);}
 }
 
-async function loadTeacherSummary(){
+async function loadTeacherActionCenter(){
     try{
-        const res = await fetch('/auth/api/teacher/my-schedule?range=all');
+        const res = await fetch('/auth/api/teacher/action-center');
         const json = await res.json();
         if(!json.success) return;
-        const d = json.data;
-
-        const stl = document.getElementById('studentList');
-        if(d.students && d.students.length > 0){
-            stl.innerHTML = d.students.map(s=>{
-                let contactHtml = '';
-                if(s.phone) contactHtml += `<div class="contact-info"><span class="material-icons">phone</span> ${s.phone}</div>`;
-                return `<div class="student-card"><div class="name">${s.name}</div><div class="course">${s.course} · ${s.status === 'confirmed' ? '已确认' : s.status === 'active' ? '进行中' : s.status}</div>${contactHtml}</div>`;
-            }).join('');
-        } else {
-            stl.innerHTML = '<div class="empty">暂无学生</div>';
-        }
-
-        const upcoming = document.getElementById('upcomingList');
-        if(d.upcoming_schedules && d.upcoming_schedules.length > 0){
-            upcoming.innerHTML = d.upcoming_schedules.map(s => `
-                <div class="task-card">
-                    <div class="task-title">${s.course_name}</div>
-                    <div class="task-detail">${s.date} ${s.time_start}-${s.time_end} · ${s.students || '未绑定学生'}</div>
-                </div>
-            `).join('');
-        } else {
-            upcoming.innerHTML = '<div class="empty">未来 7 天暂无课程</div>';
-        }
-
-        const feedback = document.getElementById('feedbackList');
-        if(d.pending_feedback_schedules && d.pending_feedback_schedules.length > 0){
-            feedback.innerHTML = d.pending_feedback_schedules.map(s => `
-                <div class="task-card">
-                    <div class="task-title">${s.course_name}</div>
-                    <div class="task-detail">${s.date} ${s.time_start}-${s.time_end} · ${s.students || '未绑定学生'}</div>
-                    <div style="margin-top:10px">
-                        <button class="inline-btn" onclick="submitFeedback(${s.id}, '${(s.course_name || '').replace(/'/g, "\\'")}')">
-                            <span class="material-icons">edit_note</span> 提交反馈
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            feedback.innerHTML = '<div class="empty">暂无待提交反馈课程</div>';
-        }
+        teacherActionCenter = json.data || {};
+        workflowTodos = teacherActionCenter.proposal_workflows || [];
+        renderProposalWorkflows(workflowTodos);
+        renderTeacherStudents(teacherActionCenter.students || []);
+        renderUpcomingSchedules(teacherActionCenter.upcoming_schedules || []);
+        renderPendingFeedback(teacherActionCenter.pending_feedback_schedules || []);
+        renderLeaveRequests(teacherActionCenter.leave_requests || []);
     }catch(e){console.error(e);}
 }
 
@@ -396,12 +414,45 @@ function escapeHtml(value){
     return div.innerHTML;
 }
 
+function firstFilled(...values){
+    for(const value of values){
+        if(value === undefined || value === null) continue;
+        if(String(value).trim() !== '') return value;
+    }
+    return '';
+}
+
 function escapeJs(value){
     return String(value || '')
         .replace(/\\/g, '\\\\')
         .replace(/'/g, "\\'")
         .replace(/\n/g, ' ')
         .replace(/\r/g, ' ');
+}
+
+function getProposalContextLines(item, payload){
+    const context = (item.context && typeof item.context === 'object') ? item.context : (payload.context || {});
+    const lines = [];
+    const contextSummary = firstFilled(item.context_summary, payload.context_summary);
+    const previousPlanSummary = firstFilled(item.previous_plan_summary, payload.previous_plan_summary);
+    const availableSummary = firstFilled(context.student_available_slots_summary);
+    const excludedSummary = firstFilled(context.student_excluded_dates_summary);
+    const intakeNote = firstFilled(context.student_intake_note);
+    const currentPlanSummary = firstFilled(item.current_plan_summary, payload.current_plan_summary);
+    const latestRejectionText = firstFilled(item.latest_rejection_text, payload.latest_rejection_text);
+
+    if(item.todo_type === 'enrollment_replan'){
+        if(previousPlanSummary) lines.push(`上次方案：${previousPlanSummary}`);
+        else if(contextSummary) lines.push(contextSummary);
+    }else if(contextSummary){
+        lines.push(contextSummary);
+    }
+    if(availableSummary) lines.push(`学生长期可上课：${availableSummary}`);
+    if(excludedSummary) lines.push(`学生禁排日期：${excludedSummary}`);
+    if(intakeNote) lines.push(`学生备注：${intakeNote}`);
+    if(currentPlanSummary) lines.push(`方案概览：${currentPlanSummary}`);
+    if(latestRejectionText) lines.push(`最新问题：${latestRejectionText}`);
+    return lines;
 }
 
 function renderProposalWorkflowSummary(items){
@@ -432,12 +483,13 @@ function renderProposalWorkflows(items){
         const payload = parseWorkflowPayload(item);
         const title = item.title || item.name || workflowTypeLabel(item.todo_type);
         const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
-        const context = payload.context || item.description || '';
-        const current = payload.current_proposal && payload.current_proposal.session_dates
-            ? `当前方案 ${payload.current_proposal.session_dates.length} 节`
-            : payload.previous_confirmed_slot && payload.previous_confirmed_slot.session_dates
-                ? `上次方案 ${payload.previous_confirmed_slot.session_dates.length} 节`
-                : '';
+        const context = [
+            item.context_summary || payload.context_summary || '',
+            item.current_plan_summary || payload.current_plan_summary ? `方案概览：${item.current_plan_summary || payload.current_plan_summary}` : '',
+            item.proposal_note || payload.proposal_note ? `备注：${item.proposal_note || payload.proposal_note}` : '',
+            item.latest_rejection_text || payload.latest_rejection_text ? `最新问题：${item.latest_rejection_text || payload.latest_rejection_text}` : '',
+            item.waiting_since ? `等待开始：${item.waiting_since}` : '',
+        ].filter(Boolean).join(' · ');
         return `
             <div class="workflow-card">
                 <div class="wf-head">
@@ -447,13 +499,16 @@ function renderProposalWorkflows(items){
                     </div>
                     <span class="wf-status ${item.todo_type === 'leave_makeup' ? 'makeup' : 'proposal'}">${escapeHtml(workflowStatusLabel(item.workflow_status))}</span>
                 </div>
-                <div class="wf-context">${escapeHtml(context || current || '暂无上下文')}</div>
+                <div class="wf-context">${escapeHtml(context || '暂无上下文')}</div>
                 <div class="wf-meta">
                     ${item.revision !== undefined && item.revision !== null ? `<span>revision ${item.revision}</span>` : ''}
                     ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
                     ${item.due_date ? `<span>截止：${escapeHtml(item.due_date)}</span>` : ''}
                 </div>
                 <div class="wf-actions">
+                    <button class="inline-btn" onclick="openProposalModal(${item.id})">
+                        <span class="material-icons">draw</span> 填写建议
+                    </button>
                     ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
                 </div>
             </div>
@@ -461,19 +516,238 @@ function renderProposalWorkflows(items){
     }).join('');
 }
 
-async function loadWorkflowTodos(){
-    try{
-        const res = await fetch('/auth/api/workflow-todos');
-        const json = await res.json();
-        if(!json.success){
-            renderProposalWorkflows([]);
-            return;
+function renderTeacherStudents(items){
+    const box = document.getElementById('studentList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">暂无学生</div>';
+        return;
+    }
+    box.innerHTML = items.map(item => {
+        let contactHtml = '';
+        if(item.phone) contactHtml += `<div class="contact-info"><span class="material-icons">phone</span> ${escapeHtml(item.phone)}</div>`;
+        return `<div class="student-card"><div class="name">${escapeHtml(item.name || '-')}</div><div class="course">${escapeHtml(item.course || '-')} · ${escapeHtml(item.status || '-')}</div>${contactHtml}</div>`;
+    }).join('');
+}
+
+function renderUpcomingSchedules(items){
+    const box = document.getElementById('upcomingList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">未来 7 天暂无课程</div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="task-card">
+            <div class="task-title">${escapeHtml(item.course_name || '-')}</div>
+            <div class="task-detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')} · ${escapeHtml(item.students || '未绑定学生')}</div>
+            ${item.feedback && item.feedback.status === 'submitted' ? `<div style="margin-top:8px;font-size:.82rem;color:#475569">已提交反馈</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function renderPendingFeedback(items){
+    const box = document.getElementById('feedbackList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">暂无待提交反馈课程</div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="task-card">
+            <div class="task-title">${escapeHtml(item.course_name || '-')}</div>
+            <div class="task-detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')} · ${escapeHtml(item.students || '未绑定学生')}</div>
+            <div style="margin-top:8px;font-size:.82rem;color:${item.is_overdue ? '#b91c1c' : '#64748b'}">${item.is_overdue ? '已逾期，请尽快补反馈' : '本节课已开始，待提交反馈'}</div>
+            <div style="margin-top:10px">
+                <button class="inline-btn" onclick="submitFeedback(${item.id}, '${escapeJs(item.course_name || '')}')">
+                    <span class="material-icons">edit_note</span> 提交反馈
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderLeaveRequests(items){
+    const box = document.getElementById('leaveList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">暂无请假申请</div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="leave-card">
+            <div class="leave-info">
+                <div class="leave-student">${escapeHtml(item.student_name || '学生')}</div>
+                <div class="leave-detail">${escapeHtml(item.course_name || '')} · ${escapeHtml(item.date || '')} · 原因：${escapeHtml(item.reason || '无')}</div>
+                ${item.makeup_preference_summary ? `<div class="leave-detail" style="margin-top:6px;color:#475569">本次补课偏好：${escapeHtml(item.makeup_preference_summary)}</div>` : ''}
+                ${item.decision_comment ? `<div class="leave-detail" style="margin-top:6px;color:#92400e">处理说明：${escapeHtml(item.decision_comment)}</div>` : ''}
+            </div>
+            <div class="leave-actions">
+                <button class="approve-btn" onclick="handleLeave(${item.id},'approve')">批准</button>
+                <button class="reject-btn" onclick="openLeaveDecisionModal(${item.id}, '${escapeJs(item.student_name || '学生')}')">驳回</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addDaysToDate(dateStr, days){
+    if(!dateStr) return '';
+    const current = new Date(`${dateStr}T00:00:00`);
+    current.setDate(current.getDate() + days);
+    return current.toISOString().slice(0, 10);
+}
+
+function resolveProposalSessions(item){
+    const payload = parseWorkflowPayload(item);
+    const currentProposal = payload.current_proposal && payload.current_proposal.session_dates ? payload.current_proposal.session_dates : [];
+    const previousPlan = payload.previous_confirmed_slot && payload.previous_confirmed_slot.session_dates ? payload.previous_confirmed_slot.session_dates : [];
+    const source = currentProposal.length ? currentProposal : previousPlan;
+    if(source.length){
+        return source.map(session => ({
+            date: session.date || '',
+            time_start: session.time_start || '',
+            time_end: session.time_end || '',
+        }));
+    }
+    if(item.todo_type === 'leave_makeup'){
+        const original = payload.context && payload.context.original_schedule ? payload.context.original_schedule : null;
+        if(original && original.date){
+            return [{
+                date: addDaysToDate(original.date, 7),
+                time_start: original.time_start || '10:00',
+                time_end: original.time_end || '12:00',
+            }];
         }
-        workflowTodos = (json.data || []).filter(item => ['enrollment_replan','leave_makeup'].includes(item.todo_type) && item.workflow_status !== 'completed' && item.workflow_status !== 'cancelled');
-        renderProposalWorkflows(workflowTodos);
+    }
+    return [{date: '', time_start: '10:00', time_end: '12:00'}];
+}
+
+function renderProposalSessionRows(){
+    const box = document.getElementById('proposalSessionList');
+    if(!box) return;
+    box.innerHTML = proposalDraft.sessions.map((session, index) => `
+        <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:10px;padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc">
+            <label style="font-size:.8rem;color:#475569;font-weight:700">
+                日期
+                <input type="date" value="${escapeHtml(session.date || '')}" onchange="updateProposalSession(${index}, 'date', this.value)" style="margin-top:6px;width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px">
+            </label>
+            <label style="font-size:.8rem;color:#475569;font-weight:700">
+                开始
+                <input type="time" value="${escapeHtml(session.time_start || '')}" onchange="updateProposalSession(${index}, 'time_start', this.value)" style="margin-top:6px;width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px">
+            </label>
+            <label style="font-size:.8rem;color:#475569;font-weight:700">
+                结束
+                <input type="time" value="${escapeHtml(session.time_end || '')}" onchange="updateProposalSession(${index}, 'time_end', this.value)" style="margin-top:6px;width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px">
+            </label>
+            <button class="btn-ghost" onclick="removeProposalSessionRow(${index})" ${proposalDraft.sessions.length <= 1 ? 'disabled' : ''} style="padding:10px 14px;${proposalDraft.sessions.length <= 1 ? 'opacity:.5;cursor:not-allowed' : ''}">
+                删除
+            </button>
+        </div>
+    `).join('');
+    const addBtn = document.getElementById('proposalAddBtn');
+    if(addBtn){
+        addBtn.style.display = proposalDraft.todoType === 'leave_makeup' ? 'none' : 'inline-flex';
+    }
+}
+
+function updateProposalSession(index, field, value){
+    if(!proposalDraft.sessions[index]) return;
+    proposalDraft.sessions[index][field] = value;
+}
+
+function addProposalSessionRow(){
+    if(proposalDraft.todoType === 'leave_makeup') return;
+    const last = proposalDraft.sessions[proposalDraft.sessions.length - 1] || {};
+    proposalDraft.sessions.push({
+        date: last.date || '',
+        time_start: last.time_start || '10:00',
+        time_end: last.time_end || '12:00',
+    });
+    renderProposalSessionRows();
+}
+
+function removeProposalSessionRow(index){
+    if(proposalDraft.sessions.length <= 1) return;
+    proposalDraft.sessions.splice(index, 1);
+    renderProposalSessionRows();
+}
+
+function openProposalModal(todoId){
+    const item = workflowTodos.find(entry => Number(entry.id) === Number(todoId));
+    if(!item) return;
+    const payload = parseWorkflowPayload(item);
+    proposalDraft = {
+        todoId: item.id,
+        todoType: item.todo_type || '',
+        title: item.title || workflowTypeLabel(item.todo_type),
+        note: payload.proposal_note || '',
+        sessions: resolveProposalSessions(item),
+    };
+    document.getElementById('proposalModalSubtitle').textContent = `${proposalDraft.title} · ${item.todo_type === 'leave_makeup' ? '补课建议只保留 1 节课' : '排课建议会先交给教务微调'}`;
+    document.getElementById('proposalModalHint').textContent = item.todo_type === 'leave_makeup'
+        ? '默认已按原课次后一周同时间预填，老师只需要改成更合适的补课时间。'
+        : '先看学生的长期可上课时间和禁排日期，再填写您最能稳定执行的日期与时间；教务会在发送给学生前做最终检查和微调。';
+    const contextSummary = document.getElementById('proposalContextSummary');
+    const warningBox = document.getElementById('proposalWarningBox');
+    const contextLines = getProposalContextLines(item, payload);
+    contextSummary.style.display = contextLines.length ? 'block' : 'none';
+    contextSummary.innerHTML = contextLines.map(line => `<div>${escapeHtml(line)}</div>`).join('');
+    const warningItems = Array.isArray(item.proposal_warnings) ? item.proposal_warnings : (Array.isArray(payload.proposal_warnings) ? payload.proposal_warnings : []);
+    if(warningItems.length){
+        warningBox.style.display = 'block';
+        warningBox.innerHTML = `当前方案提醒：<ul style="margin:8px 0 0 18px;padding:0">${warningItems.map(entry => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>`;
+    }else{
+        warningBox.style.display = 'none';
+        warningBox.innerHTML = '';
+    }
+    document.getElementById('proposalNoteInput').value = proposalDraft.note || '';
+    renderProposalSessionRows();
+    document.getElementById('proposalModal').classList.add('active');
+}
+
+function closeProposalModal(){
+    document.getElementById('proposalModal').classList.remove('active');
+    document.getElementById('proposalContextSummary').style.display = 'none';
+    document.getElementById('proposalContextSummary').textContent = '';
+    document.getElementById('proposalWarningBox').style.display = 'none';
+    document.getElementById('proposalWarningBox').innerHTML = '';
+    proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
+}
+
+async function saveProposalModal(){
+    if(!proposalDraft.todoId) return;
+    const note = document.getElementById('proposalNoteInput').value.trim();
+    const sessionDates = proposalDraft.sessions.map(item => ({
+        date: (item.date || '').trim(),
+        time_start: (item.time_start || '').trim(),
+        time_end: (item.time_end || '').trim(),
+    }));
+    if(sessionDates.some(item => !item.date || !item.time_start || !item.time_end)){
+        alert('请先填写完整的日期和时间');
+        return;
+    }
+    try{
+        const res = await fetch(`/auth/api/workflow-todos/${proposalDraft.todoId}/teacher-proposal`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({session_dates: sessionDates, note})
+        });
+        const json = await res.json();
+        if(json.success){
+            const warnings = json.warnings || [];
+            if(warnings.length){
+                showToast('建议已提交给教务复核，存在提醒项');
+                alert(`建议已提交给教务复核。\n\n提醒：\n- ${warnings.join('\n- ')}`);
+            }else{
+                showToast('建议已提交给教务');
+            }
+            closeProposalModal();
+            await loadTeacherActionCenter();
+        }else{
+            alert(json.error || '提交失败');
+        }
     }catch(e){
-        console.error(e);
-        renderProposalWorkflows([]);
+        alert('网络错误');
     }
 }
 
@@ -509,7 +783,7 @@ async function saveFeedbackModal(){
         if(json.success){
             showToast('课程反馈已提交');
             closeFeedbackModal();
-            await loadTeacherSummary();
+            await loadTeacherActionCenter();
             await loadProgress();
             calendar.setProgressMap(progressMap);
             await calendar.render();
@@ -525,40 +799,48 @@ function submitFeedback(scheduleId, courseName){
     openFeedbackModal(scheduleId, courseName);
 }
 
-async function loadLeaveRequests(){
+async function handleLeave(id, action, comment = ''){
     try{
-        const res = await fetch('/auth/api/leave-requests');
-        const json = await res.json();
-        const ll = document.getElementById('leaveList');
-        if(!json.success || !json.data || json.data.length === 0){
-            ll.innerHTML = '<div class="empty">暂无请假申请</div>';
-            return;
+        const options = {method:'PUT'};
+        if(action === 'reject'){
+            options.headers = {'Content-Type':'application/json'};
+            options.body = JSON.stringify({comment: (comment || '').trim()});
         }
-        ll.innerHTML = json.data.map(r=>{
-            const actions = r.status === 'pending' ? `
-                <div class="leave-actions">
-                    <button class="approve-btn" onclick="handleLeave(${r.id},'approve')">批准</button>
-                    <button class="reject-btn" onclick="handleLeave(${r.id},'reject')">驳回</button>
-                </div>` : `<span style="font-size:.82rem;color:${r.status==='approved'?'#166534':'#991b1b'}">${r.status==='approved'?'已批准':'已驳回'}</span>`;
-            return `
-            <div class="leave-card">
-                <div class="leave-info">
-                    <div class="leave-student">${r.student_name||'学生'}</div>
-                    <div class="leave-detail">${r.course_name||''} · ${r.date||''} · 原因：${r.reason||'无'}</div>
-                </div>
-                ${actions}
-            </div>`;
-        }).join('');
-    }catch(e){console.error(e);}
-}
-
-async function handleLeave(id, action){
-    try{
-        const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, {method:'PUT'});
+        const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, options);
         const json = await res.json();
-        if(json.success) loadLeaveRequests();
+        if(json.success){
+            showToast(action === 'approve' ? '请假已批准，请到待我提案里提交补课建议' : '请假已驳回');
+            await loadTeacherActionCenter();
+            await loadProgress();
+            calendar.setProgressMap(progressMap);
+            await calendar.render();
+            if(action === 'reject') closeLeaveDecisionModal();
+        }
         else alert(json.error || '操作失败');
     }catch(e){alert('网络错误');}
+}
+
+function openLeaveDecisionModal(id, studentName){
+    leaveDecisionState = {id};
+    document.getElementById('leaveDecisionSubtitle').textContent = `${studentName || '学生'}：请填写驳回说明`;
+    document.getElementById('leaveDecisionCommentInput').value = '';
+    document.getElementById('leaveDecisionModal').classList.add('active');
+}
+
+function closeLeaveDecisionModal(){
+    leaveDecisionState = {id: null};
+    document.getElementById('leaveDecisionModal').classList.remove('active');
+    document.getElementById('leaveDecisionCommentInput').value = '';
+}
+
+async function submitLeaveDecisionModal(){
+    if(!leaveDecisionState.id) return;
+    const comment = document.getElementById('leaveDecisionCommentInput').value.trim();
+    if(!comment){
+        alert('请先填写处理说明');
+        return;
+    }
+    await handleLeave(leaveDecisionState.id, 'reject', comment);
 }
 
 /* ========== Availability Modal ========== */

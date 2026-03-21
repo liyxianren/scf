@@ -35,6 +35,7 @@ class CourseSchedule(db.Model):
     )
     leave_requests = db.relationship(
         'LeaveRequest',
+        foreign_keys='LeaveRequest.schedule_id',
         backref='schedule_record',
         lazy=True,
         cascade='all, delete-orphan',

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import UserMixin
@@ -59,7 +60,6 @@ class StudentProfile(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
-        import json
         slots = []
         if self.available_slots:
             try:
@@ -181,28 +181,51 @@ class LeaveRequest(db.Model):
     enrollment_id = db.Column(db.Integer, db.ForeignKey('enrollments.id'), nullable=True)
     student_name = db.Column(db.String(100), nullable=False)
     schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=False)
+    makeup_schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=True)
+    makeup_available_slots_json = db.Column(db.Text)
+    makeup_excluded_dates_json = db.Column(db.Text)
+    makeup_preference_note = db.Column(db.Text)
     leave_date = db.Column(db.Date, nullable=False)
     reason = db.Column(db.Text)
+    decision_comment = db.Column(db.Text)
     status = db.Column(db.String(20), default='pending')  # pending / approved / rejected
     approved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     schedule = db.relationship('CourseSchedule', foreign_keys=[schedule_id], overlaps='leave_requests,schedule_record')
+    makeup_schedule = db.relationship('CourseSchedule', foreign_keys=[makeup_schedule_id])
     enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id])
     approver = db.relationship('User', foreign_keys=[approved_by])
 
     def to_dict(self):
+        makeup_available_slots = []
+        if self.makeup_available_slots_json:
+            try:
+                makeup_available_slots = json.loads(self.makeup_available_slots_json)
+            except (json.JSONDecodeError, TypeError):
+                makeup_available_slots = []
+        makeup_excluded_dates = []
+        if self.makeup_excluded_dates_json:
+            try:
+                makeup_excluded_dates = json.loads(self.makeup_excluded_dates_json)
+            except (json.JSONDecodeError, TypeError):
+                makeup_excluded_dates = []
         return {
             'id': self.id,
             'enrollment_id': self.enrollment_id,
             'student_name': self.student_name,
             'schedule_id': self.schedule_id,
+            'makeup_schedule_id': self.makeup_schedule_id,
+            'makeup_available_slots': makeup_available_slots,
+            'makeup_excluded_dates': makeup_excluded_dates,
+            'makeup_preference_note': self.makeup_preference_note,
             'leave_date': self.leave_date.isoformat() if self.leave_date else None,
             'date': self.leave_date.isoformat() if self.leave_date else None,
             'course_name': self.schedule.course_name if self.schedule else '',
             'teacher_id': self.schedule.teacher_id if self.schedule else None,
             'teacher_name': self.schedule.teacher if self.schedule else '',
             'reason': self.reason,
+            'decision_comment': self.decision_comment,
             'status': self.status,
             'approved_by': self.approved_by,
             'approver_name': self.approver.display_name if self.approver else None,

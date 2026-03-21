@@ -10,7 +10,7 @@ from extensions import db
 from modules.auth.models import Enrollment
 from modules.auth.services import _build_manual_plan
 from modules.auth.workflow_services import ensure_schedule_feedback_todo
-from modules.oa.models import CourseSchedule, OATodo
+from modules.oa.models import CourseSchedule, OATodo, ScheduleImportRun
 from tests.factories import (
     create_enrollment,
     create_leave_request,
@@ -35,6 +35,23 @@ def _build_import_workbook():
     sheet['A3'] = '10:00-12:00 ImportTeacher\nImportCourse AI\nImportStudent'
     sheet['B3'] = '10:00-12:00 ImportTeacher\nUnknownCourse AI\nUnknownStudent'
     sheet['C3'] = '10:00-12:00 ImportTeacher\nConflictImport AI\nOtherStudent'
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def _build_custom_import_workbook(columns):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = '3月'
+    sheet['H1'] = 'todo'
+
+    for index, (column_date, cell_text) in enumerate(columns, start=1):
+        cell = chr(ord('A') + index - 1)
+        sheet[f'{cell}2'] = int(to_excel(column_date))
+        sheet[f'{cell}3'] = cell_text
 
     buffer = io.BytesIO()
     workbook.save(buffer)
@@ -337,6 +354,7 @@ def test_same_student_conflict_and_leave_lock_behaviour(client, login_as):
     )
     payload = response.get_json()
     assert response.status_code == 400
+    assert payload['error'] == '该学生在其他报名里同一时段已有课程安排'
     assert CourseSchedule.query.filter_by(
         enrollment_id=other_enrollment.id,
         date=date(2026, 3, 18),
@@ -458,3 +476,248 @@ def test_excel_import_creates_binding_todo_and_feedback_workflow(client, login_a
         date=date(2026, 3, 18),
         course_name='ConflictImport AI',
     ).count() == 0
+
+
+def test_excel_import_blocks_same_student_overlap(client, login_as):
+    admin = create_user(username='oa-p1-import-overlap-admin', display_name='ImportOverlapAdmin', role='admin')
+    first_teacher = create_user(username='oa-p1-import-overlap-t1', display_name='ImportTeacherA', role='teacher')
+    second_teacher = create_user(username='oa-p1-import-overlap-t2', display_name='ImportTeacherB', role='teacher')
+    student = create_user(username='oa-p1-import-overlap-student', display_name='ImportOverlapStudentUser', role='student')
+    profile = create_student_profile(user=student, name='ImportOverlapStudent')
+    first_enrollment = create_enrollment(
+        teacher=first_teacher,
+        student_name='ImportOverlapStudent',
+        course_name='OverlapCourse A AI',
+        student_profile=profile,
+        status='confirmed',
+    )
+    second_enrollment = create_enrollment(
+        teacher=second_teacher,
+        student_name='ImportOverlapStudent',
+        course_name='OverlapCourse B AI',
+        student_profile=profile,
+        status='confirmed',
+    )
+
+    login_as(admin)
+    response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 ImportTeacherA\nOverlapCourse A AI\nImportOverlapStudent'),
+                    (date(2026, 3, 16), '10:30-11:30 ImportTeacherB\nOverlapCourse B AI\nImportOverlapStudent'),
+                ]),
+                '2026-overlap.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    summary = payload['data']
+    assert len(summary['conflict_rows']) == 1
+    assert CourseSchedule.query.filter_by(enrollment_id=first_enrollment.id).count() == 1
+    assert CourseSchedule.query.filter_by(enrollment_id=second_enrollment.id).count() == 0
+
+
+def test_excel_reimport_unmatched_cancels_stale_feedback_workflow(client, login_as):
+    admin = create_user(username='oa-p1-import-rebind-admin', display_name='ImportRebindAdmin', role='admin')
+    teacher = create_user(username='oa-p1-import-rebind-teacher', display_name='ImportRebindTeacher', role='teacher')
+    student = create_user(username='oa-p1-import-rebind-student', display_name='ImportRebindStudentUser', role='student')
+    profile = create_student_profile(user=student, name='ImportRebindStudent')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='ImportRebindStudent',
+        course_name='RebindCourse AI',
+        student_profile=profile,
+        status='confirmed',
+    )
+
+    login_as(admin)
+    initial_response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 ImportRebindTeacher\nRebindCourse AI\nImportRebindStudent'),
+                ]),
+                '2026-rebind-initial.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    assert initial_response.status_code == 200
+
+    schedule = CourseSchedule.query.filter_by(
+        enrollment_id=enrollment.id,
+        course_name='RebindCourse AI',
+        date=date(2026, 3, 16),
+    ).first()
+    assert schedule is not None
+    feedback_todo = OATodo.query.filter_by(
+        schedule_id=schedule.id,
+        todo_type=OATodo.TODO_TYPE_SCHEDULE_FEEDBACK,
+    ).order_by(OATodo.id.desc()).first()
+    assert feedback_todo is not None
+    assert feedback_todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+
+    response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 ImportRebindTeacher\nUnknownCourse AI\nUnknownStudent'),
+                ]),
+                '2026-rebind-unmatched.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    db.session.expire_all()
+
+    refreshed_schedule = db.session.get(CourseSchedule, schedule.id)
+    refreshed_feedback_todo = OATodo.query.filter_by(
+        schedule_id=schedule.id,
+        todo_type=OATodo.TODO_TYPE_SCHEDULE_FEEDBACK,
+    ).order_by(OATodo.id.desc()).first()
+    binding_todo = OATodo.query.filter_by(
+        schedule_id=schedule.id,
+        todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+    ).order_by(OATodo.id.desc()).first()
+
+    assert refreshed_schedule.enrollment_id is None
+    assert refreshed_feedback_todo is not None
+    assert refreshed_feedback_todo.workflow_status == OATodo.WORKFLOW_STATUS_CANCELLED
+    assert refreshed_feedback_todo.is_completed is True
+    assert binding_todo is not None
+    assert binding_todo.is_completed is False
+
+
+def test_excel_reimport_conflict_keeps_existing_imported_schedule(client, login_as):
+    admin = create_user(username='oa-p1-stale-import-admin', display_name='StaleImportAdmin', role='admin')
+    teacher = create_user(username='oa-p1-stale-import-teacher', display_name='StaleImportTeacher', role='teacher')
+
+    import_run = ScheduleImportRun(
+        original_filename='older-import.xlsx',
+        uploaded_by=admin.id,
+        status='completed',
+    )
+    db.session.add(import_run)
+    db.session.flush()
+
+    imported_schedule = CourseSchedule(
+        date=date(2026, 3, 16),
+        day_of_week=date(2026, 3, 16).weekday(),
+        time_start='10:00',
+        time_end='12:00',
+        teacher=teacher.display_name,
+        teacher_id=teacher.id,
+        course_name='StaleImportCourse AI',
+        students='StaleImportStudent',
+        import_run_id=import_run.id,
+        color_tag='blue',
+        delivery_mode='online',
+    )
+    db.session.add(imported_schedule)
+    db.session.commit()
+
+    create_schedule(
+        teacher=teacher,
+        course_name='ManualConflictCourse',
+        students='AnotherStudent',
+        schedule_date=date(2026, 3, 16),
+        time_start='10:30',
+        time_end='11:30',
+    )
+
+    login_as(admin)
+    response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 StaleImportTeacher\nStaleImportCourse AI\nStaleImportStudent'),
+                ]),
+                '2026-stale-reimport.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert len(payload['data']['conflict_rows']) == 1
+    assert payload['data']['schedules_deleted'] == 0
+    assert db.session.get(CourseSchedule, imported_schedule.id) is not None
+
+
+def test_excel_reimport_conflict_keeps_existing_binding_todo(client, login_as):
+    admin = create_user(username='oa-p1-stale-binding-admin', display_name='StaleBindingAdmin', role='admin')
+    teacher = create_user(username='oa-p1-stale-binding-teacher', display_name='StaleBindingTeacher', role='teacher')
+
+    login_as(admin)
+    first_response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 StaleBindingTeacher\nStaleBindingCourse AI\nStaleBindingStudent'),
+                ]),
+                '2026-stale-binding-1.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    assert first_response.status_code == 200
+
+    imported_schedule = CourseSchedule.query.filter_by(
+        teacher=teacher.display_name,
+        course_name='StaleBindingCourse AI',
+        date=date(2026, 3, 16),
+    ).first()
+    assert imported_schedule is not None
+
+    binding_todo = OATodo.query.filter_by(
+        schedule_id=imported_schedule.id,
+        todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+    ).order_by(OATodo.id.desc()).first()
+    assert binding_todo is not None
+
+    create_schedule(
+        teacher=teacher,
+        course_name='ManualBindingConflict',
+        students='AnotherStudent',
+        schedule_date=date(2026, 3, 16),
+        time_start='10:30',
+        time_end='11:30',
+    )
+
+    response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 StaleBindingTeacher\nStaleBindingCourse AI\nStaleBindingStudent'),
+                ]),
+                '2026-stale-binding-2.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert len(payload['data']['conflict_rows']) == 1
+
+    refreshed_todo = OATodo.query.filter_by(
+        schedule_id=imported_schedule.id,
+        todo_type=OATodo.TODO_TYPE_EXCEL_IMPORT,
+    ).order_by(OATodo.id.desc()).first()
+    assert refreshed_todo is not None
+    assert refreshed_todo.id == binding_todo.id
+    assert refreshed_todo.is_completed is False

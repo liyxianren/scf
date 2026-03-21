@@ -181,7 +181,7 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">event_busy</span> 全局待审批请假</h2>
+        <h2><span class="material-icons">event_busy</span> 待处理请假</h2>
         <div class="card">
             <div class="summary-list" id="leaveList">
                 <div class="empty">加载中...</div>
@@ -190,7 +190,7 @@
     </div>
 
     <div class="section" id="workflowSection">
-        <h2><span class="material-icons">account_tree</span> OA 工作流</h2>
+        <h2><span class="material-icons">account_tree</span> 流程行动台</h2>
         <div class="card">
             <div id="workflowSummary" class="workflow-summary"></div>
             <div class="workflow-list" id="workflowList">
@@ -200,7 +200,16 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">school</span> 待排课 / 待跟进报名</h2>
+        <h2><span class="material-icons">edit_note</span> 待老师反馈</h2>
+        <div class="card">
+            <div class="summary-list" id="pendingFeedbackList">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><span class="material-icons">school</span> 待排课报名</h2>
         <div class="card">
             <div class="summary-list" id="pendingEnrollmentList">
                 <div class="empty">加载中...</div>
@@ -233,6 +242,26 @@
     </div>
 </div>
 
+<div id="leaveDecisionModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:620px">
+        <div class="modal-header">
+            <div>
+                <h3><span class="material-icons">edit</span> 驳回请假申请</h3>
+                <div class="modal-subtitle" id="leaveDecisionSubtitle" style="margin-top:6px;font-size:.84rem;color:#64748b">请填写学生可执行的处理说明。</div>
+            </div>
+            <button class="close-btn" onclick="closeLeaveDecisionModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="hint">学生会在请假记录和站内通知里看到这段说明，请尽量直接说明下一步需要怎么处理。</p>
+            <textarea id="leaveDecisionCommentInput" placeholder="例如：这次请假与既定时间冲突太大，请先补充新的可补课时段后再提交。" style="width:100%;min-height:130px;padding:12px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.92rem;resize:vertical;outline:none"></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" onclick="closeLeaveDecisionModal()">取消</button>
+            <button class="btn-primary" onclick="submitLeaveDecisionModal()"><span class="material-icons" style="font-size:1rem">send</span> 提交驳回说明</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast" class="toast"></div>
 {% endblock %}
 {% block extra_js %}
@@ -242,6 +271,8 @@ const MY_ID = {{ current_user.id }};
 let availGrid = null;
 let workflowTodos = [];
 let workflowTodoMap = {};
+let adminActionCenter = null;
+let leaveDecisionState = {id: null};
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 function weekRange(){
@@ -294,21 +325,141 @@ async function loadWeekSchedulePreview(){
     }
 }
 
-async function loadLeaveRequests(){
-    try{
-        const res = await fetch('/auth/api/leave-requests');
-        const json = await res.json();
-        const box = document.getElementById('leaveList');
-        if(!json.success){
-            box.innerHTML = '<div class="empty">加载失败</div>';
-            return;
+function renderWorkflowSummary(groups){
+    const box = document.getElementById('workflowSummary');
+    if(!box) return;
+    const teacherCount = (groups.waiting_teacher_proposal_workflows || []).length;
+    const adminCount = (groups.pending_admin_send_workflows || []).length;
+    const studentCount = (groups.waiting_student_confirm_workflows || []).length + (groups.waiting_student_confirm_enrollments || []).length;
+    if(!teacherCount && !adminCount && !studentCount){
+        box.innerHTML = '<span class="workflow-chip">当前没有待老师提案、待教务发送或待学生确认的动作</span>';
+        return;
+    }
+    box.innerHTML = [
+        teacherCount ? `<span class="workflow-chip">待老师提案 ${teacherCount}</span>` : '',
+        adminCount ? `<span class="workflow-chip">待教务发送 ${adminCount}</span>` : '',
+        studentCount ? `<span class="workflow-chip">待学生确认 ${studentCount}</span>` : '',
+    ].filter(Boolean).join('');
+}
+
+function normalizeWorkflowSessionDates(sessionDates){
+    return (sessionDates || [])
+        .filter(item => item && item.date && item.time_start && item.time_end)
+        .map(item => ({
+            date: item.date,
+            time_start: item.time_start,
+            time_end: item.time_end,
+        }))
+        .sort((a, b) => {
+            if(a.date !== b.date) return a.date.localeCompare(b.date);
+            if(a.time_start !== b.time_start) return a.time_start.localeCompare(b.time_start);
+            return a.time_end.localeCompare(b.time_end);
+        });
+}
+
+function getWorkflowSessionPreviewLines(item, payload){
+    const proposal = (payload.current_proposal && payload.current_proposal.session_dates)
+        ? payload.current_proposal
+        : (payload.previous_confirmed_slot || {});
+    const sessions = normalizeWorkflowSessionDates(proposal.session_dates || []);
+    return sessions.slice(0, 3).map(session => `${session.date} ${session.time_start}-${session.time_end}`);
+}
+
+function renderWorkflowTodos(groups){
+    const box = document.getElementById('workflowList');
+    if(!box) return;
+    const teacherItems = groups.waiting_teacher_proposal_workflows || [];
+    const adminItems = groups.pending_admin_send_workflows || [];
+    const studentWorkflowItems = groups.waiting_student_confirm_workflows || [];
+    const studentEnrollmentItems = groups.waiting_student_confirm_enrollments || [];
+    if(!teacherItems.length && !adminItems.length && !studentWorkflowItems.length && !studentEnrollmentItems.length){
+        box.innerHTML = '<div class="empty">当前没有待老师提案、待教务发送或待学生确认的动作</div>';
+        renderWorkflowSummary(groups);
+        return;
+    }
+    renderWorkflowSummary(groups);
+    const getStudentConfirmStageText = item => `当前阶段：${item.todo_type === 'leave_makeup' ? '待学生确认补课' : '待学生确认方案'}`;
+    const getStudentConfirmNextStepText = item => item.todo_type === 'leave_makeup'
+        ? '下一步：学生确认后补课时间会正式生效。'
+        : '下一步：学生确认后系统会生成正式课表。';
+    const renderWorkflowItem = (item, badgeText, statusClass) => {
+        const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
+        const payload = parseWorkflowPayload(item);
+        const sessionPreviewLines = badgeText === '待教务发送'
+            ? getWorkflowSessionPreviewLines(item, payload)
+            : [];
+        const contextLines = [
+            item.context_summary || item.next_action_label || item.description || '等待处理',
+            item.current_plan_summary ? `方案概览：${item.current_plan_summary}` : '',
+            item.proposal_note ? `老师备注：${item.proposal_note}` : '',
+            item.latest_rejection_text ? `最新问题：${item.latest_rejection_text}` : '',
+            item.proposal_warning_summary || payload.proposal_warning_summary ? `方案提醒：${item.proposal_warning_summary || payload.proposal_warning_summary}` : '',
+            badgeText === '待学生确认' ? getStudentConfirmStageText(item) : '',
+            badgeText === '待学生确认' ? getStudentConfirmNextStepText(item) : '',
+        ].filter(Boolean);
+        if(sessionPreviewLines.length){
+            contextLines.push(`课次预览：${sessionPreviewLines[0]}`);
+            sessionPreviewLines.slice(1).forEach(line => contextLines.push(`继续：${line}`));
         }
-        const pending = (json.data || []).filter(item => item.status === 'pending');
-        if(!pending.length){
+        return `
+            <div class="workflow-item">
+                <div class="wf-head">
+                    <div>
+                        <div class="wf-title">${escapeHtml(item.title || item.student_name || item.course_name || '工作流')}</div>
+                        <div class="wf-subtitle">${escapeHtml(item.course_name || '-') } · ${escapeHtml(item.student_name || '-')}</div>
+                    </div>
+                    <span class="wf-status ${statusClass}">${badgeText}</span>
+                </div>
+                <div class="wf-context">${contextLines.map(line => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+                <div class="wf-meta">
+                    ${item.waiting_since ? `<span>等待开始：${escapeHtml(item.waiting_since)}</span>` : ''}
+                    ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
+                    ${item.due_date ? `<span>截止：${escapeHtml(item.due_date)}</span>` : ''}
+                </div>
+                <div class="wf-actions">
+                    ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
+                </div>
+            </div>
+        `;
+    };
+    const renderEnrollmentItem = item => `
+        <div class="workflow-item">
+            <div class="wf-head">
+                <div>
+                    <div class="wf-title">${escapeHtml(item.student_name || '-')}</div>
+                    <div class="wf-subtitle">${escapeHtml(item.course_name || '-')} · ${escapeHtml(item.teacher_name || '-')}</div>
+                </div>
+                <span class="wf-status pending">待学生确认</span>
+            </div>
+            <div class="wf-context">
+                <div>${escapeHtml(item.current_plan_summary ? `方案概览：${item.current_plan_summary}` : (item.next_action_label || '学生待确认当前排课方案'))}</div>
+                <div>${escapeHtml('当前阶段：待学生确认方案')}</div>
+                <div>${escapeHtml('下一步：学生确认后系统会生成正式课表。')}</div>
+                ${(item.latest_rejection_text || item.latest_feedback) ? `<div>${escapeHtml(`最新退回：${item.latest_rejection_text || item.latest_feedback}`)}</div>` : ''}
+            </div>
+            <div class="wf-meta">
+                ${item.waiting_since ? `<span>等待开始：${escapeHtml(item.waiting_since)}</span>` : ''}
+            </div>
+            <div class="wf-actions">
+                <a class="inline-btn" href="/auth/enrollments/${item.id}">打开报名</a>
+            </div>
+        </div>
+    `;
+    box.innerHTML = `
+        ${teacherItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin-bottom:10px">待老师提案</div>${teacherItems.map(item => renderWorkflowItem(item, '待老师提案', item.todo_type === 'leave_makeup' ? 'makeup' : 'replan')).join('')}` : ''}
+        ${adminItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length ? '18px 0 10px' : '0 0 10px'}">待教务发送给学生</div>${adminItems.map(item => renderWorkflowItem(item, '待教务发送', 'review')).join('')}` : ''}
+        ${studentWorkflowItems.length || studentEnrollmentItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length || adminItems.length ? '18px 0 10px' : '0 0 10px'}">待学生确认</div>${studentWorkflowItems.map(item => renderWorkflowItem(item, '待学生确认', 'pending')).join('')}${studentEnrollmentItems.map(renderEnrollmentItem).join('')}` : ''}
+    `;
+}
+
+function renderLeaveRequests(items){
+    try{
+        const box = document.getElementById('leaveList');
+        if(!items.length){
             box.innerHTML = '<div class="empty">暂无待审批请假</div>';
             return;
         }
-        box.innerHTML = pending.map(item => `
+        box.innerHTML = items.map(item => `
             <div class="summary-item">
                 <div class="title">${escapeHtml(item.student_name || '学生')}</div>
                 <div class="detail">${escapeHtml(item.course_name || '')} · ${item.date || ''}</div>
@@ -316,15 +467,15 @@ async function loadLeaveRequests(){
                     <span>原因：${escapeHtml(item.reason || '无')}</span>
                     <span>教师：${escapeHtml(item.teacher_name || '-')}</span>
                 </div>
+                ${item.makeup_preference_summary ? `<div class="detail" style="margin-top:6px;color:#475569">本次补课偏好：${escapeHtml(item.makeup_preference_summary)}</div>` : ''}
+                ${item.decision_comment ? `<div class="detail" style="margin-top:6px;color:#92400e">处理说明：${escapeHtml(item.decision_comment)}</div>` : ''}
                 <div class="inline-actions">
                     <button class="inline-btn approve-btn" onclick="handleLeave(${item.id}, 'approve')">批准</button>
-                    <button class="inline-btn reject-btn" onclick="handleLeave(${item.id}, 'reject')">驳回</button>
+                    <button class="inline-btn reject-btn" onclick="openLeaveDecisionModal(${item.id}, '${escapeJs(item.student_name || '学生')}')">驳回</button>
                 </div>
             </div>
         `).join('');
-    }catch(e){
-        console.error(e);
-    }
+    }catch(e){console.error(e);}
 }
 
 function workflowTypeLabel(type){
@@ -346,6 +497,14 @@ function workflowStatusLabel(status){
         cancelled: '已取消',
     };
     return map[status] || status || '-';
+}
+
+function escapeJs(value){
+    return String(value || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, ' ');
 }
 
 function parseWorkflowPayload(item){
@@ -377,84 +536,30 @@ function formatWorkflowContext(item){
     return parts.join(' · ');
 }
 
-function renderWorkflowSummary(items){
-    const box = document.getElementById('workflowSummary');
+function renderPendingFeedback(items){
+    const box = document.getElementById('pendingFeedbackList');
     if(!box) return;
     if(!items.length){
-        box.innerHTML = '<span class="workflow-chip">当前没有打开的工作流</span>';
+        box.innerHTML = '<div class="empty">当前没有待老师反馈的课程</div>';
         return;
     }
-    const counts = items.reduce((acc, item) => {
-        const key = item.workflow_status || 'unknown';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-    }, {});
-    box.innerHTML = Object.entries(counts).map(([status, count]) => `
-        <span class="workflow-chip">${escapeHtml(workflowStatusLabel(status))} ${count}</span>
+    box.innerHTML = items.map(item => `
+        <div class="summary-item">
+            <div class="title">${escapeHtml(item.course_name || '-')}</div>
+            <div class="detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')}</div>
+            <div class="meta">
+                <span>老师：${escapeHtml(item.teacher || item.teacher_name || '-')}</span>
+                <span>学生：${escapeHtml(item.students || '-')}</span>
+                <span style="color:${item.is_overdue ? '#b91c1c' : '#64748b'}">${item.is_overdue ? '已逾期' : '待老师提交反馈'}</span>
+            </div>
+            ${item.enrollment_id ? `<div class="inline-actions"><a class="inline-btn" href="/auth/enrollments/${item.enrollment_id}">查看报名</a></div>` : ''}
+        </div>
     `).join('');
 }
 
-function renderWorkflowTodos(items){
-    const box = document.getElementById('workflowList');
-    if(!box) return;
-    if(!items.length){
-        box.innerHTML = '<div class="empty">当前没有打开的 OA 工作流</div>';
-        renderWorkflowSummary([]);
-        return;
-    }
-
-    renderWorkflowSummary(items);
-    box.innerHTML = items.map(item => {
-        const payload = parseWorkflowPayload(item);
-        const title = item.title || item.name || workflowTypeLabel(item.todo_type);
-        const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
-        const statusClass = item.todo_type === 'leave_makeup'
-            ? 'makeup'
-            : item.todo_type === 'schedule_feedback'
-                ? 'feedback'
-                : item.workflow_status === 'waiting_admin_review'
-                    ? 'review'
-                    : 'pending';
-        const wfContext = formatWorkflowContext(item);
-        const previewText = payload.current_proposal && payload.current_proposal.session_dates
-            ? `当前方案 ${payload.current_proposal.session_dates.length} 节`
-            : payload.previous_confirmed_slot && payload.previous_confirmed_slot.session_dates
-                ? `上次方案 ${payload.previous_confirmed_slot.session_dates.length} 节`
-                : payload.note || item.description || '';
-        return `
-            <div class="workflow-item">
-                <div class="wf-head">
-                    <div>
-                        <div class="wf-title">${escapeHtml(title)}</div>
-                        <div class="wf-subtitle">${escapeHtml(workflowTypeLabel(item.todo_type))} · ${escapeHtml(item.enrollment_name || item.enrollment_title || item.course_name || '-')}</div>
-                    </div>
-                    <span class="wf-status ${statusClass}">${escapeHtml(workflowStatusLabel(item.workflow_status))}</span>
-                </div>
-                <div class="wf-context">${escapeHtml(wfContext || previewText || '暂无上下文')}</div>
-                <div class="wf-meta">
-                    ${item.revision !== undefined && item.revision !== null ? `<span>revision ${item.revision}</span>` : ''}
-                    ${item.due_date ? `<span>截止：${escapeHtml(item.due_date)}</span>` : ''}
-                    ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
-                </div>
-                <div class="wf-actions">
-                    ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
-                    ${item.leave_request_id ? `<span class="inline-btn" style="pointer-events:none;opacity:.7">关联请假 #${escapeHtml(String(item.leave_request_id))}</span>` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-async function loadPendingEnrollments(){
+function renderPendingEnrollments(items){
     try{
-        const res = await fetch('/auth/api/enrollments');
-        const json = await res.json();
         const box = document.getElementById('pendingEnrollmentList');
-        if(!json.success){
-            box.innerHTML = '<div class="empty">加载失败</div>';
-            return;
-        }
-        const items = (json.data || []).filter(item => ['pending_info','pending_schedule','pending_student_confirm'].includes(item.status));
         if(!items.length){
             box.innerHTML = '<div class="empty">当前没有待跟进报名</div>';
             return;
@@ -479,19 +584,44 @@ async function loadPendingEnrollments(){
                 </div>
             </div>
         `).join('');
-    }catch(e){
-        console.error(e);
-    }
+    }catch(e){console.error(e);}
 }
 
-async function handleLeave(id, action){
+async function loadAdminActionCenter(){
     try{
-        const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, {method:'PUT'});
+        const res = await fetch('/auth/api/admin/action-center');
+        const json = await res.json();
+        if(!json.success) return;
+        adminActionCenter = json.data || {};
+        workflowTodos = [
+            ...(adminActionCenter.waiting_teacher_proposal_workflows || []),
+            ...(adminActionCenter.pending_admin_send_workflows || []),
+            ...(adminActionCenter.waiting_student_confirm_workflows || []),
+        ];
+        workflowTodoMap = {};
+        workflowTodos.forEach(item => {
+            if(item.enrollment_id) workflowTodoMap[item.enrollment_id] = item;
+        });
+        renderWorkflowTodos(adminActionCenter);
+        renderLeaveRequests(adminActionCenter.pending_leave_requests || []);
+        renderPendingFeedback(adminActionCenter.pending_feedback_schedules || []);
+        renderPendingEnrollments(adminActionCenter.pending_schedule_enrollments || []);
+    }catch(e){console.error(e);}
+}
+
+async function handleLeave(id, action, comment = ''){
+    try{
+        const options = {method:'PUT'};
+        if(action === 'reject'){
+            options.headers = {'Content-Type':'application/json'};
+            options.body = JSON.stringify({comment: (comment || '').trim()});
+        }
+        const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, options);
         const json = await res.json();
         if(json.success){
             showToast(action === 'approve' ? '请假已批准' : '请假已驳回');
-            await loadLeaveRequests();
-            await loadPendingEnrollments();
+            await loadAdminActionCenter();
+            if(action === 'reject') closeLeaveDecisionModal();
         }else{
             alert(json.error || '操作失败');
         }
@@ -500,24 +630,42 @@ async function handleLeave(id, action){
     }
 }
 
-async function loadWorkflowTodos(){
+function openLeaveDecisionModal(id, studentName){
+    leaveDecisionState = {id};
+    document.getElementById('leaveDecisionSubtitle').textContent = `${studentName || '学生'}：请填写驳回说明`;
+    document.getElementById('leaveDecisionCommentInput').value = '';
+    document.getElementById('leaveDecisionModal').classList.add('active');
+}
+
+function closeLeaveDecisionModal(){
+    leaveDecisionState = {id: null};
+    document.getElementById('leaveDecisionModal').classList.remove('active');
+    document.getElementById('leaveDecisionCommentInput').value = '';
+}
+
+async function submitLeaveDecisionModal(){
+    if(!leaveDecisionState.id) return;
+    const comment = document.getElementById('leaveDecisionCommentInput').value.trim();
+    if(!comment){
+        alert('请先填写处理说明');
+        return;
+    }
     try{
-        const res = await fetch('/auth/api/workflow-todos');
-        const json = await res.json();
-        if(!json.success){
-            renderWorkflowTodos([]);
-            return;
-        }
-        workflowTodos = (json.data || []).filter(item => item && item.todo_type && item.todo_type !== 'generic');
-        workflowTodoMap = {};
-        workflowTodos.forEach(item => {
-            if(item.enrollment_id) workflowTodoMap[item.enrollment_id] = item;
+        const res = await fetch(`/auth/api/leave-requests/${leaveDecisionState.id}/reject`, {
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({comment})
         });
-        const openTodos = workflowTodos.filter(item => item.workflow_status !== 'completed' && item.workflow_status !== 'cancelled');
-        renderWorkflowTodos(openTodos);
+        const json = await res.json();
+        if(json.success){
+            showToast('请假已驳回');
+            closeLeaveDecisionModal();
+            await loadAdminActionCenter();
+        }else{
+            alert(json.error || '操作失败');
+        }
     }catch(e){
-        console.error(e);
-        renderWorkflowTodos([]);
+        alert('网络错误');
     }
 }
 
@@ -586,9 +734,7 @@ function escapeHtml(value){
 document.addEventListener('DOMContentLoaded', async function(){
     await loadStats();
     await loadWeekSchedulePreview();
-    await loadLeaveRequests();
-    await loadWorkflowTodos();
-    await loadPendingEnrollments();
+    await loadAdminActionCenter();
 });
 </script>
 {% endblock %}

@@ -242,13 +242,21 @@ def create_leave_request(
     reason='临时有事',
     status='pending',
     approved_by=None,
+    makeup_available_slots=None,
+    makeup_excluded_dates=None,
+    makeup_preference_note=None,
+    decision_comment=None,
 ):
     leave = LeaveRequest(
         enrollment_id=enrollment.id if enrollment else None,
         student_name=student_name,
         schedule_id=schedule.id,
+        makeup_available_slots_json=json.dumps(makeup_available_slots, ensure_ascii=False) if makeup_available_slots else None,
+        makeup_excluded_dates_json=json.dumps(makeup_excluded_dates, ensure_ascii=False) if makeup_excluded_dates else None,
+        makeup_preference_note=makeup_preference_note,
         leave_date=schedule.date,
         reason=reason,
+        decision_comment=decision_comment,
         status=status,
         approved_by=approved_by.id if approved_by else None,
     )

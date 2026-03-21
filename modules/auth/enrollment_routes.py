@@ -8,6 +8,8 @@ from modules.auth import auth_bp
 from modules.auth.decorators import role_required
 from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.auth.services import (
+    _normalize_available_slot_entries,
+    _normalize_excluded_dates_entries,
     _linked_schedule_query,
     build_enrollment_payload,
     build_leave_request_payload,
@@ -408,6 +410,9 @@ def api_create_leave_request():
 
     schedule_id = data.get('schedule_id')
     reason = (data.get('reason') or '').strip()
+    makeup_available_slots = _normalize_available_slot_entries(data.get('makeup_available_slots'))
+    makeup_excluded_dates = _normalize_excluded_dates_entries(data.get('makeup_excluded_dates'))
+    makeup_preference_note = (data.get('makeup_preference_note') or '').strip() or None
     if not schedule_id:
         return jsonify({'success': False, 'error': '缺少 schedule_id'}), 400
 
@@ -423,6 +428,9 @@ def api_create_leave_request():
         enrollment_id=schedule.enrollment_id,
         student_name=schedule.enrollment.student_name,
         schedule_id=schedule_id,
+        makeup_available_slots_json=json.dumps(makeup_available_slots, ensure_ascii=False) if makeup_available_slots else None,
+        makeup_excluded_dates_json=json.dumps(makeup_excluded_dates, ensure_ascii=False) if makeup_excluded_dates else None,
+        makeup_preference_note=makeup_preference_note,
         leave_date=schedule.date,
         reason=reason,
         status='pending',
@@ -445,7 +453,11 @@ def api_approve_leave(request_id):
     if leave_request.status != 'pending':
         return jsonify({'success': False, 'error': '该请假申请已处理'}), 400
 
+    data = request.get_json(silent=True) or {}
+    decision_comment = (data.get('comment') or '').strip() or None
+
     leave_request.status = 'approved'
+    leave_request.decision_comment = decision_comment
     leave_request.approved_by = current_user.id
     send_leave_status_notification(leave_request)
     linked_enrollment = leave_request.enrollment or (
@@ -471,7 +483,13 @@ def api_reject_leave(request_id):
     if leave_request.status != 'pending':
         return jsonify({'success': False, 'error': '该请假申请已处理'}), 400
 
+    data = request.get_json(silent=True) or {}
+    decision_comment = (data.get('comment') or '').strip()
+    if not decision_comment:
+        return jsonify({'success': False, 'error': '请先填写处理说明'}), 400
+
     leave_request.status = 'rejected'
+    leave_request.decision_comment = decision_comment
     leave_request.approved_by = current_user.id
     send_leave_status_notification(leave_request)
     linked_enrollment = leave_request.enrollment or (

@@ -1,6 +1,5 @@
-import json
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import jsonify, redirect, render_template, request
 from flask_login import current_user, login_user, login_required, logout_user
@@ -14,6 +13,7 @@ from modules.auth.services import (
     _schedule_has_started,
     build_enrollment_payload,
     build_feedback_payload,
+    build_leave_request_payload,
     build_schedule_payload,
     delete_student_user_hard,
     get_accessible_enrollment_query,
@@ -86,6 +86,67 @@ def _student_schedule_query(user, start=None, end=None):
     if end is not None:
         query = query.filter(CourseSchedule.date <= end)
     return query.order_by(CourseSchedule.date, CourseSchedule.time_start)
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _action_sort_key(item):
+    overdue_rank = 0 if item.get('is_overdue') else 1
+    priority = int(item.get('priority') or 9)
+    due_date = _parse_iso_date(item.get('due_date') or item.get('date')) or date.max
+    waiting_since = (
+        _parse_iso_datetime(item.get('waiting_since'))
+        or _parse_iso_datetime(item.get('updated_at'))
+        or _parse_iso_datetime(item.get('created_at'))
+        or datetime.max
+    )
+    time_start = item.get('time_start') or '99:99'
+    return (overdue_rank, priority, due_date, waiting_since, time_start)
+
+
+def _sort_action_items(items):
+    return sorted(items, key=_action_sort_key)
+
+
+def _teacher_students_summary(user):
+    enrollments = get_accessible_enrollment_query(user).filter(
+        Enrollment.status.in_(['confirmed', 'active', 'pending_student_confirm', 'pending_schedule'])
+    ).all()
+
+    students = []
+    for enrollment in enrollments:
+        info = {
+            'name': enrollment.student_name,
+            'course': enrollment.course_name,
+            'status': enrollment.status,
+            'user_id': enrollment.student_profile.user_id if enrollment.student_profile else None,
+            'student_profile_id': enrollment.student_profile_id,
+        }
+        if enrollment.student_profile:
+            info['phone'] = enrollment.student_profile.phone
+            info['parent_phone'] = enrollment.student_profile.parent_phone
+        students.append(info)
+    return students
 
 
 # ========== 登录/登出 ==========
@@ -242,6 +303,70 @@ def api_teacher_my_schedule():
     })
 
 
+@auth_bp.route('/api/teacher/action-center')
+@role_required('teacher', 'admin')
+def api_teacher_action_center():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    today = get_business_today()
+    upcoming_end = today + timedelta(days=7)
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    proposal_workflows = _sort_action_items([
+        item for item in workflow_todos
+        if item.get('next_action_role') == 'teacher'
+        and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+    ])
+
+    schedule_payloads = [
+        build_schedule_payload(schedule, current_user)
+        for schedule in _teacher_schedule_query(current_user, today - timedelta(days=30), upcoming_end).all()
+    ]
+    pending_feedback = _sort_action_items([
+        item for item in schedule_payloads
+        if item.get('next_action_status') == 'waiting_teacher_feedback'
+    ])
+    upcoming_schedules = sorted(
+        [
+            item for item in schedule_payloads
+            if item.get('date')
+            and today <= date.fromisoformat(item['date']) <= upcoming_end
+        ],
+        key=lambda item: (item['date'], item.get('time_start') or '99:99'),
+    )
+
+    leave_requests = _sort_action_items([
+        build_leave_request_payload(item, current_user)
+        for item in LeaveRequest.query.join(
+            CourseSchedule, LeaveRequest.schedule_id == CourseSchedule.id
+        ).filter(
+            CourseSchedule.teacher_id == current_user.id,
+            LeaveRequest.status == 'pending',
+        ).order_by(LeaveRequest.created_at.desc()).all()
+    ])
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'availability_ready': TeacherAvailability.query.filter_by(user_id=current_user.id).count() > 0,
+            'proposal_workflows': proposal_workflows,
+            'pending_feedback_schedules': pending_feedback,
+            'leave_requests': leave_requests,
+            'upcoming_schedules': upcoming_schedules[:10],
+            'students': _teacher_students_summary(current_user),
+            'counts': {
+                'proposal_workflows': len(proposal_workflows),
+                'pending_feedback_schedules': len(pending_feedback),
+                'leave_requests': len(leave_requests),
+                'upcoming_schedules': len(upcoming_schedules),
+            },
+        },
+    })
+
+
 @auth_bp.route('/api/teacher/my-schedules/by-date')
 @role_required('teacher', 'admin')
 def api_teacher_my_schedules_by_date():
@@ -289,6 +414,165 @@ def api_student_my_info():
             'schedules': [build_schedule_payload(schedule, current_user) for schedule in schedules],
             'enrollments': [build_enrollment_payload(enrollment, current_user) for enrollment in enrollments],
         }
+    })
+
+
+@auth_bp.route('/api/student/action-center')
+@role_required('student')
+def api_student_action_center():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    today = get_business_today()
+    profile = current_user.student_profile
+    if not profile:
+        return jsonify({'success': True, 'data': {
+            'pending_workflows': [],
+            'pending_enrollments': [],
+            'upcoming_schedules': [],
+            'leave_requests': [],
+            'counts': {
+                'pending_workflows': 0,
+                'pending_enrollments': 0,
+                'leave_requests': 0,
+                'upcoming_schedules': 0,
+            },
+        }})
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    pending_workflows = _sort_action_items([
+        item for item in workflow_todos if item.get('next_action_role') == 'student'
+    ])
+    workflow_enrollment_ids = {
+        item.get('enrollment_id')
+        for item in pending_workflows
+        if item.get('todo_type') == 'enrollment_replan' and item.get('enrollment_id')
+    }
+
+    enrollments = [
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in Enrollment.query.filter(
+            Enrollment.student_profile_id == profile.id
+        ).order_by(Enrollment.created_at.desc()).all()
+    ]
+    pending_enrollments = _sort_action_items([
+        item for item in enrollments
+        if item.get('status') == 'pending_student_confirm' and item.get('id') not in workflow_enrollment_ids
+    ])
+
+    upcoming_schedules = [
+        build_schedule_payload(schedule, current_user)
+        for schedule in _student_schedule_query(current_user, today, today + timedelta(days=30)).limit(20).all()
+    ]
+    leave_requests = _sort_action_items([
+        build_leave_request_payload(item, current_user)
+        for item in LeaveRequest.query.join(
+            Enrollment, LeaveRequest.enrollment_id == Enrollment.id
+        ).filter(
+            Enrollment.student_profile_id == profile.id
+        ).order_by(LeaveRequest.created_at.desc()).all()
+    ])
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'pending_workflows': pending_workflows,
+            'pending_enrollments': pending_enrollments,
+            'upcoming_schedules': upcoming_schedules,
+            'leave_requests': leave_requests,
+            'counts': {
+                'pending_workflows': len(pending_workflows),
+                'pending_enrollments': len(pending_enrollments),
+                'leave_requests': len(leave_requests),
+                'upcoming_schedules': len(upcoming_schedules),
+            },
+        },
+    })
+
+
+@auth_bp.route('/api/admin/action-center')
+@role_required('admin')
+def api_admin_action_center():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    today = get_business_today()
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    waiting_teacher_proposal_workflows = _sort_action_items([
+        item for item in workflow_todos
+        if item.get('next_action_role') == 'teacher'
+        and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+    ])
+    pending_admin_send = _sort_action_items([
+        item for item in workflow_todos
+        if item.get('next_action_role') == 'admin'
+        and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+    ])
+    waiting_student_confirm_workflows = _sort_action_items([
+        item for item in workflow_todos
+        if item.get('next_action_role') == 'student'
+        and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+    ])
+    workflow_enrollment_ids = {
+        item.get('enrollment_id')
+        for item in waiting_student_confirm_workflows
+        if item.get('todo_type') == 'enrollment_replan' and item.get('enrollment_id')
+    }
+
+    pending_schedule_enrollments = _sort_action_items([
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in get_accessible_enrollment_query(current_user).filter(
+            Enrollment.status.in_(['pending_info', 'pending_schedule'])
+        ).order_by(Enrollment.updated_at.desc(), Enrollment.created_at.desc()).all()
+    ])
+    waiting_student_confirm_enrollments = _sort_action_items([
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in get_accessible_enrollment_query(current_user).filter(
+            Enrollment.status == 'pending_student_confirm'
+        ).order_by(Enrollment.updated_at.desc(), Enrollment.created_at.desc()).all()
+        if enrollment.id not in workflow_enrollment_ids
+    ])
+    pending_leave_requests = _sort_action_items([
+        build_leave_request_payload(item, current_user)
+        for item in LeaveRequest.query.filter(
+            LeaveRequest.status == 'pending'
+        ).order_by(LeaveRequest.created_at.desc()).all()
+    ])
+    pending_feedback_schedules = _sort_action_items([
+        build_schedule_payload(schedule, current_user)
+        for schedule in CourseSchedule.query.filter(
+            CourseSchedule.date <= today
+        ).order_by(CourseSchedule.date.desc(), CourseSchedule.time_start.asc()).all()
+        if _schedule_has_started(schedule)
+        and not (schedule.feedback and schedule.feedback.status == 'submitted')
+        and not (_latest_leave_request(schedule) and _latest_leave_request(schedule).status == 'approved')
+    ])
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'pending_schedule_enrollments': pending_schedule_enrollments,
+            'waiting_teacher_proposal_workflows': waiting_teacher_proposal_workflows,
+            'pending_admin_send_workflows': pending_admin_send,
+            'waiting_student_confirm_workflows': waiting_student_confirm_workflows,
+            'waiting_student_confirm_enrollments': waiting_student_confirm_enrollments,
+            'pending_leave_requests': pending_leave_requests,
+            'pending_feedback_schedules': pending_feedback_schedules,
+            'counts': {
+                'pending_schedule_enrollments': len(pending_schedule_enrollments),
+                'waiting_teacher_proposal_workflows': len(waiting_teacher_proposal_workflows),
+                'pending_admin_send_workflows': len(pending_admin_send),
+                'waiting_student_confirm_workflows': len(waiting_student_confirm_workflows),
+                'waiting_student_confirm_enrollments': len(waiting_student_confirm_enrollments),
+                'pending_leave_requests': len(pending_leave_requests),
+                'pending_feedback_schedules': len(pending_feedback_schedules),
+            },
+        },
     })
 
 

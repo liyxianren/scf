@@ -476,6 +476,160 @@ def _load_student_excluded_dates(student_profile):
     return excluded_set
 
 
+def _load_json_list(value):
+    if value in (None, ''):
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            data = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return data if isinstance(data, list) else []
+    return []
+
+
+def _day_name(day_of_week):
+    labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+    try:
+        index = int(day_of_week)
+    except (TypeError, ValueError):
+        return ''
+    if 0 <= index < len(labels):
+        return labels[index]
+    return ''
+
+
+def _normalize_available_slot_entries(value):
+    normalized = []
+    for slot in _load_json_list(value):
+        if not isinstance(slot, dict):
+            continue
+        day_value = slot.get('day')
+        if day_value is None:
+            day_value = slot.get('day_of_week')
+        try:
+            day = int(day_value)
+        except (TypeError, ValueError):
+            continue
+        start = (slot.get('start') or slot.get('time_start') or '').strip()
+        end = (slot.get('end') or slot.get('time_end') or '').strip()
+        if not start or not end or start >= end:
+            continue
+        normalized.append({
+            'day': day,
+            'start': start,
+            'end': end,
+        })
+    normalized.sort(key=lambda item: (item['day'], item['start'], item['end']))
+    return normalized
+
+
+def _normalize_excluded_dates_entries(value):
+    normalized = []
+    for item in _load_json_list(value):
+        date_text = str(item or '').strip()
+        if not date_text:
+            continue
+        try:
+            date.fromisoformat(date_text)
+        except ValueError:
+            continue
+        normalized.append(date_text)
+    return sorted(dict.fromkeys(normalized))
+
+
+def _summarize_available_slots(value):
+    slots = _normalize_available_slot_entries(value)
+    if not slots:
+        return None
+    return '；'.join(
+        f'{_day_name(slot["day"])} {slot["start"]}-{slot["end"]}'
+        for slot in slots
+        if _day_name(slot['day'])
+    ) or None
+
+
+def _summarize_excluded_dates(value):
+    dates = _normalize_excluded_dates_entries(value)
+    if not dates:
+        return None
+    if len(dates) <= 3:
+        return '、'.join(dates)
+    return f'{dates[0]}、{dates[1]} 等 {len(dates)} 天'
+
+
+def _summarize_schedule_summary(schedule_data):
+    if not schedule_data:
+        return None
+
+    if isinstance(schedule_data, dict):
+        day_of_week = schedule_data.get('day_of_week')
+        date_text = schedule_data.get('date')
+        time_start = schedule_data.get('time_start')
+        time_end = schedule_data.get('time_end')
+    else:
+        day_of_week = getattr(schedule_data, 'day_of_week', None)
+        schedule_date = getattr(schedule_data, 'date', None)
+        date_text = schedule_date.isoformat() if schedule_date else None
+        time_start = getattr(schedule_data, 'time_start', None)
+        time_end = getattr(schedule_data, 'time_end', None)
+
+    parts = []
+    day_label = _day_name(day_of_week)
+    if day_label:
+        parts.append(day_label)
+    if date_text:
+        parts.append(date_text)
+    if time_start and time_end:
+        parts.append(f'{time_start}-{time_end}')
+    return ' '.join(parts) or None
+
+
+def _summarize_plan(plan):
+    if not isinstance(plan, dict):
+        return None
+
+    weekly_slots = plan.get('weekly_slots') or []
+    session_dates = plan.get('session_dates') or []
+    parts = []
+
+    weekly_summary = _summarize_available_slots([
+        {
+            'day': slot.get('day_of_week'),
+            'start': slot.get('time_start'),
+            'end': slot.get('time_end'),
+        }
+        for slot in weekly_slots
+    ])
+    if weekly_summary:
+        parts.append(f'每周 {weekly_summary}')
+
+    if session_dates:
+        parts.append(f'共 {len(session_dates)} 节')
+        first_summary = _summarize_schedule_summary(session_dates[0])
+        last_summary = _summarize_schedule_summary(session_dates[-1])
+        if first_summary and last_summary:
+            parts.append(first_summary if first_summary == last_summary else f'{first_summary} 至 {last_summary}')
+
+    return ' · '.join(parts) or None
+
+
+def _summarize_makeup_preferences(available_slots, excluded_dates, note=None):
+    parts = []
+    slot_summary = _summarize_available_slots(available_slots)
+    if slot_summary:
+        parts.append(f'本次可补课时间：{slot_summary}')
+    excluded_summary = _summarize_excluded_dates(excluded_dates)
+    if excluded_summary:
+        parts.append(f'禁排日期：{excluded_summary}')
+    note_text = (note or '').strip()
+    if note_text:
+        parts.append(f'补课备注：{note_text}')
+    return ' · '.join(parts) or None
+
+
 def _build_session_dates(weekly_slots, total_sessions, excluded_set):
     """按周轮转生成具体课次，遇到不可上课日期则跳过并顺延到下周。"""
     if not weekly_slots:
@@ -888,7 +1042,7 @@ def _collect_student_schedule_conflicts(enrollment, session_dates, *, ignore_sch
             ):
                 conflicts.append(
                     f'{session["date"]} {session["time_start"]}-{session["time_end"]} '
-                    f'涓庡鐢熺幇鏈夎绋嬪啿绐侊細{existing.course_name} {existing.time_start}-{existing.time_end}'
+                    f'与同一学生现有课程冲突：{existing.course_name} {existing.time_start}-{existing.time_end}'
                 )
 
     return conflicts
@@ -1157,6 +1311,88 @@ def build_feedback_payload(feedback, actor=None):
     return payload
 
 
+def _datetime_to_iso(value):
+    return value.isoformat() if value else None
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_next_action_meta(*, role=None, label=None, status=None, waiting_since=None, is_overdue=False):
+    return {
+        'next_action_role': role,
+        'next_action_label': label,
+        'next_action_status': status,
+        'waiting_since': _datetime_to_iso(waiting_since),
+        'is_overdue': bool(is_overdue),
+    }
+
+
+def get_workflow_next_action_meta(todo, *, payload=None):
+    from modules.oa.models import OATodo
+
+    if not todo:
+        return build_next_action_meta()
+
+    workflow_payload = payload or todo.get_payload_data()
+    role = None
+    label = None
+    status = todo.workflow_status
+    waiting_since = todo.updated_at or todo.created_at
+
+    if todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL:
+        role = 'teacher'
+        if todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK:
+            label = '提交课后反馈'
+            status = 'waiting_teacher_feedback'
+            if todo.schedule:
+                waiting_since = _schedule_start_datetime(todo.schedule)
+        elif todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP:
+            label = '提交补课建议'
+        else:
+            label = '提交排课建议'
+        latest_rejection = workflow_payload.get('latest_rejection') or {}
+        waiting_since = _parse_iso_datetime(latest_rejection.get('created_at')) or waiting_since
+    elif todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW:
+        role = 'admin'
+        label = '微调并发送给学生'
+        proposal = workflow_payload.get('current_proposal') or {}
+        waiting_since = _parse_iso_datetime(proposal.get('submitted_at')) or waiting_since
+    elif todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM:
+        role = 'student'
+        label = '确认补课方案' if todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP else '确认排课方案'
+        waiting_since = _parse_iso_datetime(workflow_payload.get('sent_to_student_at')) or waiting_since
+    elif todo.workflow_status == OATodo.WORKFLOW_STATUS_COMPLETED:
+        role = 'none'
+        label = '已完成'
+        waiting_since = todo.completed_at or waiting_since
+    elif todo.workflow_status == OATodo.WORKFLOW_STATUS_CANCELLED:
+        role = 'none'
+        label = '已取消'
+        waiting_since = todo.completed_at or waiting_since
+
+    is_overdue = bool(
+        todo.is_open_workflow
+        and todo.due_date
+        and todo.due_date < get_business_today()
+    )
+    return build_next_action_meta(
+        role=role,
+        label=label,
+        status=status,
+        waiting_since=waiting_since,
+        is_overdue=is_overdue,
+    )
+
+
 def _filter_workflow_todos_for_actor(workflow_todos, actor=None):
     if not (actor and getattr(actor, 'is_authenticated', False) and actor.role == 'student'):
         return workflow_todos
@@ -1193,6 +1429,41 @@ def build_schedule_payload(schedule, actor=None):
         'can_submit_feedback': bool(actor and user_can_submit_feedback(actor, schedule)),
         'workflow_todos': workflow_todos,
     })
+    active_todo = next(
+        (
+            item for item in workflow_todos
+            if item.get('workflow_status') not in {'completed', 'cancelled'}
+        ),
+        None,
+    )
+    if active_todo:
+        payload.update({
+            'next_action_role': active_todo.get('next_action_role'),
+            'next_action_label': active_todo.get('next_action_label'),
+            'next_action_status': active_todo.get('next_action_status'),
+            'waiting_since': active_todo.get('waiting_since'),
+            'is_overdue': bool(active_todo.get('is_overdue')),
+        })
+    elif user_can_submit_feedback(actor, schedule) or (
+        _schedule_has_started(schedule)
+        and not (feedback and feedback.status == 'submitted')
+        and not (latest_leave and latest_leave.status == 'approved')
+    ):
+        payload.update(build_next_action_meta(
+            role='teacher',
+            label='提交课后反馈',
+            status='waiting_teacher_feedback',
+            waiting_since=_schedule_start_datetime(schedule),
+            is_overdue=bool(schedule.date < get_business_today()),
+        ))
+    else:
+        payload.update(build_next_action_meta(
+            role='none',
+            label='等待课程进行' if _schedule_start_datetime(schedule) > get_business_now() else '已完成当前动作',
+            status='idle',
+            waiting_since=schedule.updated_at or schedule.created_at,
+            is_overdue=False,
+        ))
     return payload
 
 
@@ -1200,6 +1471,20 @@ def build_leave_request_payload(leave_request, actor=None):
     from modules.auth.workflow_services import get_leave_request_workflow
 
     payload = leave_request.to_dict()
+    makeup_workflow = get_leave_request_workflow(leave_request.id, actor)
+    makeup_schedule = build_schedule_payload(leave_request.makeup_schedule, actor) if leave_request.makeup_schedule else None
+    makeup_preference_summary = _summarize_makeup_preferences(
+        payload.get('makeup_available_slots'),
+        payload.get('makeup_excluded_dates'),
+        payload.get('makeup_preference_note'),
+    )
+    makeup_status = (
+        'confirmed'
+        if leave_request.makeup_schedule_id
+        else 'waiting_arrangement'
+        if leave_request.status == 'approved'
+        else None
+    )
     payload.update({
         'can_edit': False,
         'can_confirm': False,
@@ -1211,8 +1496,62 @@ def build_leave_request_payload(leave_request, actor=None):
             and user_can_approve_leave(actor, leave_request)
         ),
         'can_submit_feedback': False,
-        'makeup_workflow': get_leave_request_workflow(leave_request.id, actor),
+        'makeup_workflow': makeup_workflow,
+        'makeup_schedule_id': leave_request.makeup_schedule_id,
+        'makeup_schedule': makeup_schedule,
+        'makeup_status': makeup_status,
+        'original_schedule_summary': _summarize_schedule_summary(leave_request.schedule),
+        'makeup_preference_summary': makeup_preference_summary,
+        'decision_comment': payload.get('decision_comment'),
+        'context_summary': makeup_preference_summary,
+        'latest_rejection_text': None,
+        'proposal_note': None,
+        'current_plan_summary': _summarize_schedule_summary(leave_request.makeup_schedule) if leave_request.makeup_schedule else None,
     })
+    if makeup_workflow:
+        payload.update({
+            'next_action_role': makeup_workflow.get('next_action_role'),
+            'next_action_label': makeup_workflow.get('next_action_label'),
+            'next_action_status': makeup_workflow.get('next_action_status'),
+            'waiting_since': makeup_workflow.get('waiting_since'),
+            'is_overdue': bool(makeup_workflow.get('is_overdue')),
+            'context_summary': makeup_workflow.get('context_summary') or payload.get('context_summary'),
+            'latest_rejection_text': makeup_workflow.get('latest_rejection_text'),
+            'proposal_note': makeup_workflow.get('proposal_note'),
+            'current_plan_summary': makeup_workflow.get('current_plan_summary') or payload.get('current_plan_summary'),
+        })
+    elif leave_request.status == 'pending':
+        payload.update(build_next_action_meta(
+            role='teacher_or_admin',
+            label='审批请假申请',
+            status='waiting_leave_approval',
+            waiting_since=leave_request.created_at,
+            is_overdue=False,
+        ))
+    elif leave_request.status == 'approved' and leave_request.makeup_schedule_id:
+        payload.update(build_next_action_meta(
+            role='none',
+            label='补课已确认',
+            status='confirmed',
+            waiting_since=leave_request.makeup_schedule.updated_at if leave_request.makeup_schedule else leave_request.created_at,
+            is_overdue=False,
+        ))
+    elif leave_request.status == 'approved':
+        payload.update(build_next_action_meta(
+            role='teacher',
+            label='提交补课建议',
+            status='waiting_teacher_proposal',
+            waiting_since=leave_request.created_at,
+            is_overdue=False,
+        ))
+    else:
+        payload.update(build_next_action_meta(
+            role='none',
+            label='请假流程已结束',
+            status=leave_request.status,
+            waiting_since=leave_request.created_at,
+            is_overdue=False,
+        ))
     return payload
 
 
@@ -1251,12 +1590,14 @@ def _get_enrollment_delivery_meta(enrollment):
         'pending_feedback_count': pending_feedback_count,
         'latest_teacher_feedback': latest_feedback.summary if latest_feedback and latest_feedback.summary else None,
         'latest_teacher_feedback_at': latest_feedback.submitted_at.isoformat() if latest_feedback and latest_feedback.submitted_at else None,
+        'latest_teacher_feedback_detail': build_feedback_payload(latest_feedback),
     }
 
 
 def get_enrollment_feedback_meta(enrollment):
-    """返回报名最近一次学生排课反馈及未读状态。"""
+    """返回报名最近一次学生排课反馈及未读状态，优先读取 workflow 结构化 rejection。"""
     from modules.auth.models import ChatMessage
+    from modules.oa.models import OATodo
 
     if not enrollment:
         return {
@@ -1264,6 +1605,32 @@ def get_enrollment_feedback_meta(enrollment):
             'latest_feedback_at': None,
             'has_unread_feedback': False,
         }
+
+    latest_workflow = OATodo.query.filter(
+        OATodo.enrollment_id == enrollment.id,
+        OATodo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+    ).order_by(OATodo.updated_at.desc(), OATodo.created_at.desc()).first()
+    if latest_workflow:
+        workflow_payload = latest_workflow.get_payload_data()
+        latest_rejection = workflow_payload.get('latest_rejection') or {}
+        feedback_text = (latest_rejection.get('message') or latest_rejection.get('reason') or '').strip()
+        if feedback_text:
+            rejections = workflow_payload.get('rejections') or []
+            unread_reference = latest_rejection.get('created_at')
+            has_unread = False
+            if unread_reference:
+                latest_chat = ChatMessage.query.filter(
+                    ChatMessage.enrollment_id == enrollment.id,
+                    ChatMessage.content.startswith(FEEDBACK_PREFIX),
+                    ChatMessage.is_read == False,
+                ).order_by(ChatMessage.created_at.desc()).first()
+                if latest_chat and latest_chat.created_at:
+                    has_unread = latest_chat.created_at.isoformat() <= unread_reference
+            return {
+                'latest_feedback': feedback_text,
+                'latest_feedback_at': latest_rejection.get('created_at'),
+                'has_unread_feedback': has_unread or bool(rejections and latest_workflow.is_open_workflow),
+            }
 
     query = ChatMessage.query.filter(
         ChatMessage.enrollment_id == enrollment.id,
@@ -1327,6 +1694,71 @@ def build_enrollment_payload(enrollment, actor=None):
     )
     payload['workflow_todos'] = workflow_todos
     payload['active_workflow_todo'] = workflow_todos[0] if workflow_todos else None
+    payload['current_plan_summary'] = _summarize_plan(payload.get('confirmed_slot'))
+    payload['proposal_note'] = ((payload.get('confirmed_slot') or {}).get('note') or '').strip() or None
+    payload['latest_rejection_text'] = payload.get('latest_feedback')
+    payload['context_summary'] = payload.get('next_action_label')
+    active_todo = payload['active_workflow_todo']
+    if active_todo:
+        payload.update({
+            'next_action_role': active_todo.get('next_action_role'),
+            'next_action_label': active_todo.get('next_action_label'),
+            'next_action_status': active_todo.get('next_action_status'),
+            'waiting_since': active_todo.get('waiting_since'),
+            'is_overdue': bool(active_todo.get('is_overdue')),
+            'context_summary': active_todo.get('context_summary') or payload.get('context_summary'),
+            'latest_rejection_text': active_todo.get('latest_rejection_text') or payload.get('latest_rejection_text'),
+            'proposal_note': active_todo.get('proposal_note') or payload.get('proposal_note'),
+            'current_plan_summary': active_todo.get('current_plan_summary') or payload.get('current_plan_summary'),
+            'original_schedule_summary': active_todo.get('original_schedule_summary'),
+        })
+    elif enrollment.status == 'pending_info':
+        payload.update(build_next_action_meta(
+            role='student',
+            label='提交报名信息',
+            status='waiting_student_info',
+            waiting_since=enrollment.created_at,
+            is_overdue=False,
+        ))
+    elif enrollment.status == 'pending_schedule':
+        payload.update(build_next_action_meta(
+            role='admin',
+            label='安排初始排课',
+            status='waiting_admin_schedule',
+            waiting_since=enrollment.updated_at or enrollment.created_at,
+            is_overdue=False,
+        ))
+    elif enrollment.status == 'pending_student_confirm':
+        payload.update(build_next_action_meta(
+            role='student',
+            label='确认排课方案',
+            status='waiting_student_confirm',
+            waiting_since=enrollment.updated_at or enrollment.created_at,
+            is_overdue=False,
+        ))
+    elif payload.get('pending_feedback_count'):
+        payload.update(build_next_action_meta(
+            role='teacher',
+            label='提交课后反馈',
+            status='waiting_teacher_feedback',
+            waiting_since=enrollment.updated_at or enrollment.created_at,
+            is_overdue=bool(payload.get('pending_feedback_count')),
+        ))
+    else:
+        label = '交付进行中'
+        if enrollment.status == 'completed':
+            label = '已完成'
+        elif enrollment.status == 'confirmed':
+            label = '等待首次上课'
+        payload.update(build_next_action_meta(
+            role='none',
+            label=label,
+            status=enrollment.status,
+            waiting_since=enrollment.updated_at or enrollment.created_at,
+            is_overdue=False,
+        ))
+    if not payload.get('context_summary'):
+        payload['context_summary'] = payload.get('next_action_label')
     return payload
 
 
@@ -1736,10 +2168,9 @@ def send_leave_status_notification(leave_request):
     status_text = '已批准' if leave_request.status == 'approved' else '已驳回'
     course_name = leave_request.schedule.course_name if leave_request.schedule else ''
     leave_date = leave_request.leave_date.isoformat() if leave_request.leave_date else ''
-    content = (
-        f'[请假审批][{course_name}] 你在 {leave_date} 的请假申请{status_text}。'
-        f'{(" 原因：" + leave_request.reason) if leave_request.reason else ""}'
-    )
+    content = f'[请假审批][{course_name}] 你在 {leave_date} 的请假申请{status_text}。'
+    if leave_request.status == 'rejected' and leave_request.decision_comment:
+        content += f' 处理说明：{leave_request.decision_comment}'
     db.session.add(ChatMessage(
         sender_id=leave_request.approved_by,
         receiver_id=profile.user_id,

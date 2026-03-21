@@ -56,7 +56,7 @@ def _payload_rejections(payload):
 
 def _append_rejection(payload, user, message_text):
     rejections = _payload_rejections(payload)
-    message = (message_text or '').strip() or '?????????????'
+    message = (message_text or '').strip() or '学生对当前方案有疑问，请重新调整。'
     rejections.append({
         'message': message,
         'reason': message,
@@ -100,6 +100,25 @@ def _student_responsible_people(enrollment):
     return OATodo.normalize_responsible_people(names)
 
 
+def _student_preference_context(enrollment):
+    profile = getattr(enrollment, 'student_profile', None)
+    if not profile:
+        return {}
+
+    profile_payload = profile.to_dict()
+    available_slots = profile_payload.get('available_slots') or []
+    excluded_dates = profile_payload.get('excluded_dates') or []
+    intake_note = (profile_payload.get('notes') or '').strip() or None
+
+    return {
+        'student_available_slots': available_slots,
+        'student_available_slots_summary': auth_services._summarize_available_slots(available_slots),
+        'student_excluded_dates': excluded_dates,
+        'student_excluded_dates_summary': auth_services._summarize_excluded_dates(excluded_dates),
+        'student_intake_note': intake_note,
+    }
+
+
 def _workflow_base_payload(todo, payload=None):
     data = todo.get_payload_data()
     if payload:
@@ -139,14 +158,16 @@ def _schedule_summary(schedule):
 def _leave_request_summary(leave_request):
     if not leave_request:
         return None
-    return {
-        'id': leave_request.id,
-        'status': leave_request.status,
-        'leave_date': leave_request.leave_date.isoformat() if leave_request.leave_date else None,
-        'reason': leave_request.reason,
-        'schedule_id': leave_request.schedule_id,
-        'student_name': leave_request.student_name,
-    }
+    payload = leave_request.to_dict()
+    payload.update({
+        'original_schedule_summary': auth_services._summarize_schedule_summary(leave_request.schedule),
+        'makeup_preference_summary': auth_services._summarize_makeup_preferences(
+            payload.get('makeup_available_slots'),
+            payload.get('makeup_excluded_dates'),
+            payload.get('makeup_preference_note'),
+        ),
+    })
+    return payload
 
 
 def _process_workflow_query():
@@ -248,15 +269,112 @@ def _workflow_status_label(todo_type, workflow_status):
     }.get(workflow_status, workflow_status or '')
 
 
+def _latest_rejection_text(workflow_payload):
+    latest_rejection = workflow_payload.get('latest_rejection') or {}
+    return (latest_rejection.get('message') or latest_rejection.get('reason') or '').strip() or None
+
+
+def _proposal_note(workflow_payload):
+    current_proposal = workflow_payload.get('current_proposal') or {}
+    return (
+        (workflow_payload.get('proposal_note') or '').strip()
+        or (current_proposal.get('note') or '').strip()
+        or None
+    )
+
+
+def _proposal_warnings(workflow_payload):
+    current_proposal = workflow_payload.get('current_proposal') or {}
+    warnings = workflow_payload.get('proposal_warnings')
+    if warnings is None:
+        warnings = current_proposal.get('warnings')
+    if not isinstance(warnings, list):
+        return []
+    return [str(item).strip() for item in warnings if str(item).strip()]
+
+
+def _proposal_warning_summary(workflow_payload):
+    warnings = _proposal_warnings(workflow_payload)
+    if not warnings:
+        return None
+    return '；'.join(warnings)
+
+
+def _context_summary(todo_type, workflow_payload):
+    context = workflow_payload.get('context') or {}
+    parts = []
+
+    if todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP:
+        original_schedule_summary = auth_services._summarize_schedule_summary(context.get('original_schedule'))
+        if original_schedule_summary:
+            parts.append(f'原请假课次：{original_schedule_summary}')
+        makeup_preference_summary = (
+            context.get('makeup_preference_summary')
+            or auth_services._summarize_makeup_preferences(
+                context.get('makeup_available_slots'),
+                context.get('makeup_excluded_dates'),
+                context.get('makeup_preference_note'),
+            )
+        )
+        if makeup_preference_summary:
+            parts.append(makeup_preference_summary)
+    elif todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN:
+        previous_plan_summary = auth_services._summarize_plan(workflow_payload.get('previous_confirmed_slot'))
+        if previous_plan_summary:
+            parts.append(f'上次方案：{previous_plan_summary}')
+        student_available_slots_summary = (
+            context.get('student_available_slots_summary')
+            or auth_services._summarize_available_slots(context.get('student_available_slots'))
+        )
+        if student_available_slots_summary:
+            parts.append(f'学生长期可上课：{student_available_slots_summary}')
+        student_excluded_dates_summary = (
+            context.get('student_excluded_dates_summary')
+            or auth_services._summarize_excluded_dates(context.get('student_excluded_dates'))
+        )
+        if student_excluded_dates_summary:
+            parts.append(f'学生禁排日期：{student_excluded_dates_summary}')
+    elif todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK:
+        schedule_summary = auth_services._summarize_schedule_summary(context.get('schedule'))
+        if schedule_summary:
+            parts.append(f'课次：{schedule_summary}')
+
+    return ' · '.join(parts) or None
+
+
 def build_workflow_todo_payload(todo, actor=None):
     if not todo:
         return None
 
     payload = todo.to_dict()
-    workflow_payload = todo.get_payload_data()
+    workflow_payload = _copy_jsonable(todo.get_payload_data()) or {}
     enrollment = todo.enrollment
     schedule = todo.schedule
     leave_request = todo.leave_request
+    latest_rejection_text = _latest_rejection_text(workflow_payload)
+    proposal_note = _proposal_note(workflow_payload)
+    proposal_warnings = _proposal_warnings(workflow_payload)
+    proposal_warning_summary = _proposal_warning_summary(workflow_payload)
+    current_plan_summary = (
+        auth_services._summarize_plan(workflow_payload.get('current_proposal'))
+        or auth_services._summarize_plan(workflow_payload.get('previous_confirmed_slot'))
+    )
+    previous_plan_summary = auth_services._summarize_plan(workflow_payload.get('previous_confirmed_slot'))
+    original_schedule_summary = auth_services._summarize_schedule_summary(
+        (workflow_payload.get('context') or {}).get('original_schedule')
+    )
+    context_summary = _context_summary(todo.todo_type, workflow_payload)
+
+    workflow_payload.update({
+        'context_summary': context_summary,
+        'latest_rejection_text': latest_rejection_text,
+        'proposal_note': proposal_note,
+        'proposal_warnings': proposal_warnings,
+        'proposal_warning_summary': proposal_warning_summary,
+        'current_plan_summary': current_plan_summary,
+        'previous_plan_summary': previous_plan_summary,
+        'original_schedule_summary': original_schedule_summary,
+    })
 
     payload.update({
         'payload': workflow_payload,
@@ -264,10 +382,29 @@ def build_workflow_todo_payload(todo, actor=None):
         'schedule': _schedule_summary(schedule),
         'leave_request': _leave_request_summary(leave_request),
         'latest_rejection': workflow_payload.get('latest_rejection'),
+        'latest_rejection_text': latest_rejection_text,
         'revision': int(workflow_payload.get('revision') or 0),
         'current_proposal': workflow_payload.get('current_proposal'),
+        'proposal_note': proposal_note,
+        'proposal_warnings': proposal_warnings,
+        'proposal_warning_summary': proposal_warning_summary,
+        'current_plan_summary': current_plan_summary,
+        'previous_plan_summary': previous_plan_summary,
+        'original_schedule_summary': original_schedule_summary,
+        'context_summary': context_summary,
         'previous_confirmed_slot': workflow_payload.get('previous_confirmed_slot'),
         'context': workflow_payload.get('context') or {},
+        'student_name': enrollment.student_name if enrollment else workflow_payload.get('context', {}).get('student_name'),
+        'course_name': (
+            enrollment.course_name
+            if enrollment
+            else (schedule.course_name if schedule else workflow_payload.get('context', {}).get('course_name'))
+        ),
+        'teacher_name': (
+            enrollment.teacher.display_name
+            if enrollment and enrollment.teacher
+            else (schedule.teacher if schedule else workflow_payload.get('context', {}).get('teacher_name'))
+        ),
         'todo_type_label': _todo_type_label(todo.todo_type),
         'workflow_status_label': _workflow_status_label(todo.todo_type, todo.workflow_status),
         'can_teacher_propose': False,
@@ -276,6 +413,7 @@ def build_workflow_todo_payload(todo, actor=None):
         'can_student_reject': False,
         'can_submit_feedback': False,
     })
+    payload.update(auth_services.get_workflow_next_action_meta(todo, payload=workflow_payload))
 
     if actor and getattr(actor, 'is_authenticated', False) and user_can_access_workflow_todo(actor, todo):
         if actor.role == 'teacher':
@@ -403,6 +541,7 @@ def ensure_enrollment_replan_workflow(enrollment, *, rejection_text='', actor_us
             'student_name': enrollment.student_name,
             'course_name': enrollment.course_name,
             'teacher_name': enrollment.teacher.display_name if enrollment.teacher else '',
+            **_student_preference_context(enrollment),
         },
         'previous_confirmed_slot': _copy_jsonable(_load_enrollment_confirmed_slot(enrollment)),
     })
@@ -449,9 +588,17 @@ def ensure_leave_makeup_workflow(leave_request, *, actor_user=None):
             'teacher_name': leave_request.schedule.teacher if leave_request.schedule else '',
             'leave_date': leave_request.leave_date.isoformat() if leave_request.leave_date else None,
             'original_schedule': _schedule_summary(leave_request.schedule),
+            'makeup_available_slots': leave_request.to_dict().get('makeup_available_slots'),
+            'makeup_excluded_dates': leave_request.to_dict().get('makeup_excluded_dates'),
+            'makeup_preference_note': leave_request.makeup_preference_note,
+            'makeup_preference_summary': auth_services._summarize_makeup_preferences(
+                leave_request.to_dict().get('makeup_available_slots'),
+                leave_request.to_dict().get('makeup_excluded_dates'),
+                leave_request.makeup_preference_note,
+            ),
         },
-        'current_proposal': None,
     })
+    payload.setdefault('current_proposal', None)
     todo.description = '请假已批准，等待老师提交补课提案。'
     todo.notes = leave_request.reason
     todo.responsible_person = _teacher_admin_responsible_people(enrollment) if enrollment else '教务'
@@ -506,8 +653,21 @@ def _collect_makeup_plan_issues(leave_request, session_dates):
             )
 
     teacher_ranges = auth_services._load_teacher_available_ranges(enrollment.teacher_id)
-    student_ranges = auth_services._load_student_available_ranges(enrollment.student_profile)
-    excluded_dates = auth_services._load_student_excluded_dates(enrollment.student_profile)
+    preferred_slot_entries = auth_services._normalize_available_slot_entries(leave_request.makeup_available_slots_json)
+    student_ranges = [
+        {
+            'day_of_week': slot['day'],
+            'time_start': slot['start'],
+            'time_end': slot['end'],
+        }
+        for slot in preferred_slot_entries
+    ]
+    if not student_ranges:
+        student_ranges = auth_services._load_student_available_ranges(enrollment.student_profile)
+
+    excluded_dates = set(auth_services._normalize_excluded_dates_entries(leave_request.makeup_excluded_dates_json))
+    if not excluded_dates:
+        excluded_dates = auth_services._load_student_excluded_dates(enrollment.student_profile)
 
     if teacher_ranges and not auth_services._session_within_ranges(session, teacher_ranges):
         warnings.append(
@@ -515,10 +675,14 @@ def _collect_makeup_plan_issues(leave_request, session_dates):
         )
     if student_ranges and not auth_services._session_within_ranges(session, student_ranges):
         warnings.append(
-            f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出学生填写的可上课时间'
+            f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出'
+            f'{"本次补课偏好时间" if preferred_slot_entries else "学生填写的可上课时间"}'
         )
     if session['date'] in excluded_dates:
-        warnings.append(f'{session["date"]} 命中学生标记的不可上课日期')
+        warnings.append(
+            f'{session["date"]} 命中'
+            f'{"本次补课禁排日期" if leave_request.makeup_excluded_dates_json else "学生标记的不可上课日期"}'
+        )
     if leave_request.leave_date and session['date'] == leave_request.leave_date.isoformat():
         warnings.append('补课日期与请假日期相同，请确认是否为真实补课安排')
 
@@ -898,10 +1062,13 @@ def student_confirm_workflow_todo(todo, actor):
                 'status_code': 400,
                 'error': error,
             }
+        if todo.leave_request:
+            todo.leave_request.makeup_schedule_id = schedule.id
         if todo.enrollment:
             auth_services.sync_enrollment_status(todo.enrollment)
         payload = _workflow_base_payload(todo)
         payload['replacement_schedule'] = _schedule_summary(schedule)
+        payload['makeup_schedule_id'] = schedule.id
         todo.set_payload_data(payload)
         _set_todo_state(todo, OATodo.WORKFLOW_STATUS_COMPLETED)
         db.session.commit()
