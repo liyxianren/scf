@@ -79,6 +79,7 @@ def _migrate_add_columns():
     migrations = [
         "ALTER TABLE course_schedules ADD COLUMN teacher_id INTEGER REFERENCES users(id)",
         "ALTER TABLE course_schedules ADD COLUMN enrollment_id INTEGER REFERENCES enrollments(id)",
+        "ALTER TABLE course_schedules ADD COLUMN student_profile_id_snapshot INTEGER REFERENCES student_profiles(id)",
         "ALTER TABLE course_schedules ADD COLUMN delivery_mode TEXT DEFAULT 'unknown'",
         "ALTER TABLE course_schedules ADD COLUMN import_run_id INTEGER REFERENCES schedule_import_runs(id)",
         "ALTER TABLE student_profiles ADD COLUMN excluded_dates TEXT",

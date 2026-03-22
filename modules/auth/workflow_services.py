@@ -5,7 +5,7 @@ from sqlalchemy import or_
 
 from extensions import db
 from modules.auth import services as auth_services
-from modules.auth.models import ChatMessage, Enrollment
+from modules.auth.models import ChatMessage, Enrollment, LeaveRequest
 from modules.oa.models import CourseSchedule, OATodo
 
 MAKEUP_FEEDBACK_PREFIX = '[补课反馈]'
@@ -100,6 +100,38 @@ def _student_responsible_people(enrollment):
     return OATodo.normalize_responsible_people(names)
 
 
+def _workflow_target_teacher_id(todo):
+    if todo.enrollment and todo.enrollment.teacher_id:
+        return todo.enrollment.teacher_id
+    if todo.schedule and todo.schedule.teacher_id:
+        return todo.schedule.teacher_id
+    if todo.leave_request and todo.leave_request.schedule and todo.leave_request.schedule.teacher_id:
+        return todo.leave_request.schedule.teacher_id
+    payload = todo.get_payload_data() or {}
+    context = payload.get('context') or {}
+    return context.get('teacher_id')
+
+
+def _workflow_target_teacher_name(todo):
+    if todo.enrollment and todo.enrollment.teacher:
+        return todo.enrollment.teacher.display_name
+    if todo.schedule and todo.schedule.teacher:
+        return todo.schedule.teacher
+    if todo.leave_request and todo.leave_request.schedule and todo.leave_request.schedule.teacher:
+        return todo.leave_request.schedule.teacher
+    payload = todo.get_payload_data() or {}
+    context = payload.get('context') or {}
+    return context.get('teacher_name')
+
+
+def _actor_can_submit_teacher_workflow(actor, todo):
+    return auth_services._schedule_matches_teacher_actor(
+        actor,
+        teacher_id=_workflow_target_teacher_id(todo),
+        teacher_name=_workflow_target_teacher_name(todo),
+    )
+
+
 def _student_preference_context(enrollment):
     profile = getattr(enrollment, 'student_profile', None)
     if not profile:
@@ -191,7 +223,13 @@ def user_can_access_workflow_todo(user, todo):
     if user.role == 'teacher':
         if enrollment and enrollment.teacher_id == user.id:
             return True
-        return bool(todo.schedule and todo.schedule.teacher_id == user.id)
+        if todo.schedule and auth_services._schedule_matches_teacher_actor(user, todo.schedule):
+            return True
+        return bool(
+            todo.leave_request
+            and todo.leave_request.schedule
+            and auth_services._schedule_matches_teacher_actor(user, todo.leave_request.schedule)
+        )
 
     if user.role == 'student':
         if todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK:
@@ -218,10 +256,12 @@ def list_workflow_todos_for_user(user, *, status='open', todo_type=None, enrollm
         return []
 
     if user.role == 'teacher':
+        teacher_schedule_filter = auth_services._teacher_schedule_identity_filter(CourseSchedule, user)
         query = query.filter(
             or_(
                 OATodo.enrollment.has(Enrollment.teacher_id == user.id),
-                OATodo.schedule.has(CourseSchedule.teacher_id == user.id),
+                OATodo.schedule.has(teacher_schedule_filter),
+                OATodo.leave_request.has(LeaveRequest.schedule.has(teacher_schedule_filter)),
             )
         )
     elif user.role == 'student':
@@ -355,6 +395,11 @@ def build_workflow_todo_payload(todo, actor=None):
     proposal_note = _proposal_note(workflow_payload)
     proposal_warnings = _proposal_warnings(workflow_payload)
     proposal_warning_summary = _proposal_warning_summary(workflow_payload)
+    current_plan_session_dates = (
+        ((workflow_payload.get('current_proposal') or {}).get('session_dates'))
+        or ((workflow_payload.get('previous_confirmed_slot') or {}).get('session_dates'))
+        or []
+    )
     current_plan_summary = (
         auth_services._summarize_plan(workflow_payload.get('current_proposal'))
         or auth_services._summarize_plan(workflow_payload.get('previous_confirmed_slot'))
@@ -371,6 +416,8 @@ def build_workflow_todo_payload(todo, actor=None):
         'proposal_note': proposal_note,
         'proposal_warnings': proposal_warnings,
         'proposal_warning_summary': proposal_warning_summary,
+        'current_plan_session_dates': current_plan_session_dates,
+        'session_preview_lines': auth_services._session_preview_lines(current_plan_session_dates),
         'current_plan_summary': current_plan_summary,
         'previous_plan_summary': previous_plan_summary,
         'original_schedule_summary': original_schedule_summary,
@@ -388,6 +435,8 @@ def build_workflow_todo_payload(todo, actor=None):
         'proposal_note': proposal_note,
         'proposal_warnings': proposal_warnings,
         'proposal_warning_summary': proposal_warning_summary,
+        'current_plan_session_dates': current_plan_session_dates,
+        'session_preview_lines': auth_services._session_preview_lines(current_plan_session_dates),
         'current_plan_summary': current_plan_summary,
         'previous_plan_summary': previous_plan_summary,
         'original_schedule_summary': original_schedule_summary,
@@ -405,6 +454,11 @@ def build_workflow_todo_payload(todo, actor=None):
             if enrollment and enrollment.teacher
             else (schedule.teacher if schedule else workflow_payload.get('context', {}).get('teacher_name'))
         ),
+        'teacher_id': (
+            enrollment.teacher_id
+            if enrollment and enrollment.teacher_id
+            else (schedule.teacher_id if schedule else workflow_payload.get('context', {}).get('teacher_id'))
+        ),
         'todo_type_label': _todo_type_label(todo.todo_type),
         'workflow_status_label': _workflow_status_label(todo.todo_type, todo.workflow_status),
         'can_teacher_propose': False,
@@ -416,16 +470,21 @@ def build_workflow_todo_payload(todo, actor=None):
     payload.update(auth_services.get_workflow_next_action_meta(todo, payload=workflow_payload))
 
     if actor and getattr(actor, 'is_authenticated', False) and user_can_access_workflow_todo(actor, todo):
-        if actor.role == 'teacher':
-            payload['can_teacher_propose'] = todo.todo_type in {
+        payload['can_teacher_propose'] = (
+            _actor_can_submit_teacher_workflow(actor, todo)
+            and todo.todo_type in {
                 OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
                 OATodo.TODO_TYPE_LEAVE_MAKEUP,
-            } and todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
-            payload['can_submit_feedback'] = (
-                todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
-                and schedule is not None
-                and auth_services.user_can_submit_feedback(actor, schedule)
-            )
+            }
+            and todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+        )
+        payload['can_submit_feedback'] = (
+            todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
+            and schedule is not None
+            and auth_services.user_can_submit_feedback(actor, schedule)
+        )
+        if actor.role == 'teacher':
+            pass
         elif actor.role == 'admin':
             payload['can_admin_send'] = todo.todo_type in {
                 OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
@@ -438,6 +497,22 @@ def build_workflow_todo_payload(todo, actor=None):
             payload['can_student_confirm'] = todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM
             payload['can_student_reject'] = todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM
 
+    payload['current_stage_label'] = {
+        OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL: '待老师提案',
+        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW: '待教务发送给学生',
+        OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM: '待学生确认',
+        OATodo.WORKFLOW_STATUS_COMPLETED: '已完成',
+        OATodo.WORKFLOW_STATUS_CANCELLED: '已取消',
+    }.get(todo.workflow_status, payload.get('next_action_label'))
+    payload['next_step_hint'] = {
+        OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL: '老师提交建议后，教务会继续微调并发送给学生。',
+        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW: '教务确认后会把方案发给学生。',
+        OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM: (
+            '学生确认后补课时间会正式生效。'
+            if todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP
+            else '学生确认后系统会生成正式课表。'
+        ),
+    }.get(todo.workflow_status)
     return payload
 
 
@@ -488,6 +563,23 @@ def has_open_process_workflow(*, schedule_id=None, enrollment_id=None, exclude_t
     if not clauses:
         return False
     return query.filter(or_(*clauses)).count() > 0
+
+
+def has_open_enrollment_replan_workflow(enrollment_id, *, exclude_todo_id=None):
+    if not enrollment_id:
+        return False
+    query = OATodo.query.filter(
+        OATodo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        OATodo.enrollment_id == enrollment_id,
+        OATodo.is_completed == False,
+        ~OATodo.workflow_status.in_([
+            OATodo.WORKFLOW_STATUS_COMPLETED,
+            OATodo.WORKFLOW_STATUS_CANCELLED,
+        ]),
+    )
+    if exclude_todo_id:
+        query = query.filter(OATodo.id != exclude_todo_id)
+    return query.count() > 0
 
 
 def has_open_workflow(*, schedule_id=None, enrollment_id=None, exclude_todo_id=None):
@@ -556,6 +648,65 @@ def ensure_enrollment_replan_workflow(enrollment, *, rejection_text='', actor_us
     _set_todo_state(todo, OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL)
     todo.set_payload_data(payload)
     return todo
+
+
+def refresh_enrollment_replan_workflows(
+    enrollment,
+    *,
+    reset_to_teacher_proposal=False,
+    reason='',
+    previous_confirmed_slot=None,
+):
+    if not enrollment:
+        return []
+
+    todos = OATodo.query.filter(
+        OATodo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        OATodo.enrollment_id == enrollment.id,
+        OATodo.is_completed == False,
+    ).all()
+    if not todos:
+        return []
+
+    refresh_reason = (reason or '').strip() or '学生信息已更新，请基于最新可上课时间重新提案。'
+    refreshed = []
+    for todo in todos:
+        payload = _workflow_base_payload(todo)
+        payload['context'] = {
+            'student_name': enrollment.student_name,
+            'course_name': enrollment.course_name,
+            'teacher_name': enrollment.teacher.display_name if enrollment.teacher else '',
+            **_student_preference_context(enrollment),
+        }
+        if previous_confirmed_slot is not None:
+            payload['previous_confirmed_slot'] = _copy_jsonable(previous_confirmed_slot)
+        elif payload.get('previous_confirmed_slot') is None:
+            payload['previous_confirmed_slot'] = _copy_jsonable(_load_enrollment_confirmed_slot(enrollment))
+
+        if reset_to_teacher_proposal:
+            should_record_reset = (
+                todo.workflow_status != OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+                or bool(payload.get('current_proposal'))
+            )
+            if should_record_reset:
+                _append_system_rejection(payload, refresh_reason)
+                payload['revision'] = int(payload.get('revision') or 0) + 1
+            payload['current_proposal'] = None
+            payload['proposal_note'] = None
+            payload['proposal_warnings'] = []
+            payload.pop('sent_to_student_at', None)
+            payload.pop('sent_to_student_by', None)
+            payload.pop('sent_to_student_by_name', None)
+            todo.description = refresh_reason
+            todo.notes = refresh_reason
+            todo.responsible_person = _teacher_admin_responsible_people(enrollment)
+            _set_todo_state(todo, OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL)
+        else:
+            todo.responsible_person = _teacher_admin_responsible_people(enrollment)
+
+        todo.set_payload_data(payload)
+        refreshed.append(todo)
+    return refreshed
 
 
 def ensure_leave_makeup_workflow(leave_request, *, actor_user=None):
@@ -697,14 +848,14 @@ def _collect_student_profile_conflicts(enrollment, session_dates):
     if not session_dates_set:
         return []
 
-    query = db.session.query(CourseSchedule).join(
-        Enrollment,
-        CourseSchedule.enrollment_id == Enrollment.id,
-    ).filter(
-        Enrollment.student_profile_id == enrollment.student_profile_id,
-        Enrollment.id != enrollment.id,
+    query = db.session.query(CourseSchedule).filter(
+        auth_services.student_schedule_profile_clause(enrollment.student_profile_id, schedule_model=CourseSchedule),
         CourseSchedule.date.in_(session_dates_set),
     )
+    if enrollment.id:
+        query = query.filter(
+            or_(CourseSchedule.enrollment_id.is_(None), CourseSchedule.enrollment_id != enrollment.id)
+        )
 
     existing_by_date = {}
     for schedule in query.all():
@@ -785,8 +936,45 @@ def _proposal_validation(todo, session_dates):
     return plan, [], warnings
 
 
+def preview_teacher_workflow_proposal(todo, actor, session_dates):
+    if not user_can_access_workflow_todo(actor, todo) or not _actor_can_submit_teacher_workflow(actor, todo):
+        return {
+            'success': False,
+            'status_code': 403,
+            'error': '无权预检该工作流提案',
+        }
+    if todo.workflow_status != OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前工作流不在待老师提案状态',
+        }
+
+    normalized_dates, parse_errors, _ = _normalize_proposal_session_dates(session_dates)
+    plan = None
+    errors = list(parse_errors)
+    warnings = []
+    if not errors:
+        plan, errors, warnings = _proposal_validation(todo, session_dates)
+
+    current_plan_summary = auth_services._summarize_plan(plan) if plan else None
+    return {
+        'success': True,
+        'status_code': 200,
+        'data': {
+            'errors': errors,
+            'warnings': warnings,
+            'current_plan_summary': current_plan_summary,
+            'current_plan_session_dates': (plan or {}).get('session_dates') or normalized_dates,
+            'session_preview_lines': auth_services._session_preview_lines(
+                (plan or {}).get('session_dates') or normalized_dates
+            ),
+        },
+    }
+
+
 def submit_teacher_workflow_proposal(todo, actor, session_dates, note=''):
-    if not user_can_access_workflow_todo(actor, todo) or actor.role != 'teacher':
+    if not user_can_access_workflow_todo(actor, todo) or not _actor_can_submit_teacher_workflow(actor, todo):
         return {
             'success': False,
             'status_code': 403,
@@ -870,8 +1058,29 @@ def admin_send_workflow_to_student(todo, actor, *, session_dates=None, note='', 
             'status_code': 400,
             'error': '当前工作流不支持发送给学生确认',
         }
+    if todo.workflow_status not in {
+        OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW,
+    }:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前工作流不在可发送给学生确认的状态',
+        }
 
     payload = _workflow_base_payload(todo)
+    if (
+        todo.todo_type == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        and todo.enrollment
+        and todo.enrollment.status == 'pending_student_confirm'
+        and todo.enrollment.confirmed_slot
+        and not payload.get('sent_to_student_at')
+    ):
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前报名已通过其他入口发送给学生确认，请刷新状态后再处理',
+        }
     source_proposal = session_dates
     if source_proposal is None:
         source_proposal = (payload.get('current_proposal') or {}).get('session_dates') or []
@@ -972,6 +1181,7 @@ def _create_makeup_schedule(todo, plan=None):
         color_tag='teal',
         delivery_mode=delivery_mode_from_color_tag('teal'),
     )
+    auth_services.sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
     db.session.add(schedule)
     db.session.flush()
     ensure_schedule_feedback_todo(schedule, created_by=todo.created_by or enrollment.teacher_id)
@@ -1141,7 +1351,10 @@ def student_reject_workflow_todo(todo, actor, message_text=''):
 
 
 def ensure_schedule_feedback_todo(schedule, *, created_by=None):
-    if not schedule or not schedule.teacher_id:
+    if not schedule:
+        return None
+    auth_services._hydrate_schedule_teacher_id(schedule)
+    if not schedule.teacher_id:
         return None
     latest_leave = auth_services._latest_leave_request(schedule)
     if latest_leave and latest_leave.status == 'approved':

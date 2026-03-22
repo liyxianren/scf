@@ -4,7 +4,11 @@ from sqlalchemy import or_, and_, func
 from extensions import db
 from modules.auth import auth_bp
 from modules.auth.models import User, ChatMessage
-from modules.auth.services import serialize_business_datetime, user_can_chat_with
+from modules.auth.services import (
+    serialize_business_datetime,
+    user_can_access_chat_history,
+    user_can_chat_with,
+)
 
 
 def _build_chat_message_payload(message):
@@ -17,6 +21,14 @@ def _build_chat_message_payload(message):
         'content': message.content,
         'is_read': message.is_read,
         'created_at': serialize_business_datetime(message.created_at),
+    }
+
+
+def _build_chat_contact_payload(user):
+    return {
+        'id': user.id,
+        'display_name': user.display_name,
+        'role': user.role,
     }
 
 
@@ -47,7 +59,7 @@ def api_chat_conversations():
     conversations = []
     for (pid,) in partner_ids:
         partner = db.session.get(User, pid)
-        if not partner or not user_can_chat_with(current_user, partner):
+        if not partner or not user_can_access_chat_history(current_user, partner):
             continue
         # 最新一条消息
         last_msg = ChatMessage.query.filter(
@@ -73,6 +85,20 @@ def api_chat_conversations():
     return jsonify({'success': True, 'data': conversations})
 
 
+@auth_bp.route('/api/chat/contacts')
+@login_required
+def api_chat_contacts():
+    contacts = [
+        _build_chat_contact_payload(user)
+        for user in User.query.filter(
+            User.is_active == True,
+            User.id != current_user.id,
+        ).order_by(User.role.asc(), User.display_name.asc()).all()
+        if user_can_chat_with(current_user, user)
+    ]
+    return jsonify({'success': True, 'data': contacts})
+
+
 @auth_bp.route('/api/chat/messages')
 @login_required
 def api_chat_messages():
@@ -83,7 +109,7 @@ def api_chat_messages():
     partner = db.session.get(User, partner_id)
     if not partner:
         return jsonify({'success': False, 'error': '联系人不存在'}), 404
-    if not user_can_chat_with(current_user, partner):
+    if not user_can_access_chat_history(current_user, partner):
         return jsonify({'success': False, 'error': '无权查看该会话'}), 403
 
     uid = current_user.id
@@ -145,6 +171,6 @@ def api_chat_unread_count():
     count = 0
     for message in unread_messages:
         sender = db.session.get(User, message.sender_id)
-        if sender and user_can_chat_with(current_user, sender):
+        if sender and user_can_access_chat_history(current_user, sender):
             count += 1
     return jsonify({'success': True, 'count': count})

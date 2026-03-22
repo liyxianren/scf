@@ -16,6 +16,7 @@ class CourseSchedule(db.Model):
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     course_name = db.Column(db.String(200), nullable=False)
     enrollment_id = db.Column(db.Integer, db.ForeignKey('enrollments.id'), nullable=True)
+    student_profile_id_snapshot = db.Column(db.Integer, db.ForeignKey('student_profiles.id'), nullable=True)
     students = db.Column(db.Text)
     location = db.Column(db.String(200))
     notes = db.Column(db.Text)
@@ -53,6 +54,7 @@ class CourseSchedule(db.Model):
             'teacher_id': self.teacher_id,
             'course_name': self.course_name,
             'enrollment_id': self.enrollment_id,
+            'student_profile_id_snapshot': self.student_profile_id_snapshot,
             'students': self.students,
             'location': self.location,
             'notes': self.notes,

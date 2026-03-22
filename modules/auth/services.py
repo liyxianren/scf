@@ -9,7 +9,7 @@ from itertools import product
 from math import ceil
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 
 from extensions import db
 
@@ -18,6 +18,7 @@ FEEDBACK_PREFIX = "[排课反馈]"
 SCHEDULE_PREFIX = "[排课方案]"
 BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 UTC = timezone.utc
+LEGACY_ENROLLMENT_NOTE_PATTERN = re.compile(r'(?<!\d)报名#\s*(\d+)(?!\d)')
 
 
 def get_business_now():
@@ -87,6 +88,125 @@ def _resolve_teacher_user(teacher_id=None, teacher_name=None):
         return teacher, None
 
     return None, '缺少 teacher_id 或 teacher_name'
+
+
+def _teacher_identity_names(user):
+    if not user:
+        return []
+    values = []
+    for raw in [getattr(user, 'display_name', None), getattr(user, 'username', None)]:
+        text = str(raw or '').strip()
+        if text:
+            values.append(text)
+    return list(dict.fromkeys(values))
+
+
+def _teacher_schedule_identity_filter(schedule_model, user):
+    if not user or not getattr(user, 'id', None):
+        return schedule_model.id == None
+    clauses = [schedule_model.teacher_id == user.id]
+    names = _teacher_identity_names(user)
+    if names:
+        clauses.append(and_(schedule_model.teacher_id.is_(None), schedule_model.teacher.in_(names)))
+    return or_(*clauses)
+
+
+def _schedule_matches_teacher_actor(actor, schedule=None, *, teacher_id=None, teacher_name=None):
+    if not (
+        actor
+        and getattr(actor, 'is_authenticated', False)
+        and getattr(actor, 'role', None) in {'teacher', 'admin'}
+    ):
+        return False
+    target_teacher_id = teacher_id if teacher_id is not None else getattr(schedule, 'teacher_id', None)
+    if target_teacher_id is not None:
+        return actor.id == target_teacher_id
+    target_teacher_name = str(
+        teacher_name if teacher_name is not None else getattr(schedule, 'teacher', None) or ''
+    ).strip()
+    return bool(target_teacher_name and target_teacher_name in _teacher_identity_names(actor))
+
+
+def _hydrate_schedule_teacher_id(schedule):
+    if not schedule or getattr(schedule, 'teacher_id', None):
+        return getattr(schedule, 'teacher_id', None)
+    teacher_name = str(getattr(schedule, 'teacher', None) or '').strip()
+    if not teacher_name:
+        return None
+    teacher, error = _resolve_teacher_user(teacher_name=teacher_name)
+    if teacher and not error:
+        schedule.teacher_id = teacher.id
+        return teacher.id
+    return None
+
+
+def student_schedule_profile_clause(profile_ids, *, schedule_model=None):
+    from modules.auth.models import Enrollment
+    from modules.oa.models import CourseSchedule
+
+    schedule_model = schedule_model or CourseSchedule
+    if isinstance(profile_ids, (list, tuple, set)):
+        normalized_profile_ids = [item for item in profile_ids if item]
+    elif profile_ids:
+        normalized_profile_ids = [profile_ids]
+    else:
+        normalized_profile_ids = []
+
+    if not normalized_profile_ids:
+        return schedule_model.id.is_(None)
+
+    return or_(
+        schedule_model.student_profile_id_snapshot.in_(normalized_profile_ids),
+        and_(
+            schedule_model.student_profile_id_snapshot.is_(None),
+            schedule_model.enrollment.has(Enrollment.student_profile_id.in_(normalized_profile_ids)),
+        ),
+    )
+
+
+def _resolve_schedule_student_profile_id(schedule, *, enrollment=None):
+    from modules.auth.models import Enrollment
+
+    linked_enrollment = enrollment
+    if linked_enrollment is None and schedule and getattr(schedule, 'enrollment_id', None):
+        linked_enrollment = getattr(schedule, 'enrollment', None) or db.session.get(Enrollment, schedule.enrollment_id)
+
+    if linked_enrollment and linked_enrollment.student_profile_id:
+        return linked_enrollment.student_profile_id
+
+    latest_leave = _latest_leave_request(schedule)
+    if latest_leave and latest_leave.enrollment and latest_leave.enrollment.student_profile_id:
+        return latest_leave.enrollment.student_profile_id
+
+    return None
+
+
+def sync_schedule_student_snapshot(schedule, *, enrollment=None, preserve_history=None, force=False):
+    if not schedule:
+        return None
+
+    if preserve_history is None:
+        preserve_history = schedule_has_historical_facts(schedule)
+
+    next_profile_id = _resolve_schedule_student_profile_id(schedule, enrollment=enrollment)
+    current_snapshot = getattr(schedule, 'student_profile_id_snapshot', None)
+    if preserve_history and current_snapshot is not None and not force:
+        return current_snapshot
+
+    schedule.student_profile_id_snapshot = next_profile_id
+    return next_profile_id
+
+
+def _schedule_effective_student_profile_id(schedule):
+    if not schedule:
+        return None
+    snapshot_profile_id = getattr(schedule, 'student_profile_id_snapshot', None)
+    if snapshot_profile_id is not None:
+        return snapshot_profile_id
+    enrollment = getattr(schedule, 'enrollment', None)
+    if enrollment and enrollment.student_profile_id:
+        return enrollment.student_profile_id
+    return None
 
 
 def create_enrollment_record(data):
@@ -283,6 +403,7 @@ def submit_enrollment_intake(enrollment, data):
 def update_enrollment_intake(enrollment, data):
     """学生本人或教务修改已提交的 intake 信息，并强制回到待排课。"""
     from modules.auth.models import StudentProfile
+    from modules.auth.workflow_services import refresh_enrollment_replan_workflows
 
     if not enrollment:
         return None, '报名记录不存在'
@@ -308,9 +429,21 @@ def update_enrollment_intake(enrollment, data):
 
     enrollment.student_name = student_name
     enrollment.student_profile_id = profile.id
+    previous_confirmed_slot = None
+    if enrollment.confirmed_slot:
+        try:
+            previous_confirmed_slot = normalize_plan(json.loads(enrollment.confirmed_slot), enrollment)
+        except (json.JSONDecodeError, TypeError):
+            previous_confirmed_slot = None
     enrollment.proposed_slots = None
     enrollment.confirmed_slot = None
     enrollment.status = 'pending_schedule'
+    refresh_enrollment_replan_workflows(
+        enrollment,
+        reset_to_teacher_proposal=True,
+        reason='学生信息已更新，请基于最新可上课时间重新提案。',
+        previous_confirmed_slot=previous_confirmed_slot,
+    )
     db.session.commit()
 
     return {
@@ -501,10 +634,29 @@ def _day_name(day_of_week):
     return ''
 
 
-def _normalize_available_slot_entries(value):
+def _is_valid_time_text(value):
+    return bool(re.match(r'^(?:[01]\d|2[0-3]):[0-5]\d$', str(value or '').strip()))
+
+
+def _validate_available_slot_entries(value):
+    if value in (None, ''):
+        return [], []
+
+    if isinstance(value, str):
+        try:
+            raw_items = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return [], ['可补课时段格式错误，请传数组']
+    else:
+        raw_items = value
+    if not isinstance(raw_items, list):
+        return [], ['可补课时段格式错误，请传数组']
+
     normalized = []
-    for slot in _load_json_list(value):
+    errors = []
+    for index, slot in enumerate(raw_items, start=1):
         if not isinstance(slot, dict):
+            errors.append(f'第 {index} 个可补课时段格式不正确')
             continue
         day_value = slot.get('day')
         if day_value is None:
@@ -512,32 +664,71 @@ def _normalize_available_slot_entries(value):
         try:
             day = int(day_value)
         except (TypeError, ValueError):
+            errors.append(f'第 {index} 个可补课时段缺少有效星期')
+            continue
+        if day < 0 or day > 6:
+            errors.append(f'第 {index} 个可补课时段星期超出范围')
             continue
         start = (slot.get('start') or slot.get('time_start') or '').strip()
         end = (slot.get('end') or slot.get('time_end') or '').strip()
-        if not start or not end or start >= end:
+        if not _is_valid_time_text(start) or not _is_valid_time_text(end):
+            errors.append(f'第 {index} 个可补课时段时间格式错误，请使用 HH:MM')
+            continue
+        if end <= start:
+            errors.append(f'第 {index} 个可补课时段结束时间必须晚于开始时间')
             continue
         normalized.append({
             'day': day,
             'start': start,
             'end': end,
         })
-    normalized.sort(key=lambda item: (item['day'], item['start'], item['end']))
+
+    deduped = list({
+        (item['day'], item['start'], item['end']): item
+        for item in normalized
+    }.values())
+    deduped.sort(key=lambda item: (item['day'], item['start'], item['end']))
+    return deduped, errors
+
+
+def _normalize_available_slot_entries(value):
+    normalized, _ = _validate_available_slot_entries(value)
     return normalized
 
 
-def _normalize_excluded_dates_entries(value):
+def _validate_excluded_dates_entries(value):
+    if value in (None, ''):
+        return [], []
+
+    if isinstance(value, str):
+        try:
+            raw_items = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return [], ['禁排日期格式错误，请传数组']
+    else:
+        raw_items = value
+    if not isinstance(raw_items, list):
+        return [], ['禁排日期格式错误，请传数组']
+
     normalized = []
-    for item in _load_json_list(value):
+    errors = []
+    for index, item in enumerate(raw_items, start=1):
         date_text = str(item or '').strip()
         if not date_text:
+            errors.append(f'第 {index} 个禁排日期为空')
             continue
         try:
             date.fromisoformat(date_text)
         except ValueError:
+            errors.append(f'第 {index} 个禁排日期格式错误，请使用 YYYY-MM-DD')
             continue
         normalized.append(date_text)
-    return sorted(dict.fromkeys(normalized))
+    return sorted(dict.fromkeys(normalized)), errors
+
+
+def _normalize_excluded_dates_entries(value):
+    normalized, _ = _validate_excluded_dates_entries(value)
+    return normalized
 
 
 def _summarize_available_slots(value):
@@ -628,6 +819,55 @@ def _summarize_makeup_preferences(available_slots, excluded_dates, note=None):
     if note_text:
         parts.append(f'补课备注：{note_text}')
     return ' · '.join(parts) or None
+
+
+def _session_preview_lines(session_dates, *, limit=3):
+    normalized_dates, errors = _normalize_manual_session_dates(session_dates or [])
+    source = normalized_dates if not errors else []
+    lines = [
+        f'{item["date"]} {item["time_start"]}-{item["time_end"]}'
+        for item in source[:limit]
+    ]
+    hidden_count = max(len(source) - limit, 0)
+    if hidden_count:
+        lines.append(f'其余 {hidden_count} 节待查看详情')
+    return lines
+
+
+def _profile_constraint_meta(student_profile):
+    available_slots = _normalize_available_slot_entries(
+        student_profile.available_slots if student_profile else None
+    )
+    excluded_dates = _normalize_excluded_dates_entries(
+        student_profile.excluded_dates if student_profile else None
+    )
+    notes = (getattr(student_profile, 'notes', None) or '').strip() or None
+    return {
+        'available_times_summary': _summarize_available_slots(available_slots),
+        'excluded_dates_summary': _summarize_excluded_dates(excluded_dates),
+        'available_slots': available_slots,
+        'excluded_dates': excluded_dates,
+        'notes': notes,
+    }
+
+
+def _build_scheduling_complexity_hint(enrollment):
+    profile = getattr(enrollment, 'student_profile', None)
+    meta = _profile_constraint_meta(profile)
+    flags = []
+    if not meta['available_slots']:
+        flags.append('学生还没有长期可上课时间，建议先补充后再排课')
+    elif len(meta['available_slots']) <= 1:
+        flags.append('学生长期可上课时段较少，排课弹性有限')
+    if len(meta['excluded_dates']) >= 3:
+        flags.append('学生禁排日期较多，建议先核对本周安排')
+    if (enrollment.total_hours or 0) >= 10:
+        flags.append('总课时较多，建议优先选择稳定可复用时段')
+    if meta['notes']:
+        flags.append('报名备注里有额外限制，排课前请先阅读')
+    if not flags:
+        return '当前排课约束较少，可直接进入排课'
+    return '；'.join(flags[:3])
 
 
 def _build_session_dates(weekly_slots, total_sessions, excluded_set):
@@ -833,6 +1073,11 @@ def _schedule_start_datetime(schedule):
     return datetime.combine(schedule.date, start_time)
 
 
+def _schedule_end_datetime(schedule):
+    end_time = datetime.strptime(schedule.time_end, '%H:%M').time()
+    return datetime.combine(schedule.date, end_time)
+
+
 def _schedule_has_started(schedule, reference=None):
     if not schedule or not schedule.date or not schedule.time_start:
         return False
@@ -949,14 +1194,7 @@ def _load_teacher_available_ranges(teacher_id):
 
 
 def _actor_can_manage_schedule_feedback(actor, schedule=None, *, teacher_id=None):
-    target_teacher_id = teacher_id if teacher_id is not None else getattr(schedule, 'teacher_id', None)
-    return bool(
-        actor
-        and getattr(actor, 'is_authenticated', False)
-        and actor.role in {'teacher', 'admin'}
-        and target_teacher_id is not None
-        and actor.id == target_teacher_id
-    )
+    return _schedule_matches_teacher_actor(actor, schedule, teacher_id=teacher_id)
 
 
 def _collect_teacher_schedule_conflicts(enrollment, session_dates, *, ignore_schedule_ids=None):
@@ -1004,7 +1242,6 @@ def _collect_teacher_schedule_conflicts(enrollment, session_dates, *, ignore_sch
 
 
 def _collect_student_schedule_conflicts(enrollment, session_dates, *, ignore_schedule_ids=None):
-    from modules.auth.models import Enrollment
     from modules.oa.models import CourseSchedule
 
     if not enrollment or not enrollment.student_profile_id or not session_dates:
@@ -1015,17 +1252,16 @@ def _collect_student_schedule_conflicts(enrollment, session_dates, *, ignore_sch
     for session in session_dates:
         session_dates_by_date.setdefault(session['date'], []).append(session)
 
-    query = CourseSchedule.query.join(
-        Enrollment,
-        CourseSchedule.enrollment_id == Enrollment.id,
-    ).filter(
-        Enrollment.student_profile_id == enrollment.student_profile_id,
+    query = CourseSchedule.query.filter(
+        student_schedule_profile_clause(enrollment.student_profile_id, schedule_model=CourseSchedule),
         CourseSchedule.date.in_([date.fromisoformat(value) for value in session_dates_by_date]),
     )
     if ignore_ids:
         query = query.filter(~CourseSchedule.id.in_(ignore_ids))
     if enrollment.id:
-        query = query.filter(Enrollment.id != enrollment.id)
+        query = query.filter(
+            or_(CourseSchedule.enrollment_id.is_(None), CourseSchedule.enrollment_id != enrollment.id)
+        )
 
     conflicts = []
     existing_by_date = {}
@@ -1149,16 +1385,43 @@ def _collect_manual_plan_issues(enrollment, session_dates):
     return list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
 
 
+def _extract_legacy_enrollment_id(note_text):
+    matches = {int(value) for value in LEGACY_ENROLLMENT_NOTE_PATTERN.findall(str(note_text or ''))}
+    if len(matches) != 1:
+        return None
+    return next(iter(matches))
+
+
+def _linked_schedule_ids(enrollment_id):
+    from modules.oa.models import CourseSchedule
+
+    if not enrollment_id:
+        return []
+
+    schedule_ids = {
+        row[0]
+        for row in db.session.query(CourseSchedule.id).filter(
+            CourseSchedule.enrollment_id == enrollment_id
+        ).all()
+    }
+    legacy_candidates = CourseSchedule.query.filter(
+        CourseSchedule.enrollment_id.is_(None),
+        CourseSchedule.notes.isnot(None),
+        CourseSchedule.notes.contains('报名#'),
+    ).all()
+    for schedule in legacy_candidates:
+        if _extract_legacy_enrollment_id(schedule.notes) == enrollment_id:
+            schedule_ids.add(schedule.id)
+    return sorted(schedule_ids)
+
+
 def _linked_schedule_query(enrollment_id):
     from modules.oa.models import CourseSchedule
 
-    legacy_note = f'报名#{enrollment_id}'
-    return CourseSchedule.query.filter(
-        or_(
-            CourseSchedule.enrollment_id == enrollment_id,
-            CourseSchedule.notes.contains(legacy_note),
-        )
-    )
+    linked_ids = _linked_schedule_ids(enrollment_id)
+    if not linked_ids:
+        return CourseSchedule.query.filter(False)
+    return CourseSchedule.query.filter(CourseSchedule.id.in_(linked_ids))
 
 
 def get_accessible_enrollment_query(user):
@@ -1206,13 +1469,12 @@ def user_can_access_schedule(user, schedule):
     if user.role == 'admin':
         return True
     if user.role == 'teacher':
-        return schedule.teacher_id == user.id
+        return _schedule_matches_teacher_actor(user, schedule)
     if user.role == 'student':
         profile = user.student_profile
         return bool(
             profile
-            and schedule.enrollment
-            and schedule.enrollment.student_profile_id == profile.id
+            and _schedule_effective_student_profile_id(schedule) == profile.id
         )
     return False
 
@@ -1225,6 +1487,19 @@ def _latest_leave_request(schedule):
     return LeaveRequest.query.filter_by(schedule_id=schedule.id).order_by(
         LeaveRequest.created_at.desc()
     ).first()
+
+
+def schedule_has_historical_facts(schedule, reference=None):
+    from modules.auth.models import LeaveRequest
+
+    if not schedule:
+        return False
+    if _schedule_has_started(schedule, reference):
+        return True
+    feedback = getattr(schedule, 'feedback', None)
+    if feedback and feedback.status == 'submitted':
+        return True
+    return LeaveRequest.query.filter_by(schedule_id=schedule.id).count() > 0
 
 
 def user_can_request_leave(user, schedule):
@@ -1247,7 +1522,7 @@ def user_can_approve_leave(user, leave_request):
         return True
     if user.role != 'teacher':
         return False
-    return bool(leave_request.schedule and leave_request.schedule.teacher_id == user.id)
+    return bool(leave_request.schedule and _schedule_matches_teacher_actor(user, leave_request.schedule))
 
 
 def user_can_chat_with(user, partner):
@@ -1278,6 +1553,24 @@ def user_can_chat_with(user, partner):
             student_profile_id=profile.id,
         ).count() > 0
     return False
+
+
+def user_can_access_chat_history(user, partner):
+    from modules.auth.models import ChatMessage
+
+    if not user or not partner or not getattr(user, 'is_authenticated', False):
+        return False
+    if user.id == getattr(partner, 'id', None):
+        return False
+    if user_can_chat_with(user, partner):
+        return True
+
+    return ChatMessage.query.filter(
+        or_(
+            and_(ChatMessage.sender_id == user.id, ChatMessage.receiver_id == partner.id),
+            and_(ChatMessage.sender_id == partner.id, ChatMessage.receiver_id == user.id),
+        )
+    ).count() > 0
 
 
 def user_can_submit_feedback(user, schedule):
@@ -1428,6 +1721,10 @@ def build_schedule_payload(schedule, actor=None):
         'can_approve_leave': bool(actor and latest_leave and latest_leave.status == 'pending' and user_can_approve_leave(actor, latest_leave)),
         'can_submit_feedback': bool(actor and user_can_submit_feedback(actor, schedule)),
         'workflow_todos': workflow_todos,
+        'feedback_due_at': _datetime_to_iso(_schedule_end_datetime(schedule)) if _schedule_has_started(schedule) else None,
+        'feedback_delay_days': max((get_business_today() - schedule.date).days, 0) if _schedule_has_started(schedule) else 0,
+        'missing_feedback_count_for_teacher_recent': 0,
+        'is_repeat_late_teacher': False,
     })
     active_todo = next(
         (
@@ -1507,6 +1804,9 @@ def build_leave_request_payload(leave_request, actor=None):
         'latest_rejection_text': None,
         'proposal_note': None,
         'current_plan_summary': _summarize_schedule_summary(leave_request.makeup_schedule) if leave_request.makeup_schedule else None,
+        'case_stage': None,
+        'case_stage_label': None,
+        'related_workflow_id': makeup_workflow.get('id') if makeup_workflow else None,
     })
     if makeup_workflow:
         payload.update({
@@ -1519,6 +1819,7 @@ def build_leave_request_payload(leave_request, actor=None):
             'latest_rejection_text': makeup_workflow.get('latest_rejection_text'),
             'proposal_note': makeup_workflow.get('proposal_note'),
             'current_plan_summary': makeup_workflow.get('current_plan_summary') or payload.get('current_plan_summary'),
+            'case_stage': makeup_workflow.get('next_action_status'),
         })
     elif leave_request.status == 'pending':
         payload.update(build_next_action_meta(
@@ -1528,6 +1829,7 @@ def build_leave_request_payload(leave_request, actor=None):
             waiting_since=leave_request.created_at,
             is_overdue=False,
         ))
+        payload['case_stage'] = 'waiting_leave_approval'
     elif leave_request.status == 'approved' and leave_request.makeup_schedule_id:
         payload.update(build_next_action_meta(
             role='none',
@@ -1536,6 +1838,7 @@ def build_leave_request_payload(leave_request, actor=None):
             waiting_since=leave_request.makeup_schedule.updated_at if leave_request.makeup_schedule else leave_request.created_at,
             is_overdue=False,
         ))
+        payload['case_stage'] = 'confirmed'
     elif leave_request.status == 'approved':
         payload.update(build_next_action_meta(
             role='teacher',
@@ -1544,6 +1847,7 @@ def build_leave_request_payload(leave_request, actor=None):
             waiting_since=leave_request.created_at,
             is_overdue=False,
         ))
+        payload['case_stage'] = 'waiting_teacher_proposal'
     else:
         payload.update(build_next_action_meta(
             role='none',
@@ -1552,6 +1856,24 @@ def build_leave_request_payload(leave_request, actor=None):
             waiting_since=leave_request.created_at,
             is_overdue=False,
         ))
+        payload['case_stage'] = leave_request.status
+    payload['case_stage_label'] = {
+        'waiting_leave_approval': '待审批',
+        'waiting_teacher_proposal': '待老师提案',
+        'waiting_admin_review': '待教务发送',
+        'waiting_student_confirm': '待学生确认补课',
+        'confirmed': '已确认补课',
+        'rejected': '已驳回',
+        'approved': '补课安排中',
+    }.get(payload.get('case_stage'), payload.get('next_action_label') or payload.get('status'))
+    payload['next_step_hint'] = {
+        'waiting_leave_approval': '审批通过后会进入补课安排。',
+        'waiting_teacher_proposal': '老师提交补课建议后，教务会继续发送给学生确认。',
+        'waiting_admin_review': '教务确认后会把补课方案发给学生。',
+        'waiting_student_confirm': '学生确认后补课时间会正式生效。',
+        'confirmed': '请按已确认的补课时间正常上课。',
+        'rejected': '请查看处理说明后重新发起请假。',
+    }.get(payload.get('case_stage'))
     return payload
 
 
@@ -1659,6 +1981,7 @@ def build_enrollment_payload(enrollment, actor=None):
     from modules.auth.workflow_services import get_enrollment_workflow_todos
 
     payload = enrollment.to_dict()
+    profile_meta = _profile_constraint_meta(enrollment.student_profile)
     payload['proposed_slots'] = [
         normalize_plan(plan, enrollment)
         for plan in payload.get('proposed_slots', [])
@@ -1687,6 +2010,9 @@ def build_enrollment_payload(enrollment, actor=None):
         'can_approve_leave': False,
         'can_submit_feedback': False,
         'edit_intake_url': f'/auth/enrollments/{enrollment.id}/intake-edit',
+        'student_availability_summary': profile_meta['available_times_summary'],
+        'excluded_dates_summary': profile_meta['excluded_dates_summary'],
+        'scheduling_complexity_hint': _build_scheduling_complexity_hint(enrollment),
     })
     workflow_todos = _filter_workflow_todos_for_actor(
         get_enrollment_workflow_todos(enrollment.id, actor),
@@ -1698,6 +2024,8 @@ def build_enrollment_payload(enrollment, actor=None):
     payload['proposal_note'] = ((payload.get('confirmed_slot') or {}).get('note') or '').strip() or None
     payload['latest_rejection_text'] = payload.get('latest_feedback')
     payload['context_summary'] = payload.get('next_action_label')
+    payload['current_plan_session_dates'] = ((payload.get('confirmed_slot') or {}).get('session_dates') or [])
+    payload['session_preview_lines'] = _session_preview_lines(payload.get('current_plan_session_dates'))
     active_todo = payload['active_workflow_todo']
     if active_todo:
         payload.update({
@@ -1711,7 +2039,13 @@ def build_enrollment_payload(enrollment, actor=None):
             'proposal_note': active_todo.get('proposal_note') or payload.get('proposal_note'),
             'current_plan_summary': active_todo.get('current_plan_summary') or payload.get('current_plan_summary'),
             'original_schedule_summary': active_todo.get('original_schedule_summary'),
+            'current_plan_session_dates': (
+                ((active_todo.get('current_proposal') or {}).get('session_dates'))
+                or active_todo.get('current_plan_session_dates')
+                or payload.get('current_plan_session_dates')
+            ),
         })
+        payload['session_preview_lines'] = _session_preview_lines(payload.get('current_plan_session_dates'))
     elif enrollment.status == 'pending_info':
         payload.update(build_next_action_meta(
             role='student',
@@ -1759,6 +2093,18 @@ def build_enrollment_payload(enrollment, actor=None):
         ))
     if not payload.get('context_summary'):
         payload['context_summary'] = payload.get('next_action_label')
+    payload['current_stage_label'] = {
+        'waiting_student_confirm': '待学生确认方案',
+        'waiting_admin_schedule': '待教务排课',
+        'waiting_teacher_feedback': '待老师提交反馈',
+        'confirmed': '等待首次上课',
+        'completed': '已完成',
+    }.get(payload.get('next_action_status'), payload.get('next_action_label'))
+    payload['next_step_hint'] = {
+        'waiting_student_confirm': '学生确认后系统会生成正式课表。',
+        'waiting_admin_schedule': '教务排好课后会发送给学生确认。',
+        'waiting_teacher_feedback': '老师提交反馈后，学生和教务都可查看。',
+    }.get(payload.get('next_action_status'))
     return payload
 
 
@@ -1954,10 +2300,17 @@ def find_matching_slots(enrollment_id):
 def propose_enrollment_schedule(enrollment_id, slot_index):
     """管理员选择 plan -> 保存并通知学生确认。"""
     from modules.auth.models import Enrollment
+    from modules.auth.workflow_services import has_open_enrollment_replan_workflow
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
         return False, '报名记录不存在', []
+    if enrollment.status not in {'pending_schedule', 'pending_student_confirm'}:
+        return False, '当前状态不允许重新发送排课方案', []
+    if has_open_enrollment_replan_workflow(enrollment.id):
+        return False, '当前报名存在进行中的排课工作流，请通过工作流继续处理', []
+    if enrollment.status == 'pending_student_confirm' and _linked_schedule_ids(enrollment.id):
+        return False, '当前报名已存在正式课表，不能重新发送排课方案', []
 
     if not enrollment.proposed_slots:
         return False, '没有可用的排课方案', []
@@ -1988,6 +2341,7 @@ def propose_enrollment_schedule(enrollment_id, slot_index):
 
 def save_manual_enrollment_plan(enrollment_id, session_dates, *, force_save=False):
     from modules.auth.models import Enrollment
+    from modules.auth.workflow_services import has_open_enrollment_replan_workflow
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
@@ -2002,6 +2356,12 @@ def save_manual_enrollment_plan(enrollment_id, session_dates, *, force_save=Fals
             'success': False,
             'status_code': 400,
             'error': '当前状态不允许手动调整排课方案',
+        }
+    if has_open_enrollment_replan_workflow(enrollment.id):
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前报名存在进行中的排课工作流，请通过工作流继续处理',
         }
 
     normalized_dates, parse_errors = _normalize_manual_session_dates(session_dates)
@@ -2089,7 +2449,11 @@ def student_confirm_schedule(enrollment_id):
     from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
     from modules.oa.services import delivery_mode_from_color_tag
     from modules.auth.models import LeaveRequest
-    from modules.auth.workflow_services import complete_replan_workflows_for_enrollment, ensure_schedule_feedback_todo
+    from modules.auth.workflow_services import (
+        complete_replan_workflows_for_enrollment,
+        ensure_enrollment_replan_workflow,
+        ensure_schedule_feedback_todo,
+    )
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
@@ -2098,34 +2462,46 @@ def student_confirm_schedule(enrollment_id):
     if enrollment.status != 'pending_student_confirm':
         return False, '当前状态不允许确认', 0
 
+    def _reopen_replan(message_text):
+        ensure_enrollment_replan_workflow(
+            enrollment,
+            rejection_text=message_text,
+            actor_user=None,
+        )
+        enrollment.confirmed_slot = None
+        enrollment.status = 'pending_schedule'
+        db.session.commit()
+
     if not enrollment.confirmed_slot:
-        return False, '没有待确认的排课方案', 0
+        message = '当前排课方案已失效，请等待老师和教务重新排课'
+        _reopen_replan(message)
+        return False, message, 0
 
     try:
         plan = normalize_plan(json.loads(enrollment.confirmed_slot), enrollment)
     except (json.JSONDecodeError, TypeError):
-        return False, '排课方案数据异常', 0
+        message = '当前排课方案已失效，请等待老师和教务重新排课'
+        _reopen_replan(message)
+        return False, message, 0
 
     session_dates = plan.get('session_dates', [])
     if not session_dates:
-        return False, '排课方案没有具体课次', 0
-
-    errors, _ = _collect_manual_plan_issues(enrollment, session_dates)
-    if errors:
-        enrollment.confirmed_slot = None
-        enrollment.status = 'pending_schedule'
-        db.session.commit()
-        return False, '；'.join(dict.fromkeys(errors)), 0
-
-    teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
-    student_name = enrollment.student_name
+        message = '当前排课方案已失效，请等待老师和教务重新排课'
+        _reopen_replan(message)
+        return False, message, 0
 
     existing_ids = [schedule.id for schedule in _linked_schedule_query(enrollment.id).all()]
     if existing_ids:
-        OATodo.query.filter(OATodo.schedule_id.in_(existing_ids)).delete(synchronize_session=False)
-        LeaveRequest.query.filter(LeaveRequest.schedule_id.in_(existing_ids)).delete(synchronize_session=False)
-        CourseFeedback.query.filter(CourseFeedback.schedule_id.in_(existing_ids)).delete(synchronize_session=False)
-        CourseSchedule.query.filter(CourseSchedule.id.in_(existing_ids)).delete(synchronize_session=False)
+        return False, '当前报名已存在正式课表，不能重复确认排课方案', 0
+
+    errors, _ = _collect_manual_plan_issues(enrollment, session_dates)
+    if errors:
+        message = '；'.join(dict.fromkeys(errors))
+        _reopen_replan(message)
+        return False, message, 0
+
+    teacher_name = enrollment.teacher.display_name if enrollment.teacher else ''
+    student_name = enrollment.student_name
 
     created_count = 0
     for session in session_dates:
@@ -2144,6 +2520,7 @@ def student_confirm_schedule(enrollment_id):
             delivery_mode=delivery_mode_from_color_tag('green'),
             notes=f'自动排课 - 报名#{enrollment.id}',
         )
+        sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
         db.session.add(schedule)
         db.session.flush()
         ensure_schedule_feedback_todo(schedule, created_by=enrollment.teacher_id)
@@ -2317,9 +2694,9 @@ def delete_student_user_hard(user_id):
     linked_schedule_ids = []
     if profile_ids:
         linked_schedule_ids = [
-            row[0] for row in CourseSchedule.query.with_entities(CourseSchedule.id).join(
-                Enrollment, CourseSchedule.enrollment_id == Enrollment.id
-            ).filter(Enrollment.student_profile_id.in_(profile_ids)).all()
+            row[0] for row in CourseSchedule.query.with_entities(CourseSchedule.id).filter(
+                student_schedule_profile_clause(profile_ids, schedule_model=CourseSchedule)
+            ).all()
         ]
 
     if linked_schedule_ids:
@@ -2382,7 +2759,11 @@ def backfill_schedule_relationships():
 
     updated = 0
     schedules = CourseSchedule.query.filter(
-        or_(CourseSchedule.enrollment_id == None, CourseSchedule.teacher_id == None)
+        or_(
+            CourseSchedule.enrollment_id == None,
+            CourseSchedule.teacher_id == None,
+            CourseSchedule.student_profile_id_snapshot == None,
+        )
     ).all()
     for schedule in schedules:
         changed = False
@@ -2392,9 +2773,9 @@ def backfill_schedule_relationships():
             enrollment = db.session.get(Enrollment, schedule.enrollment_id)
 
         if not enrollment and schedule.notes:
-            match = re.search(r'报名#(\d+)', schedule.notes)
-            if match:
-                enrollment = db.session.get(Enrollment, int(match.group(1)))
+            legacy_enrollment_id = _extract_legacy_enrollment_id(schedule.notes)
+            if legacy_enrollment_id:
+                enrollment = db.session.get(Enrollment, legacy_enrollment_id)
                 if enrollment:
                     schedule.enrollment_id = enrollment.id
                     changed = True
@@ -2410,6 +2791,12 @@ def backfill_schedule_relationships():
                 if teacher:
                     schedule.teacher_id = teacher.id
                     changed = True
+
+        if schedule.student_profile_id_snapshot is None:
+            previous_snapshot = schedule.student_profile_id_snapshot
+            sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=True)
+            if schedule.student_profile_id_snapshot != previous_snapshot:
+                changed = True
 
         if changed:
             updated += 1

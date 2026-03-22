@@ -8,6 +8,7 @@ from modules.auth.workflow_services import (
     build_workflow_todo_payload,
     get_workflow_todo,
     list_workflow_todos_for_user,
+    preview_teacher_workflow_proposal,
     student_confirm_workflow_todo,
     student_reject_workflow_todo,
     submit_teacher_workflow_proposal,
@@ -46,7 +47,7 @@ def api_get_workflow_todo(todo_id):
 
 
 @auth_bp.route('/api/workflow-todos/<int:todo_id>/teacher-proposal', methods=['POST'])
-@role_required('teacher')
+@role_required('teacher', 'admin')
 def api_teacher_workflow_proposal(todo_id):
     todo = get_workflow_todo(todo_id)
     if not todo:
@@ -58,6 +59,23 @@ def api_teacher_workflow_proposal(todo_id):
         current_user,
         data.get('session_dates') or [],
         note=data.get('note', ''),
+    )
+    status_code = result.pop('status_code', 200)
+    return jsonify(result), status_code
+
+
+@auth_bp.route('/api/workflow-todos/<int:todo_id>/proposal-preview', methods=['POST'])
+@role_required('teacher', 'admin')
+def api_teacher_workflow_proposal_preview(todo_id):
+    todo = get_workflow_todo(todo_id)
+    if not todo:
+        return jsonify({'success': False, 'error': '工作流待办不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    result = preview_teacher_workflow_proposal(
+        todo,
+        current_user,
+        data.get('session_dates') or [],
     )
     status_code = result.pop('status_code', 200)
     return jsonify(result), status_code

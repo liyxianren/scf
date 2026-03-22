@@ -45,6 +45,7 @@
 .workflow-card .wf-status.makeup{background:#f3e8ff;color:#7c3aed}
 .workflow-card .wf-status.feedback{background:#dcfce7;color:#166534}
 .workflow-card .wf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.workflow-card.workflow-focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.12)}
 .nav-shortcuts{display:flex;gap:12px;flex-wrap:wrap}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;text-decoration:none;box-shadow:0 4px 12px rgba(14,165,233,.15)}
 .nav-btn:hover{opacity:.9}
@@ -244,7 +245,8 @@
         </div>
         <div class="modal-footer">
             <button class="btn-ghost" onclick="closeFeedbackModal()">取消</button>
-            <button class="btn-save" onclick="saveFeedbackModal()"><span class="material-icons" style="font-size:1rem">save</span> 提交反馈</button>
+            <button class="btn-ghost" onclick="saveFeedbackModal(false)"><span class="material-icons" style="font-size:1rem">save</span> 保存草稿</button>
+            <button class="btn-save" onclick="saveFeedbackModal(true)"><span class="material-icons" style="font-size:1rem">send</span> 提交反馈</button>
         </div>
     </div>
 </div>
@@ -316,6 +318,8 @@ let teacherActionCenter = null;
 let feedbackDraft = {scheduleId: null, courseName: ''};
 let proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
 let leaveDecisionState = {id: null};
+let proposalPreviewTimer = null;
+let proposalFocusState = {workflowId: null, hint: ''};
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
@@ -373,6 +377,12 @@ async function loadTeacherActionCenter(){
         renderUpcomingSchedules(teacherActionCenter.upcoming_schedules || []);
         renderPendingFeedback(teacherActionCenter.pending_feedback_schedules || []);
         renderLeaveRequests(teacherActionCenter.leave_requests || []);
+        if(proposalFocusState.workflowId){
+            const target = document.querySelector(`[data-workflow-id="${proposalFocusState.workflowId}"]`);
+            if(target){
+                target.scrollIntoView({behavior:'smooth', block:'center'});
+            }
+        }
     }catch(e){console.error(e);}
 }
 
@@ -483,15 +493,18 @@ function renderProposalWorkflows(items){
         const payload = parseWorkflowPayload(item);
         const title = item.title || item.name || workflowTypeLabel(item.todo_type);
         const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
+        const sessionPreviewLines = item.session_preview_lines || payload.session_preview_lines || [];
         const context = [
             item.context_summary || payload.context_summary || '',
             item.current_plan_summary || payload.current_plan_summary ? `方案概览：${item.current_plan_summary || payload.current_plan_summary}` : '',
             item.proposal_note || payload.proposal_note ? `备注：${item.proposal_note || payload.proposal_note}` : '',
             item.latest_rejection_text || payload.latest_rejection_text ? `最新问题：${item.latest_rejection_text || payload.latest_rejection_text}` : '',
+            sessionPreviewLines.length ? `课次预览：${sessionPreviewLines.join('；')}` : '',
+            proposalFocusState.workflowId === item.id && proposalFocusState.hint ? `下一步：${proposalFocusState.hint}` : '',
             item.waiting_since ? `等待开始：${item.waiting_since}` : '',
         ].filter(Boolean).join(' · ');
         return `
-            <div class="workflow-card">
+            <div class="workflow-card ${proposalFocusState.workflowId === item.id ? 'workflow-focus' : ''}" data-workflow-id="${item.id}">
                 <div class="wf-head">
                     <div>
                         <div class="wf-title">${escapeHtml(title)}</div>
@@ -557,10 +570,16 @@ function renderPendingFeedback(items){
         <div class="task-card">
             <div class="task-title">${escapeHtml(item.course_name || '-')}</div>
             <div class="task-detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')} · ${escapeHtml(item.students || '未绑定学生')}</div>
-            <div style="margin-top:8px;font-size:.82rem;color:${item.is_overdue ? '#b91c1c' : '#64748b'}">${item.is_overdue ? '已逾期，请尽快补反馈' : '本节课已开始，待提交反馈'}</div>
+            <div style="margin-top:8px;font-size:.82rem;color:${item.is_overdue ? '#b91c1c' : '#64748b'}">${
+                item.feedback && item.feedback.status === 'draft'
+                    ? '已保存草稿，等待补充后提交'
+                    : item.is_overdue
+                        ? '已逾期，请尽快补反馈'
+                        : '本节课已开始，待提交反馈'
+            }</div>
             <div style="margin-top:10px">
                 <button class="inline-btn" onclick="submitFeedback(${item.id}, '${escapeJs(item.course_name || '')}')">
-                    <span class="material-icons">edit_note</span> 提交反馈
+                    <span class="material-icons">edit_note</span> ${item.feedback && item.feedback.status === 'draft' ? '继续编辑草稿' : '提交反馈'}
                 </button>
             </div>
         </div>
@@ -653,6 +672,7 @@ function renderProposalSessionRows(){
 function updateProposalSession(index, field, value){
     if(!proposalDraft.sessions[index]) return;
     proposalDraft.sessions[index][field] = value;
+    scheduleProposalPreview();
 }
 
 function addProposalSessionRow(){
@@ -664,12 +684,14 @@ function addProposalSessionRow(){
         time_end: last.time_end || '12:00',
     });
     renderProposalSessionRows();
+    scheduleProposalPreview();
 }
 
 function removeProposalSessionRow(index){
     if(proposalDraft.sessions.length <= 1) return;
     proposalDraft.sessions.splice(index, 1);
     renderProposalSessionRows();
+    scheduleProposalPreview();
 }
 
 function openProposalModal(todoId){
@@ -703,6 +725,7 @@ function openProposalModal(todoId){
     document.getElementById('proposalNoteInput').value = proposalDraft.note || '';
     renderProposalSessionRows();
     document.getElementById('proposalModal').classList.add('active');
+    requestProposalPreview();
 }
 
 function closeProposalModal(){
@@ -712,16 +735,78 @@ function closeProposalModal(){
     document.getElementById('proposalWarningBox').style.display = 'none';
     document.getElementById('proposalWarningBox').innerHTML = '';
     proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
+    if(proposalPreviewTimer){
+        clearTimeout(proposalPreviewTimer);
+        proposalPreviewTimer = null;
+    }
+}
+
+function getProposalModalSessions(){
+    return proposalDraft.sessions.map(item => ({
+        date: (item.date || '').trim(),
+        time_start: (item.time_start || '').trim(),
+        time_end: (item.time_end || '').trim(),
+    }));
+}
+
+function renderProposalPreviewResult(preview){
+    const warningBox = document.getElementById('proposalWarningBox');
+    if(!warningBox) return;
+    const errors = (preview && preview.errors) || [];
+    const warnings = (preview && preview.warnings) || [];
+    if(!errors.length && !warnings.length){
+        warningBox.style.display = 'none';
+        warningBox.innerHTML = '';
+        return;
+    }
+    warningBox.style.display = 'block';
+    const sections = [];
+    if(errors.length){
+        sections.push(`当前不能提交：<ul style="margin:8px 0 0 18px;padding:0">${errors.map(entry => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>`);
+    }
+    if(warnings.length){
+        sections.push(`提醒项：<ul style="margin:8px 0 0 18px;padding:0">${warnings.map(entry => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>`);
+    }
+    warningBox.innerHTML = sections.join('<div style="margin-top:10px"></div>');
+}
+
+function scheduleProposalPreview(){
+    if(proposalPreviewTimer){
+        clearTimeout(proposalPreviewTimer);
+    }
+    proposalPreviewTimer = setTimeout(() => {
+        requestProposalPreview();
+    }, 250);
+}
+
+async function requestProposalPreview(){
+    if(!proposalDraft.todoId) return;
+    const sessionDates = getProposalModalSessions();
+    if(sessionDates.some(item => !item.date || !item.time_start || !item.time_end)){
+        renderProposalPreviewResult({errors: ['请先填写完整的日期和时间'], warnings: []});
+        return;
+    }
+    try{
+        const res = await fetch(`/auth/api/workflow-todos/${proposalDraft.todoId}/proposal-preview`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({session_dates: sessionDates}),
+        });
+        const json = await res.json();
+        if(json.success){
+            renderProposalPreviewResult(json.data || {});
+        }else{
+            renderProposalPreviewResult({errors: [json.error || '预检失败'], warnings: []});
+        }
+    }catch(e){
+        renderProposalPreviewResult({errors: ['预检失败，请稍后重试'], warnings: []});
+    }
 }
 
 async function saveProposalModal(){
     if(!proposalDraft.todoId) return;
     const note = document.getElementById('proposalNoteInput').value.trim();
-    const sessionDates = proposalDraft.sessions.map(item => ({
-        date: (item.date || '').trim(),
-        time_start: (item.time_start || '').trim(),
-        time_end: (item.time_end || '').trim(),
-    }));
+    const sessionDates = getProposalModalSessions();
     if(sessionDates.some(item => !item.date || !item.time_start || !item.time_end)){
         alert('请先填写完整的日期和时间');
         return;
@@ -736,9 +821,14 @@ async function saveProposalModal(){
         if(json.success){
             const warnings = json.warnings || [];
             if(warnings.length){
+                proposalFocusState = {
+                    workflowId: null,
+                    hint: '方案已提交给教务复核，存在提醒项，请等教务确认后再看学生结果。',
+                };
                 showToast('建议已提交给教务复核，存在提醒项');
                 alert(`建议已提交给教务复核。\n\n提醒：\n- ${warnings.join('\n- ')}`);
             }else{
+                proposalFocusState = {workflowId: null, hint: ''};
                 showToast('建议已提交给教务');
             }
             closeProposalModal();
@@ -758,30 +848,41 @@ function openFeedbackModal(scheduleId, courseName){
     document.getElementById('feedbackHomeworkInput').value = '';
     document.getElementById('feedbackNextFocusInput').value = '';
     document.getElementById('feedbackModal').classList.add('active');
+    fetch(`/auth/api/schedules/${scheduleId}/feedback`)
+        .then(res => res.json())
+        .then(json => {
+            const feedback = json.success ? json.data : null;
+            if(!feedback) return;
+            document.getElementById('feedbackSummaryInput').value = feedback.summary || '';
+            document.getElementById('feedbackHomeworkInput').value = feedback.homework || '';
+            document.getElementById('feedbackNextFocusInput').value = feedback.next_focus || '';
+        })
+        .catch(() => {});
 }
 
 function closeFeedbackModal(){
     document.getElementById('feedbackModal').classList.remove('active');
 }
 
-async function saveFeedbackModal(){
+async function saveFeedbackModal(submit = true){
     if(!feedbackDraft.scheduleId) return;
     const summary = document.getElementById('feedbackSummaryInput').value.trim();
     const homework = document.getElementById('feedbackHomeworkInput').value.trim();
     const nextFocus = document.getElementById('feedbackNextFocusInput').value.trim();
-    if(!summary){
+    if(submit && !summary){
         alert('请先填写课程总结');
         return;
     }
     try{
-        const res = await fetch(`/auth/api/schedules/${feedbackDraft.scheduleId}/feedback/submit`, {
+        const endpoint = submit ? 'feedback/submit' : 'feedback';
+        const res = await fetch(`/auth/api/schedules/${feedbackDraft.scheduleId}/${endpoint}`, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({summary, homework, next_focus: nextFocus})
         });
         const json = await res.json();
         if(json.success){
-            showToast('课程反馈已提交');
+            showToast(submit ? '课程反馈已提交' : '反馈草稿已保存');
             closeFeedbackModal();
             await loadTeacherActionCenter();
             await loadProgress();
@@ -809,6 +910,12 @@ async function handleLeave(id, action, comment = ''){
         const res = await fetch(`/auth/api/leave-requests/${id}/${action}`, options);
         const json = await res.json();
         if(json.success){
+            if(action === 'approve' && json.data && json.data.next_workflow_id){
+                proposalFocusState = {
+                    workflowId: json.data.next_workflow_id,
+                    hint: json.data.next_action_hint || '请继续提交补课建议。',
+                };
+            }
             showToast(action === 'approve' ? '请假已批准，请到待我提案里提交补课建议' : '请假已驳回');
             await loadTeacherActionCenter();
             await loadProgress();

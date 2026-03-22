@@ -443,6 +443,7 @@ def find_schedule_conflicts(
     student_profile_id=None,
     exclude_schedule_id=None,
 ):
+    from modules.auth.services import student_schedule_profile_clause
     from extensions import db
     from modules.auth.models import Enrollment
     from modules.oa.models import CourseSchedule
@@ -496,15 +497,14 @@ def find_schedule_conflicts(
         student_profile_id = enrollment.student_profile_id if enrollment else None
 
     if student_profile_id:
-        student_query = CourseSchedule.query.join(
-            Enrollment,
-            CourseSchedule.enrollment_id == Enrollment.id,
-        ).filter(
-            Enrollment.student_profile_id == student_profile_id,
+        student_query = CourseSchedule.query.filter(
+            student_schedule_profile_clause(student_profile_id, schedule_model=CourseSchedule),
             CourseSchedule.date == course_date,
         )
         if enrollment_id:
-            student_query = student_query.filter(Enrollment.id != enrollment_id)
+            student_query = student_query.filter(
+                or_(CourseSchedule.enrollment_id.is_(None), CourseSchedule.enrollment_id != enrollment_id)
+            )
         if exclude_schedule_id:
             student_query = student_query.filter(CourseSchedule.id != exclude_schedule_id)
         result['student'] = [
@@ -1061,7 +1061,7 @@ def _summarize_schedule(schedule):
 def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
     from extensions import db
     from modules.auth.models import Enrollment
-    from modules.auth.services import sync_enrollment_status
+    from modules.auth.services import schedule_has_historical_facts, sync_enrollment_status, sync_schedule_student_snapshot
     from modules.auth.workflow_services import cancel_schedule_feedback_todo, ensure_schedule_feedback_todo
     from modules.oa.models import CourseSchedule, OATodo, ScheduleImportRun
 
@@ -1138,6 +1138,19 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
                 if len(safe_candidates) == 1:
                     safe_enrollment = safe_candidates[0]
 
+            if existing and schedule_has_historical_facts(existing):
+                _preserve_import_row_artifacts(
+                    existing,
+                    touched_schedule_ids=touched_schedule_ids,
+                    touched_todo_ids=touched_todo_ids,
+                )
+                warnings.append(
+                    f'导入保留历史课次：{date_value.isoformat() if date_value else ""} '
+                    f'{payload.get("time_start")}-{payload.get("time_end")} '
+                    f'{existing.teacher} / {existing.course_name}，因为该课次已产生交付事实'
+                )
+                continue
+
             conflict_target_id = existing.id if existing else None
             conflicts = _find_import_schedule_conflicts(
                 payload.get('date'),
@@ -1209,6 +1222,7 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
 
                 if safe_enrollment:
                     existing.enrollment_id = safe_enrollment.id
+                    sync_schedule_student_snapshot(existing, enrollment=safe_enrollment, preserve_history=False)
                     ensure_schedule_feedback_todo(
                         existing,
                         created_by=uploaded_by,
@@ -1222,6 +1236,7 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
                     sync_enrollment_status(safe_enrollment)
                 else:
                     existing.enrollment_id = None
+                    sync_schedule_student_snapshot(existing, enrollment=None, preserve_history=False)
                     cancel_schedule_feedback_todo(existing.id, reason='课次待重新绑定报名')
                     issue_message = (
                         f'未找到唯一报名绑定: {existing.date.isoformat()} {existing.time_start}-{existing.time_end} '
@@ -1272,6 +1287,7 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
                     schedule.enrollment_id = safe_enrollment.id
                 else:
                     schedule.enrollment_id = None
+                sync_schedule_student_snapshot(schedule, enrollment=safe_enrollment, preserve_history=False)
 
                 db.session.add(schedule)
                 db.session.flush()

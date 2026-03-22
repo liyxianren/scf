@@ -10,6 +10,8 @@ from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.auth.services import (
     _normalize_available_slot_entries,
     _normalize_excluded_dates_entries,
+    _validate_available_slot_entries,
+    _validate_excluded_dates_entries,
     _linked_schedule_query,
     build_enrollment_payload,
     build_leave_request_payload,
@@ -410,11 +412,16 @@ def api_create_leave_request():
 
     schedule_id = data.get('schedule_id')
     reason = (data.get('reason') or '').strip()
-    makeup_available_slots = _normalize_available_slot_entries(data.get('makeup_available_slots'))
-    makeup_excluded_dates = _normalize_excluded_dates_entries(data.get('makeup_excluded_dates'))
+    makeup_available_slots, slot_errors = _validate_available_slot_entries(data.get('makeup_available_slots'))
+    makeup_excluded_dates, excluded_errors = _validate_excluded_dates_entries(data.get('makeup_excluded_dates'))
     makeup_preference_note = (data.get('makeup_preference_note') or '').strip() or None
     if not schedule_id:
         return jsonify({'success': False, 'error': '缺少 schedule_id'}), 400
+    if not reason:
+        return jsonify({'success': False, 'error': '请填写请假原因'}), 400
+    validation_errors = slot_errors + excluded_errors
+    if validation_errors:
+        return jsonify({'success': False, 'error': '；'.join(validation_errors), 'errors': validation_errors}), 400
 
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
@@ -467,9 +474,13 @@ def api_approve_leave(request_id):
         sync_enrollment_status(linked_enrollment)
     if leave_request.schedule_id:
         cancel_schedule_feedback_todo(leave_request.schedule_id, reason='课程请假已批准')
-    ensure_leave_makeup_workflow(leave_request, actor_user=current_user)
+    workflow_todo = ensure_leave_makeup_workflow(leave_request, actor_user=current_user)
     db.session.commit()
-    return jsonify({'success': True, 'data': build_leave_request_payload(leave_request, current_user)})
+    payload = build_leave_request_payload(leave_request, current_user)
+    payload['next_workflow_id'] = workflow_todo.id if workflow_todo else None
+    payload['next_action_label'] = '提交补课建议'
+    payload['next_action_hint'] = '请到待我提案里补充补课时间，教务会继续发送给学生确认。'
+    return jsonify({'success': True, 'data': payload})
 
 
 @auth_bp.route('/api/leave-requests/<int:request_id>/reject', methods=['PUT'])

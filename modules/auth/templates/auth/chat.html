@@ -293,38 +293,10 @@ async function openNewChat(){
   cl.innerHTML = '<div class="empty-state" style="padding:20px"><span>加载中...</span></div>';
   try{
     let contacts = [];
-    if(CURRENT_ROLE === 'teacher'){
-      const res = await fetch('/auth/api/teacher/my-schedule?range=all');
-      const json = await res.json();
-      if(json.success && json.data.students){
-        const seen = new Set();
-        json.data.students.forEach(s => {
-          if(s.user_id && !seen.has(s.user_id)){
-            seen.add(s.user_id);
-            contacts.push({id: s.user_id, name: s.name, role: 'student'});
-          }
-        });
-      }
-    } else if(CURRENT_ROLE === 'student'){
-      const res = await fetch('/auth/api/student/my-info');
-      const json = await res.json();
-      if(json.success && json.data.enrollments){
-        const seen = new Set();
-        json.data.enrollments.forEach(e => {
-          if(e.teacher_id && !seen.has(e.teacher_id)){
-            seen.add(e.teacher_id);
-            contacts.push({id: e.teacher_id, name: e.teacher_name, role: 'teacher'});
-          }
-        });
-      }
-    } else if(CURRENT_ROLE === 'admin'){
-      const res = await fetch('/auth/api/users');
-      const json = await res.json();
-      if(json.success && json.data){
-        contacts = json.data
-          .filter(user => user.id !== CURRENT_USER_ID && user.is_active)
-          .map(user => ({id: user.id, name: user.display_name, role: user.role}));
-      }
+    const res = await fetch('/auth/api/chat/contacts');
+    const json = await res.json();
+    if(json.success && Array.isArray(json.data)){
+      contacts = json.data.map(user => ({id: user.id, name: user.display_name, role: user.role}));
     }
     if(contacts.length === 0){
       cl.innerHTML = '<div class="empty-state" style="padding:20px"><span>暂无可联系的人</span></div>';

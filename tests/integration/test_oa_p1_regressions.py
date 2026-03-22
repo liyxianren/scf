@@ -13,6 +13,7 @@ from modules.auth.workflow_services import ensure_schedule_feedback_todo
 from modules.oa.models import CourseSchedule, OATodo, ScheduleImportRun
 from tests.factories import (
     create_enrollment,
+    create_feedback,
     create_leave_request,
     create_schedule,
     create_student_profile,
@@ -368,7 +369,10 @@ def test_same_student_conflict_and_leave_lock_behaviour(client, login_as):
             'time_end': '15:00',
         },
     )
+    payload = response.get_json()
     assert response.status_code == 200
+    assert payload['data']['time_start'] == '13:00'
+    assert payload['data']['time_end'] == '15:00'
 
     approved_leave_schedule = create_schedule(
         teacher=teacher,
@@ -405,8 +409,9 @@ def test_same_student_conflict_and_leave_lock_behaviour(client, login_as):
         },
     )
     payload = response.get_json()
-    assert response.status_code == 400
-    assert '请假记录' in payload['error']
+    assert response.status_code == 200
+    assert payload['data']['time_start'] == '13:00'
+    assert payload['data']['time_end'] == '15:00'
 
 
 def test_excel_import_creates_binding_todo_and_feedback_workflow(client, login_as):
@@ -654,6 +659,76 @@ def test_excel_reimport_conflict_keeps_existing_imported_schedule(client, login_
     assert len(payload['data']['conflict_rows']) == 1
     assert payload['data']['schedules_deleted'] == 0
     assert db.session.get(CourseSchedule, imported_schedule.id) is not None
+
+
+def test_excel_reimport_skips_historical_imported_schedule_with_submitted_feedback(client, login_as):
+    admin = create_user(username='oa-p1-history-import-admin', display_name='HistoryImportAdmin', role='admin')
+    teacher = create_user(username='oa-p1-history-import-teacher', display_name='HistoryImportTeacher', role='teacher')
+    student = create_user(username='oa-p1-history-import-student', display_name='HistoryImportStudentUser', role='student')
+    profile = create_student_profile(user=student, name='HistoryImportStudent')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='HistoryImportStudent',
+        course_name='HistoricalCourse AI',
+        student_profile=profile,
+        status='confirmed',
+    )
+
+    import_run = ScheduleImportRun(
+        original_filename='historical-old.xlsx',
+        uploaded_by=admin.id,
+        status='completed',
+    )
+    db.session.add(import_run)
+    db.session.flush()
+
+    imported_schedule = CourseSchedule(
+        date=date(2026, 3, 16),
+        day_of_week=date(2026, 3, 16).weekday(),
+        time_start='10:00',
+        time_end='12:00',
+        teacher=teacher.display_name,
+        teacher_id=teacher.id,
+        course_name='HistoricalCourse AI',
+        students='HistoryImportStudent',
+        enrollment_id=enrollment.id,
+        import_run_id=import_run.id,
+        color_tag='blue',
+        delivery_mode='online',
+    )
+    db.session.add(imported_schedule)
+    db.session.flush()
+    create_feedback(schedule=imported_schedule, teacher=teacher, status='submitted')
+    db.session.commit()
+
+    login_as(admin)
+    response = client.post(
+        '/oa/api/import-excel',
+        data={
+            'file': (
+                _build_custom_import_workbook([
+                    (date(2026, 3, 16), '10:00-12:00 HistoryImportTeacher\nReplacementCourse AI\nReplacementStudent'),
+                ]),
+                '2026-historical-reimport.xlsx',
+            )
+        },
+        content_type='multipart/form-data',
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['schedules_updated'] == 0
+    assert any('导入保留历史课次' in warning for warning in payload['data']['warnings'])
+
+    db.session.expire_all()
+    refreshed_schedule = db.session.get(CourseSchedule, imported_schedule.id)
+    assert refreshed_schedule is not None
+    assert refreshed_schedule.course_name == 'HistoricalCourse AI'
+    assert refreshed_schedule.students == 'HistoryImportStudent'
+    assert refreshed_schedule.enrollment_id == enrollment.id
+    assert refreshed_schedule.import_run_id == import_run.id
+    assert refreshed_schedule.feedback is not None
+    assert refreshed_schedule.feedback.status == 'submitted'
 
 
 def test_excel_reimport_conflict_keeps_existing_binding_todo(client, login_as):

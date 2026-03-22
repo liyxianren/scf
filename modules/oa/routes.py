@@ -8,7 +8,14 @@ from flask_login import current_user
 from extensions import db
 from modules.auth.decorators import role_required
 from modules.auth.models import Enrollment, LeaveRequest, User
-from modules.auth.services import build_schedule_payload, get_business_today, sync_enrollment_status
+from modules.auth.services import (
+    _schedule_effective_student_profile_id,
+    build_schedule_payload,
+    get_business_today,
+    schedule_has_historical_facts,
+    sync_schedule_student_snapshot,
+    sync_enrollment_status,
+)
 from modules.oa import oa_bp
 from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
 from modules.oa.services import (
@@ -40,6 +47,14 @@ def _time_ranges_overlap(start_a, end_a, start_b, end_b):
         _time_to_minutes(end_a),
         _time_to_minutes(end_b),
     )
+
+
+def _shift_schedule_time_value(time_str, minutes_delta):
+    total_minutes = _time_to_minutes(time_str)
+    shifted_minutes = total_minutes + minutes_delta
+    if shifted_minutes < 0 or shifted_minutes > (23 * 60 + 59):
+        return None
+    return f'{shifted_minutes // 60:02d}:{shifted_minutes % 60:02d}'
 
 
 def _resolve_teacher_or_error(teacher_value):
@@ -128,6 +143,214 @@ def _direct_schedule_update_workflow_error(schedule, updates):
     return None
 
 
+def _normalize_schedule_compare_value(field, value):
+    if field in {'teacher', 'time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag'}:
+        return str(value or '').strip()
+    return value
+
+
+def _historical_schedule_mutation_error(schedule, *, proposed_values=None, deleting=False):
+    if not schedule or not schedule_has_historical_facts(schedule):
+        return None
+    if deleting:
+        return '该课程已产生交付事实，不能直接删除'
+    changed_fields = {
+        field
+        for field, value in (proposed_values or {}).items()
+        if _normalize_schedule_compare_value(field, value)
+        != _normalize_schedule_compare_value(field, getattr(schedule, field, None))
+    }
+    if not changed_fields:
+        return None
+    if changed_fields.issubset({'notes', 'location', 'color_tag'}):
+        return None
+    return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+
+
+def _build_schedule_update_context(schedule, data, *, allow_admin_override=False):
+    if not data:
+        return None, ('请提供 JSON 数据', 400)
+    if not allow_admin_override and _schedule_locked_by_leave(schedule, data):
+        return None, ('该课程已有请假记录，请通过调课流程处理，不能直接覆盖', 400)
+
+    next_date = schedule.date
+    if 'date' in data:
+        try:
+            next_date = date.fromisoformat(data['date'])
+        except ValueError:
+            return None, ('日期格式错误', 400)
+
+    next_teacher_name = data.get('teacher', schedule.teacher)
+    if 'teacher' not in data and schedule.teacher_id:
+        teacher_user = db.session.get(User, schedule.teacher_id)
+        if teacher_user:
+            next_teacher_name = teacher_user.display_name
+    teacher_user, error = _resolve_teacher_or_error(next_teacher_name)
+    if error:
+        return None, (error, 400)
+
+    original_enrollment_id = schedule.enrollment_id
+    original_enrollment = db.session.get(Enrollment, original_enrollment_id) if original_enrollment_id else None
+    next_enrollment_id = data.get('enrollment_id', schedule.enrollment_id)
+    if next_enrollment_id:
+        enrollment = db.session.get(Enrollment, next_enrollment_id)
+        if not enrollment:
+            return None, ('报名记录不存在', 404)
+        if enrollment.teacher_id != teacher_user.id:
+            return None, ('所选教师与报名绑定教师不一致', 400)
+        if not allow_admin_override:
+            enrollment_error = _direct_schedule_enrollment_error(enrollment)
+            if enrollment_error:
+                return None, (enrollment_error, 400)
+    else:
+        enrollment = None
+
+    next_time_start = data.get('time_start', schedule.time_start)
+    next_time_end = data.get('time_end', schedule.time_end)
+    next_course_name = data.get('course_name', schedule.course_name)
+    next_students = data.get('students')
+    if next_students is None:
+        next_students = (
+            enrollment.student_name if next_enrollment_id != original_enrollment_id and enrollment else schedule.students
+        )
+    next_location = data.get('location', schedule.location)
+    next_notes = data.get('notes', schedule.notes)
+    next_color_tag = data.get('color_tag', schedule.color_tag)
+
+    if not allow_admin_override:
+        workflow_error = _direct_schedule_update_workflow_error(schedule, data)
+        if workflow_error:
+            return None, (workflow_error, 400)
+
+        historical_error = _historical_schedule_mutation_error(
+            schedule,
+            proposed_values={
+                'date': next_date,
+                'time_start': next_time_start,
+                'time_end': next_time_end,
+                'teacher': teacher_user.display_name,
+                'teacher_id': teacher_user.id,
+                'course_name': next_course_name,
+                'students': next_students,
+                'location': next_location,
+                'notes': next_notes,
+                'color_tag': next_color_tag,
+                'enrollment_id': next_enrollment_id,
+            },
+        )
+        if historical_error:
+            return None, (historical_error, 400)
+
+    conflict_error = _validate_schedule_conflicts(
+        schedule_id=schedule.id,
+        course_date=next_date,
+        time_start=next_time_start,
+        time_end=next_time_end,
+        teacher_id=teacher_user.id,
+        enrollment_id=next_enrollment_id,
+    )
+    if conflict_error:
+        return None, (conflict_error, 400)
+
+    return {
+        'original_enrollment_id': original_enrollment_id,
+        'original_enrollment': original_enrollment,
+        'historical_student_profile_id': _schedule_effective_student_profile_id(schedule),
+        'preserve_student_snapshot': schedule_has_historical_facts(schedule),
+        'enrollment': enrollment,
+        'next_date': next_date,
+        'next_time_start': next_time_start,
+        'next_time_end': next_time_end,
+        'teacher_user': teacher_user,
+        'next_course_name': next_course_name,
+        'next_students': next_students or '',
+        'next_location': next_location,
+        'next_notes': next_notes,
+        'next_color_tag': next_color_tag,
+        'next_enrollment_id': next_enrollment_id,
+    }, None
+
+
+def _apply_schedule_update_context(schedule, context):
+    from modules.auth.workflow_services import sync_schedule_feedback_todo
+
+    original_enrollment_id = context['original_enrollment_id']
+    enrollment = context['enrollment']
+
+    schedule.date = context['next_date']
+    schedule.day_of_week = context['next_date'].weekday()
+    schedule.time_start = context['next_time_start']
+    schedule.time_end = context['next_time_end']
+    schedule.teacher = context['teacher_user'].display_name
+    schedule.teacher_id = context['teacher_user'].id
+    schedule.course_name = context['next_course_name']
+    schedule.students = context['next_students']
+    schedule.location = context['next_location']
+    schedule.notes = context['next_notes']
+    schedule.color_tag = context['next_color_tag']
+    schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
+    schedule.enrollment_id = context['next_enrollment_id']
+    if context.get('preserve_student_snapshot'):
+        historical_student_profile_id = context.get('historical_student_profile_id')
+        if historical_student_profile_id is not None:
+            schedule.student_profile_id_snapshot = historical_student_profile_id
+        else:
+            sync_schedule_student_snapshot(
+                schedule,
+                enrollment=context.get('original_enrollment'),
+                preserve_history=False,
+                force=True,
+            )
+    else:
+        sync_schedule_student_snapshot(
+            schedule,
+            enrollment=enrollment,
+            preserve_history=False,
+        )
+
+    db.session.flush()
+    if original_enrollment_id:
+        original_enrollment = db.session.get(Enrollment, original_enrollment_id)
+        if original_enrollment and (not enrollment or original_enrollment.id != enrollment.id):
+            sync_enrollment_status(original_enrollment)
+    if enrollment:
+        sync_enrollment_status(enrollment)
+    sync_schedule_feedback_todo(schedule)
+    db.session.commit()
+    return schedule
+
+
+def _schedule_factual_edit_block_reason(schedule):
+    mutation_probe = {
+        'date': schedule.date.isoformat() if schedule.date else None,
+        'time_start': schedule.time_start,
+        'time_end': schedule.time_end,
+        'teacher': schedule.teacher,
+        'enrollment_id': schedule.enrollment_id,
+        'course_name': schedule.course_name,
+        'students': schedule.students,
+    }
+    if _schedule_locked_by_leave(schedule, mutation_probe):
+        return '该课程已有请假记录，请通过调课流程处理，不能直接覆盖'
+    workflow_error = _direct_schedule_update_workflow_error(schedule, mutation_probe)
+    if workflow_error:
+        return workflow_error
+    if schedule_has_historical_facts(schedule):
+        return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+    return None
+
+
+def _build_oa_schedule_payload(schedule):
+    payload = build_schedule_payload(schedule, current_user)
+    payload.update({
+        'admin_can_delete': True,
+        'admin_delete_block_reason': None,
+        'admin_can_reschedule': True,
+        'admin_reschedule_block_reason': None,
+    })
+    return payload
+
+
 def _guard_generic_todo_mutation(todo):
     if todo and todo.is_workflow:
         return jsonify({'success': False, 'error': '工作流待办不能通过通用待办接口修改，请使用对应工作流动作'}), 400
@@ -182,7 +405,7 @@ def api_list_schedules():
 
     return jsonify({
         'success': True,
-        'data': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+        'data': [_build_oa_schedule_payload(schedule) for schedule in schedules],
         'total': len(schedules),
     })
 
@@ -230,7 +453,7 @@ def api_schedules_by_date():
 
     return jsonify({
         'success': True,
-        'data': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+        'data': [_build_oa_schedule_payload(schedule) for schedule in schedules],
         'total': len(schedules),
     })
 
@@ -241,7 +464,7 @@ def api_get_schedule(schedule_id):
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
-    return jsonify({'success': True, 'data': build_schedule_payload(schedule, current_user)})
+    return jsonify({'success': True, 'data': _build_oa_schedule_payload(schedule)})
 
 
 @oa_bp.route('/api/schedules', methods=['POST'])
@@ -274,9 +497,6 @@ def api_create_schedule():
             return jsonify({'success': False, 'error': '报名记录不存在'}), 404
         if enrollment.teacher_id != teacher_user.id:
             return jsonify({'success': False, 'error': '所选教师与报名绑定教师不一致'}), 400
-        enrollment_error = _direct_schedule_enrollment_error(enrollment)
-        if enrollment_error:
-            return jsonify({'success': False, 'error': enrollment_error}), 400
     else:
         enrollment = None
 
@@ -305,6 +525,7 @@ def api_create_schedule():
         color_tag=data.get('color_tag', 'blue'),
         delivery_mode=delivery_mode_from_color_tag(data.get('color_tag', 'blue')),
     )
+    sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
     db.session.add(schedule)
     db.session.flush()
     ensure_schedule_feedback_todo(schedule, created_by=current_user.id)
@@ -312,93 +533,66 @@ def api_create_schedule():
         sync_enrollment_status(enrollment)
     db.session.commit()
 
-    return jsonify({'success': True, 'data': build_schedule_payload(schedule, current_user)}), 201
+    return jsonify({'success': True, 'data': _build_oa_schedule_payload(schedule)}), 201
 
 
 @oa_bp.route('/api/schedules/<int:schedule_id>', methods=['PUT'])
 @role_required('admin')
 def api_update_schedule(schedule_id):
-    from modules.auth.workflow_services import sync_schedule_feedback_todo
-
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
-    original_enrollment_id = schedule.enrollment_id
 
     data = request.get_json()
-    if not data:
-        return jsonify({'success': False, 'error': '请提供 JSON 数据'}), 400
-    if _schedule_locked_by_leave(schedule, data):
-        return jsonify({'success': False, 'error': '该课程已有请假记录，请通过调课流程处理，不能直接覆盖'}), 400
-    workflow_error = _direct_schedule_update_workflow_error(schedule, data)
-    if workflow_error:
-        return jsonify({'success': False, 'error': workflow_error}), 400
-
-    next_date = schedule.date
-    if 'date' in data:
-        try:
-            next_date = date.fromisoformat(data['date'])
-        except ValueError:
-            return jsonify({'success': False, 'error': '日期格式错误'}), 400
-
-    next_teacher_name = data.get('teacher', schedule.teacher)
-    teacher_user, error = _resolve_teacher_or_error(next_teacher_name)
+    context, error = _build_schedule_update_context(schedule, data, allow_admin_override=True)
     if error:
-        return jsonify({'success': False, 'error': error}), 400
+        return jsonify({'success': False, 'error': error[0]}), error[1]
+    _apply_schedule_update_context(schedule, context)
 
-    next_enrollment_id = data.get('enrollment_id', schedule.enrollment_id)
-    if next_enrollment_id:
-        enrollment = db.session.get(Enrollment, next_enrollment_id)
-        if not enrollment:
-            return jsonify({'success': False, 'error': '报名记录不存在'}), 404
-        if enrollment.teacher_id != teacher_user.id:
-            return jsonify({'success': False, 'error': '所选教师与报名绑定教师不一致'}), 400
-        enrollment_error = _direct_schedule_enrollment_error(enrollment)
-        if enrollment_error:
-            return jsonify({'success': False, 'error': enrollment_error}), 400
-    else:
-        enrollment = None
+    return jsonify({'success': True, 'data': _build_oa_schedule_payload(schedule)})
 
-    next_time_start = data.get('time_start', schedule.time_start)
-    next_time_end = data.get('time_end', schedule.time_end)
-    conflict_error = _validate_schedule_conflicts(
-        schedule_id=schedule.id,
-        course_date=next_date,
-        time_start=next_time_start,
-        time_end=next_time_end,
-        teacher_id=teacher_user.id,
-        enrollment_id=next_enrollment_id,
-    )
-    if conflict_error:
-        return jsonify({'success': False, 'error': conflict_error}), 400
 
-    schedule.date = next_date
-    schedule.day_of_week = next_date.weekday()
-    schedule.time_start = next_time_start
-    schedule.time_end = next_time_end
-    schedule.teacher = teacher_user.display_name
-    schedule.teacher_id = teacher_user.id
-    schedule.course_name = data.get('course_name', schedule.course_name)
-    if 'students' in data:
-        schedule.students = data['students']
-    elif next_enrollment_id != original_enrollment_id:
-        schedule.students = enrollment.student_name if enrollment else ''
-    schedule.location = data.get('location', schedule.location)
-    schedule.notes = data.get('notes', schedule.notes)
-    schedule.color_tag = data.get('color_tag', schedule.color_tag)
-    schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
-    schedule.enrollment_id = next_enrollment_id
-    db.session.flush()
-    if original_enrollment_id:
-        original_enrollment = db.session.get(Enrollment, original_enrollment_id)
-        if original_enrollment and (not enrollment or original_enrollment.id != enrollment.id):
-            sync_enrollment_status(original_enrollment)
-    if enrollment:
-        sync_enrollment_status(enrollment)
-    sync_schedule_feedback_todo(schedule)
-    db.session.commit()
+@oa_bp.route('/api/schedules/<int:schedule_id>/quick-shift', methods=['POST'])
+@role_required('admin')
+def api_quick_shift_schedule(schedule_id):
+    schedule = db.session.get(CourseSchedule, schedule_id)
+    if not schedule:
+        return jsonify({'success': False, 'error': '课程不存在'}), 404
 
-    return jsonify({'success': True, 'data': build_schedule_payload(schedule, current_user)})
+    data = request.get_json() or {}
+    try:
+        date_shift_days = int(data.get('date_shift_days', 0) or 0)
+        time_shift_minutes = int(data.get('time_shift_minutes', 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': '快捷调课参数必须是整数'}), 400
+
+    if date_shift_days == 0 and time_shift_minutes == 0:
+        return jsonify({'success': False, 'error': '请至少提供一个时间或日期调整量'}), 400
+
+    next_time_start = _shift_schedule_time_value(schedule.time_start, time_shift_minutes)
+    next_time_end = _shift_schedule_time_value(schedule.time_end, time_shift_minutes)
+    if not next_time_start or not next_time_end:
+        return jsonify({'success': False, 'error': '快捷调课不能跨天，请改用完整编辑'}), 400
+
+    next_date = schedule.date + timedelta(days=date_shift_days)
+    update_payload = {
+        'date': next_date.isoformat(),
+        'time_start': next_time_start,
+        'time_end': next_time_end,
+    }
+    context, error = _build_schedule_update_context(schedule, update_payload, allow_admin_override=True)
+    if error:
+        return jsonify({'success': False, 'error': error[0]}), error[1]
+    _apply_schedule_update_context(schedule, context)
+
+    return jsonify({
+        'success': True,
+        'data': _build_oa_schedule_payload(schedule),
+        'meta': {
+            'date_shift_days': date_shift_days,
+            'time_shift_minutes': time_shift_minutes,
+        },
+    })
 
 
 @oa_bp.route('/api/schedules/<int:schedule_id>', methods=['DELETE'])
@@ -706,7 +900,7 @@ def api_dashboard_stats():
             'today_count': today_count,
             'pending_todos': pending_count,
             'week_count': week_count,
-        'today_schedules': [build_schedule_payload(schedule, current_user) for schedule in today_schedules],
+        'today_schedules': [_build_oa_schedule_payload(schedule) for schedule in today_schedules],
         }
     })
 

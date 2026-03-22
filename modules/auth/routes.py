@@ -9,8 +9,14 @@ from modules.auth import auth_bp
 from modules.auth.decorators import role_required
 from modules.auth.models import Enrollment, LeaveRequest, TeacherAvailability, User
 from modules.auth.services import (
+    _actor_can_manage_schedule_feedback,
     _latest_leave_request,
+    _profile_constraint_meta,
     _schedule_has_started,
+    student_schedule_profile_clause,
+    _teacher_identity_names,
+    _teacher_schedule_identity_filter,
+    _validate_available_slot_entries,
     build_enrollment_payload,
     build_feedback_payload,
     build_leave_request_payload,
@@ -22,7 +28,7 @@ from modules.auth.services import (
     seed_staff_accounts,
     user_can_access_schedule,
 )
-from modules.oa.models import CourseSchedule
+from modules.oa.models import CourseFeedback, CourseSchedule
 
 
 def _resolve_date_range(range_param):
@@ -52,7 +58,7 @@ def _teacher_can_manage_availability(teacher_id):
 
 
 def _feedback_permission_error(schedule):
-    if not schedule or schedule.teacher_id != current_user.id:
+    if not schedule or not _actor_can_manage_schedule_feedback(current_user, schedule):
         return jsonify({'success': False, 'error': '无权提交该课程反馈'}), 403
     if getattr(schedule, 'feedback', None) and schedule.feedback.status == 'submitted':
         return jsonify({'success': False, 'error': '该课程反馈已提交'}), 400
@@ -64,12 +70,13 @@ def _feedback_permission_error(schedule):
     return None
 
 
-def _teacher_schedule_query(user, start, end):
-    return CourseSchedule.query.filter(
-        CourseSchedule.teacher_id == user.id,
-        CourseSchedule.date >= start,
-        CourseSchedule.date <= end,
-    ).order_by(CourseSchedule.date, CourseSchedule.time_start)
+def _teacher_schedule_query(user, start=None, end=None):
+    query = CourseSchedule.query.filter(_teacher_schedule_identity_filter(CourseSchedule, user))
+    if start is not None:
+        query = query.filter(CourseSchedule.date >= start)
+    if end is not None:
+        query = query.filter(CourseSchedule.date <= end)
+    return query.order_by(CourseSchedule.date, CourseSchedule.time_start)
 
 
 def _student_schedule_query(user, start=None, end=None):
@@ -77,9 +84,9 @@ def _student_schedule_query(user, start=None, end=None):
     if not profile:
         return CourseSchedule.query.filter(False)
 
-    query = CourseSchedule.query.join(
-        Enrollment, CourseSchedule.enrollment_id == Enrollment.id
-    ).filter(Enrollment.student_profile_id == profile.id)
+    query = CourseSchedule.query.filter(
+        student_schedule_profile_clause(profile.id, schedule_model=CourseSchedule)
+    )
 
     if start is not None:
         query = query.filter(CourseSchedule.date >= start)
@@ -126,6 +133,66 @@ def _action_sort_key(item):
 
 def _sort_action_items(items):
     return sorted(items, key=_action_sort_key)
+
+
+def _workflow_matches_teacher_actor(item, actor):
+    if not actor or not item:
+        return False
+    teacher_id = item.get('teacher_id')
+    if teacher_id is not None:
+        return teacher_id == actor.id
+    teacher_name = str(item.get('teacher_name') or '').strip()
+    return bool(teacher_name and teacher_name in _teacher_identity_names(actor))
+
+
+def _student_profile_payload(profile):
+    if not profile:
+        return None
+    payload = profile.to_dict()
+    meta = _profile_constraint_meta(profile)
+    payload.update({
+        'available_times_summary': meta['available_times_summary'],
+        'excluded_dates_summary': meta['excluded_dates_summary'],
+    })
+    return payload
+
+
+def _rename_slot_validation_errors(errors, label):
+    return [str(item).replace('可补课时段', label) for item in (errors or [])]
+
+
+def _annotate_pending_feedback_risk(payloads):
+    if not payloads:
+        return []
+
+    teacher_counts = {}
+    for item in payloads:
+        teacher_id = item.get('teacher_id')
+        if teacher_id is None:
+            continue
+        teacher_counts[teacher_id] = teacher_counts.get(teacher_id, 0) + 1
+
+    for item in payloads:
+        teacher_id = item.get('teacher_id')
+        item['missing_feedback_count_for_teacher_recent'] = teacher_counts.get(teacher_id, 0)
+        item['is_repeat_late_teacher'] = teacher_counts.get(teacher_id, 0) >= 2
+        item['feedback_delay_days'] = max(int(item.get('feedback_delay_days') or 0), 0)
+    return payloads
+
+
+def _exclude_approved_leave(payloads):
+    return [item for item in (payloads or []) if item.get('leave_status') != 'approved']
+
+
+def _build_leave_case_payloads(actor):
+    items = [
+        build_leave_request_payload(item, actor)
+        for item in LeaveRequest.query.order_by(
+            LeaveRequest.created_at.desc(),
+            LeaveRequest.id.desc(),
+        ).all()
+    ]
+    return _sort_action_items(items)
 
 
 def _teacher_students_summary(user):
@@ -281,13 +348,17 @@ def api_teacher_my_schedule():
 
     today = get_business_today()
     upcoming_end = today + timedelta(days=7)
-    upcoming = [
-        payload for payload in payload_schedules
-        if today <= date.fromisoformat(payload['date']) <= upcoming_end
-    ]
+    upcoming = _exclude_approved_leave([
+        build_schedule_payload(schedule, current_user)
+        for schedule in _teacher_schedule_query(current_user, today, upcoming_end).all()
+        if schedule.date and today <= schedule.date <= upcoming_end
+    ])
     pending_feedback = [
-        payload for payload in payload_schedules
-        if payload.get('can_submit_feedback')
+        payload for payload in [
+            build_schedule_payload(schedule, current_user)
+            for schedule in _teacher_schedule_query(current_user, end=today).all()
+        ]
+        if payload.get('next_action_status') == 'waiting_teacher_feedback'
     ]
 
     return jsonify({
@@ -306,10 +377,29 @@ def api_teacher_my_schedule():
 @auth_bp.route('/api/teacher/action-center')
 @role_required('teacher', 'admin')
 def api_teacher_action_center():
-    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+    from modules.auth.workflow_services import (
+        build_workflow_todo_payload,
+        ensure_leave_makeup_workflow,
+        list_workflow_todos_for_user,
+    )
 
     today = get_business_today()
     upcoming_end = today + timedelta(days=7)
+
+    orphan_makeup_leaves = LeaveRequest.query.join(
+        CourseSchedule, LeaveRequest.schedule_id == CourseSchedule.id
+    ).filter(
+        LeaveRequest.status == 'approved',
+        LeaveRequest.makeup_schedule_id.is_(None),
+        _teacher_schedule_identity_filter(CourseSchedule, current_user),
+    ).order_by(LeaveRequest.created_at.desc()).all()
+    healed_workflows = 0
+    for leave_request in orphan_makeup_leaves:
+        workflow = ensure_leave_makeup_workflow(leave_request)
+        if workflow:
+            healed_workflows += 1
+    if healed_workflows:
+        db.session.commit()
 
     workflow_todos = [
         build_workflow_todo_payload(todo, current_user)
@@ -319,22 +409,27 @@ def api_teacher_action_center():
         item for item in workflow_todos
         if item.get('next_action_role') == 'teacher'
         and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+        and _workflow_matches_teacher_actor(item, current_user)
     ])
 
-    schedule_payloads = [
+    feedback_schedule_payloads = [
         build_schedule_payload(schedule, current_user)
-        for schedule in _teacher_schedule_query(current_user, today - timedelta(days=30), upcoming_end).all()
+        for schedule in _teacher_schedule_query(current_user, end=today).all()
     ]
     pending_feedback = _sort_action_items([
-        item for item in schedule_payloads
+        item for item in feedback_schedule_payloads
         if item.get('next_action_status') == 'waiting_teacher_feedback'
     ])
+    upcoming_schedule_payloads = [
+        build_schedule_payload(schedule, current_user)
+        for schedule in _teacher_schedule_query(current_user, today, upcoming_end).all()
+    ]
     upcoming_schedules = sorted(
-        [
-            item for item in schedule_payloads
+        _exclude_approved_leave([
+            item for item in upcoming_schedule_payloads
             if item.get('date')
             and today <= date.fromisoformat(item['date']) <= upcoming_end
-        ],
+        ]),
         key=lambda item: (item['date'], item.get('time_start') or '99:99'),
     )
 
@@ -343,8 +438,8 @@ def api_teacher_action_center():
         for item in LeaveRequest.query.join(
             CourseSchedule, LeaveRequest.schedule_id == CourseSchedule.id
         ).filter(
-            CourseSchedule.teacher_id == current_user.id,
             LeaveRequest.status == 'pending',
+            _teacher_schedule_identity_filter(CourseSchedule, current_user),
         ).order_by(LeaveRequest.created_at.desc()).all()
     ])
 
@@ -375,10 +470,13 @@ def api_teacher_my_schedules_by_date():
         return error_response, status_code
 
     schedules = _teacher_schedule_query(current_user, start, end).all()
+    payloads = _exclude_approved_leave([
+        build_schedule_payload(schedule, current_user) for schedule in schedules
+    ])
     return jsonify({
         'success': True,
-        'data': [build_schedule_payload(schedule, current_user) for schedule in schedules],
-        'total': len(schedules),
+        'data': payloads,
+        'total': len(payloads),
     })
 
 
@@ -397,21 +495,46 @@ def api_student_my_info():
     profile = current_user.student_profile
     enrollments = []
     schedules = []
+    upcoming_schedules = []
+    recent_feedbacks = []
+    today = get_business_today()
 
     if profile:
         enrollments = Enrollment.query.filter(
             Enrollment.student_profile_id == profile.id
         ).order_by(Enrollment.created_at.desc()).all()
-        schedules = _student_schedule_query(current_user).order_by(
+        schedules = _student_schedule_query(current_user).order_by(None).order_by(
             CourseSchedule.date.desc(),
             CourseSchedule.time_start.desc(),
         ).limit(50).all()
+        upcoming_schedules = _student_schedule_query(
+            current_user,
+            today,
+            today + timedelta(days=90),
+        ).limit(20).all()
+        recent_feedback_rows = CourseFeedback.query.join(
+            CourseSchedule,
+            CourseFeedback.schedule_id == CourseSchedule.id,
+        ).filter(
+            student_schedule_profile_clause(profile.id, schedule_model=CourseSchedule),
+            CourseFeedback.status == 'submitted',
+        ).order_by(
+            CourseFeedback.submitted_at.desc(),
+            CourseFeedback.updated_at.desc(),
+        ).limit(3).all()
+        recent_feedbacks = [
+            build_schedule_payload(feedback.schedule, current_user)
+            for feedback in recent_feedback_rows
+            if feedback.schedule
+        ]
 
     return jsonify({
         'success': True,
         'data': {
-            'profile': profile.to_dict() if profile else None,
+            'profile': _student_profile_payload(profile),
             'schedules': [build_schedule_payload(schedule, current_user) for schedule in schedules],
+            'upcoming_schedules': [build_schedule_payload(schedule, current_user) for schedule in upcoming_schedules],
+            'recent_feedbacks': recent_feedbacks,
             'enrollments': [build_enrollment_payload(enrollment, current_user) for enrollment in enrollments],
         }
     })
@@ -442,13 +565,13 @@ def api_student_action_center():
         build_workflow_todo_payload(todo, current_user)
         for todo in list_workflow_todos_for_user(current_user, status='open')
     ]
-    pending_workflows = _sort_action_items([
-        item for item in workflow_todos if item.get('next_action_role') == 'student'
-    ])
+    pending_workflows = _sort_action_items(workflow_todos)
     workflow_enrollment_ids = {
         item.get('enrollment_id')
         for item in pending_workflows
-        if item.get('todo_type') == 'enrollment_replan' and item.get('enrollment_id')
+        if item.get('todo_type') == 'enrollment_replan'
+        and item.get('next_action_role') == 'student'
+        and item.get('enrollment_id')
     }
 
     enrollments = [
@@ -543,7 +666,7 @@ def api_admin_action_center():
             LeaveRequest.status == 'pending'
         ).order_by(LeaveRequest.created_at.desc()).all()
     ])
-    pending_feedback_schedules = _sort_action_items([
+    pending_feedback_schedules = _sort_action_items(_annotate_pending_feedback_risk([
         build_schedule_payload(schedule, current_user)
         for schedule in CourseSchedule.query.filter(
             CourseSchedule.date <= today
@@ -551,7 +674,8 @@ def api_admin_action_center():
         if _schedule_has_started(schedule)
         and not (schedule.feedback and schedule.feedback.status == 'submitted')
         and not (_latest_leave_request(schedule) and _latest_leave_request(schedule).status == 'approved')
-    ])
+    ]))
+    leave_cases = _build_leave_case_payloads(current_user)
 
     return jsonify({
         'success': True,
@@ -562,6 +686,7 @@ def api_admin_action_center():
             'waiting_student_confirm_workflows': waiting_student_confirm_workflows,
             'waiting_student_confirm_enrollments': waiting_student_confirm_enrollments,
             'pending_leave_requests': pending_leave_requests,
+            'leave_cases': leave_cases,
             'pending_feedback_schedules': pending_feedback_schedules,
             'counts': {
                 'pending_schedule_enrollments': len(pending_schedule_enrollments),
@@ -570,6 +695,7 @@ def api_admin_action_center():
                 'waiting_student_confirm_workflows': len(waiting_student_confirm_workflows),
                 'waiting_student_confirm_enrollments': len(waiting_student_confirm_enrollments),
                 'pending_leave_requests': len(pending_leave_requests),
+                'leave_cases': len(leave_cases),
                 'pending_feedback_schedules': len(pending_feedback_schedules),
             },
         },
@@ -731,9 +857,18 @@ def api_set_teacher_availability(teacher_id):
     if not data:
         return jsonify({'success': False, 'error': '请求数据为空'}), 400
 
+    available_slots, available_errors = _validate_available_slot_entries(data.get('available'))
+    preferred_slots, preferred_errors = _validate_available_slot_entries(data.get('preferred'))
+    errors = (
+        _rename_slot_validation_errors(available_errors, '可用时间')
+        + _rename_slot_validation_errors(preferred_errors, '偏好时间')
+    )
+    if errors:
+        return jsonify({'success': False, 'error': '；'.join(errors), 'errors': errors}), 400
+
     TeacherAvailability.query.filter_by(user_id=teacher_id).delete()
 
-    for slot_data in data.get('available', []):
+    for slot_data in available_slots:
         db.session.add(TeacherAvailability(
             user_id=teacher_id,
             day_of_week=slot_data['day'],
@@ -741,7 +876,7 @@ def api_set_teacher_availability(teacher_id):
             time_end=slot_data['end'],
             is_preferred=False,
         ))
-    for slot_data in data.get('preferred', []):
+    for slot_data in preferred_slots:
         db.session.add(TeacherAvailability(
             user_id=teacher_id,
             day_of_week=slot_data['day'],

@@ -68,6 +68,8 @@
 .workflow-card .wf-stage-lines strong{color:#0f172a}
 .workflow-card .wf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .workflow-card .wf-actions .inline-btn{padding-inline:12px}
+.inline-btn{display:inline-flex;align-items:center;gap:4px;padding:8px 14px;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;text-decoration:none;color:#0369a1;background:#e0f2fe}
+.inline-btn:hover{background:#bae6fd}
 .empty{padding:20px;text-align:center;color:#9ca3af;font-size:.9rem}
 @media(max-width:640px){
   .oa-page{padding:20px 14px 32px}
@@ -238,7 +240,6 @@ async function loadStudentData(){
         const json = await res.json();
         if(!json.success) return;
         const d = json.data;
-        const todayStr = new Date().toISOString().slice(0,10);
 
         // Profile
         if(d.profile){
@@ -250,6 +251,8 @@ async function loadStudentData(){
             pg.innerHTML = `
                 <div class="info-item"><div class="label">姓名</div><div class="value">${p.name||'-'}</div></div>
                 <div class="info-item"><div class="label">电话</div><div class="value">${p.phone||'-'}</div></div>
+                <div class="info-item"><div class="label">长期可上课时间</div><div class="value">${escapeHtml(p.available_times_summary||'未填写')}</div></div>
+                <div class="info-item"><div class="label">长期禁排日期</div><div class="value">${escapeHtml(p.excluded_dates_summary||'暂无')}</div></div>
             `;
         } else {
             studentProfile = null;
@@ -264,24 +267,12 @@ async function loadStudentData(){
                 const label = statusLabels[e.status] || e.status;
                 let extra = '';
                 if(e.status === 'pending_student_confirm' && e.confirmed_slot){
-                    const s = e.confirmed_slot;
-                    const weeklyText = formatWeeklySlots(s.weekly_slots || []);
-                    const dates = (s.session_dates || []).map(item => item.date);
-                    const summaryChips = [
-                        `<span class="summary-chip"><span class="material-icons" style="font-size:1rem">event_repeat</span> 共 ${dates.length} 节</span>`,
-                        `<span class="summary-chip"><span class="material-icons" style="font-size:1rem">calendar_view_week</span> ${weeklyText || '待定'}</span>`
-                    ].join('');
                     extra = `
                     <div class="confirm-preview">
-                        <div class="preview-title">待确认的排课方案${s.is_manual ? ' · 教务已微调' : ''}</div>
-                        <div class="preview-detail">请先看下面的周历分布，再决定确认或退回。</div>
-                        <div class="preview-range">${dates.length ? dates[0]+' 至 '+dates[dates.length-1] : ''}</div>
-                        <div class="pending-plan-summary">${summaryChips}</div>
-                        <div class="pending-plan-calendar" id="pendingCalendar_${e.id}"></div>
-                        <div class="confirm-btns">
-                            <button class="btn-confirm" onclick="confirmSchedule(${e.id})">确认排课</button>
-                            <button class="btn-reject" onclick="rejectSchedule(${e.id})">有问题</button>
-                        </div>
+                        <div class="preview-title">当前有待确认方案</div>
+                        <div class="preview-detail">${escapeHtml(e.current_plan_summary || '请到确认中心查看完整课次、周历预览和确认按钮。')}</div>
+                        ${e.next_step_hint ? `<div class="preview-range">${escapeHtml(e.next_step_hint)}</div>` : ''}
+                        <div style="margin-top:10px"><a class="inline-btn" href="#workflowList">打开确认中心</a></div>
                     </div>`;
                 }
                 const editLink = e.can_edit ? `<div style="margin-top:10px"><a href="${e.edit_intake_url}" style="font-size:.82rem;color:#0369a1;font-weight:700;text-decoration:none">修改上课时间与信息</a></div>` : '';
@@ -301,13 +292,10 @@ async function loadStudentData(){
         } else {
             ec.innerHTML = '<div class="empty">暂无课程</div>';
         }
-        renderPendingPlanCalendars(d.enrollments || []);
 
         const sc = document.getElementById('scheduleCardList');
-        if(d.schedules && d.schedules.length > 0){
-            const upcoming = d.schedules.filter(s => s.date >= todayStr).slice(0, 10);
-            if(upcoming.length > 0){
-                sc.innerHTML = upcoming.map(s => {
+        if(d.upcoming_schedules && d.upcoming_schedules.length > 0){
+            sc.innerHTML = d.upcoming_schedules.map(s => {
                     const safeCourseName = (s.course_name || '').replace(/'/g, "\\'");
                     const leaveBtn = s.can_request_leave ? `<button class="btn-reject" style="flex:none;padding:8px 14px" onclick="requestLeave(${s.id}, '${safeCourseName}', '${s.date}')">申请请假</button>` : '';
                     const feedbackHtml = buildFeedbackPreviewHtml(s.feedback);
@@ -320,13 +308,10 @@ async function loadStudentData(){
                         </div>
                     `;
                 }).join('');
-            } else {
-                sc.innerHTML = '<div class="empty">暂无未来课次</div>';
-            }
         } else {
             sc.innerHTML = '<div class="empty">暂无未来课次</div>';
         }
-        renderRecentFeedback(d.schedules || []);
+        renderRecentFeedback(d.recent_feedbacks || []);
     }catch(e){console.error(e);}
 }
 
@@ -584,6 +569,39 @@ function parseExcludedDatesInput(value){
     ));
 }
 
+function validateLeavePreferenceInputs(){
+    const errors = [];
+    const slots = [];
+    Array.from(document.querySelectorAll('[data-leave-slot-row]')).forEach((row, index) => {
+        const day = Number(row.querySelector('[data-field="day"]').value);
+        const start = (row.querySelector('[data-field="start"]').value || '').trim();
+        const end = (row.querySelector('[data-field="end"]').value || '').trim();
+        if(!start && !end){
+            return;
+        }
+        if(!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)){
+            errors.push(`第 ${index + 1} 个补课时段时间格式错误`);
+            return;
+        }
+        if(end <= start){
+            errors.push(`第 ${index + 1} 个补课时段结束时间必须晚于开始时间`);
+            return;
+        }
+        slots.push({day, start, end});
+    });
+    const excludedDates = parseExcludedDatesInput(document.getElementById('leaveExcludedDatesInput').value);
+    excludedDates.forEach((item, index) => {
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(item)){
+            errors.push(`第 ${index + 1} 个禁排日期格式错误，请使用 YYYY-MM-DD`);
+        }
+    });
+    return {
+        errors,
+        slots,
+        excludedDates,
+    };
+}
+
 function renderWorkflowSummary(items){
     const box = document.getElementById('workflowSummary');
     if(!box) return;
@@ -592,14 +610,17 @@ function renderWorkflowSummary(items){
         return;
     }
     const counts = items.reduce((acc, item) => {
-        const key = item.kind || item.todo_type || item.workflow_status || 'unknown';
+        const key = item.kind || item.workflow_status || item.todo_type || 'unknown';
         acc[key] = (acc[key] || 0) + 1;
         return acc;
     }, {});
     const labelMap = {
         pending_enrollment: '待确认排课',
-        enrollment_replan: '待确认重排',
-        leave_makeup: '待确认补课',
+        waiting_teacher_proposal: '待老师提案',
+        waiting_admin_review: '待教务处理',
+        waiting_student_confirm: '待学生确认',
+        completed: '已完成',
+        cancelled: '已取消',
     };
     box.innerHTML = Object.entries(counts).map(([status, count]) => `<span class="workflow-chip">${escapeHtml(labelMap[status] || workflowStatusLabel(status))} ${count}</span>`).join('');
 }
@@ -742,14 +763,7 @@ async function renderWorkflowPreviewCalendars(items){
 function renderRecentFeedback(schedules){
     const box = document.getElementById('recentFeedbackList');
     if(!box) return;
-    const items = (schedules || [])
-        .filter(item => item.feedback && item.feedback.status === 'submitted')
-        .sort((a, b) => {
-            const aValue = firstFilled(a.feedback_submitted_at, a.feedback && a.feedback.submitted_at, a.date, '');
-            const bValue = firstFilled(b.feedback_submitted_at, b.feedback && b.feedback.submitted_at, b.date, '');
-            return String(bValue).localeCompare(String(aValue));
-        })
-        .slice(0, 3);
+    const items = (schedules || []).filter(item => item.feedback && item.feedback.status === 'submitted');
     if(!items.length){
         box.innerHTML = '<div class="empty">最近暂无老师反馈</div>';
         return;
@@ -759,7 +773,6 @@ function renderRecentFeedback(schedules){
             <div class="title">${escapeHtml(item.course_name || '课程')}</div>
             <div class="detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')}</div>
             ${buildFeedbackPreviewHtml(item.feedback)}
-            ${item.enrollment_id ? `<div style="margin-top:10px"><a class="inline-btn" href="/auth/enrollments/${item.enrollment_id}">打开报名详情</a></div>` : ''}
         </div>
     `).join('');
 }
@@ -896,8 +909,13 @@ async function rejectLegacySchedule(enrollmentId, message){
 }
 
 async function submitLeaveReason(scheduleId, reason){
-    const makeupAvailableSlots = collectLeaveSlotRows();
-    const makeupExcludedDates = parseExcludedDatesInput(document.getElementById('leaveExcludedDatesInput').value);
+    const validation = validateLeavePreferenceInputs();
+    if(validation.errors.length){
+        alert(validation.errors.join('\n'));
+        return;
+    }
+    const makeupAvailableSlots = validation.slots;
+    const makeupExcludedDates = validation.excludedDates;
     const makeupPreferenceNote = document.getElementById('leavePreferenceNoteInput').value.trim();
     try{
         const res = await fetch('/auth/api/leave-requests', {
@@ -916,6 +934,8 @@ async function submitLeaveReason(scheduleId, reason){
             alert('请假申请已提交');
             closeStudentActionModal();
             await loadStudentActionCenter();
+            await loadStudentData();
+            if(calendar) await calendar.render();
         } else {
             alert(json.error || '提交失败');
         }
@@ -932,36 +952,14 @@ function renderLeaveRequests(items){
         const statusMap = {pending:'待审批',approved:'已批准',rejected:'已驳回'};
         ll.innerHTML = items.map(r=>{
             let makeupLine = '';
-            let stageLine = '';
-            let nextStepLine = '';
+            let stageLine = r.case_stage_label ? `当前阶段：${r.case_stage_label}` : '';
+            let nextStepLine = r.next_step_hint ? `下一步：${r.next_step_hint}` : '';
             if(r.makeup_schedule){
                 makeupLine = `补课时间：${r.makeup_schedule.date || ''} ${r.makeup_schedule.time_start || ''}-${r.makeup_schedule.time_end || ''}`;
             }else if(r.makeup_workflow && r.makeup_workflow.next_action_label){
                 makeupLine = `补课进度：${r.makeup_workflow.next_action_label}`;
             }else if(r.makeup_status === 'waiting_arrangement'){
                 makeupLine = '补课进度：教务与老师正在安排';
-            }
-            if(r.status === 'pending'){
-                stageLine = '当前阶段：待老师 / 教务审批';
-                nextStepLine = '下一步：审批通过后会进入补课安排。';
-            }else if(r.status === 'rejected'){
-                stageLine = '当前阶段：请假已驳回';
-                nextStepLine = '下一步：请查看处理说明后重新发起请假。';
-            }else if(r.makeup_schedule){
-                stageLine = '当前阶段：补课已确认';
-                nextStepLine = '下一步：请按已确认的补课时间正常上课。';
-            }else if(r.makeup_workflow && r.makeup_workflow.next_action_status === 'waiting_teacher_proposal'){
-                stageLine = '当前阶段：待老师提补课建议';
-                nextStepLine = '下一步：老师提交后，教务会继续发送给您确认。';
-            }else if(r.makeup_workflow && r.makeup_workflow.next_action_status === 'waiting_admin_review'){
-                stageLine = '当前阶段：待教务发送补课方案';
-                nextStepLine = '下一步：教务确认后会发给您确认补课时间。';
-            }else if(r.makeup_workflow && r.makeup_workflow.next_action_status === 'waiting_student_confirm'){
-                stageLine = '当前阶段：待我确认补课';
-                nextStepLine = '下一步：确认后补课时间会正式生效。';
-            }else if(r.status === 'approved'){
-                stageLine = '当前阶段：补课安排中';
-                nextStepLine = '下一步：老师和教务会继续安排补课。';
             }
             const preferenceLine = r.makeup_preference_summary
                 ? `<div style="font-size:.82rem;color:#475569;margin-top:6px">本次补课偏好：${escapeHtml(r.makeup_preference_summary)}</div>`

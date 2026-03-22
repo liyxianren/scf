@@ -9,6 +9,8 @@ from modules.auth.models import ChatMessage, Enrollment, LeaveRequest, User
 from modules.auth.services import (
     FEEDBACK_PREFIX,
     _build_manual_plan,
+    _linked_schedule_query,
+    backfill_schedule_relationships,
     find_matching_slots,
     propose_enrollment_schedule,
     student_confirm_schedule,
@@ -16,6 +18,7 @@ from modules.auth.services import (
 from modules.oa.models import CourseSchedule, OATodo
 from tests.factories import (
     create_enrollment,
+    create_leave_request,
     create_schedule,
     create_todo,
     create_student_profile,
@@ -44,6 +47,7 @@ def _has_rule(app, rule, methods):
 def _workflow_contract_ready(app):
     rule_candidates = [
         ['/auth/api/workflow-todos'],
+        ['/auth/api/workflow-todos/<int:id>/proposal-preview', '/auth/api/workflow-todos/<int:todo_id>/proposal-preview'],
         ['/auth/api/workflow-todos/<int:id>/teacher-proposal', '/auth/api/workflow-todos/<int:todo_id>/teacher-proposal'],
         ['/auth/api/workflow-todos/<int:id>/admin-send-to-student', '/auth/api/workflow-todos/<int:todo_id>/admin-send-to-student'],
         ['/auth/api/workflow-todos/<int:id>/student-confirm', '/auth/api/workflow-todos/<int:todo_id>/student-confirm'],
@@ -51,6 +55,7 @@ def _workflow_contract_ready(app):
     ]
     method_sets = [
         {'GET'},
+        {'POST'},
         {'POST'},
         {'POST'},
         {'POST'},
@@ -226,14 +231,41 @@ def test_enrollment_lifecycle_reject_then_confirm(client, login_as, logout):
     logout()
 
     login_as(admin)
-    response = client.post(f'/auth/api/enrollments/{enrollment_id}/match')
-    assert response.get_json()['success'] is True
-    response = client.post(f'/auth/api/enrollments/{enrollment_id}/confirm', json={'slot_index': 0})
-    assert response.get_json()['success'] is True
+    workflow_payload = client.get('/auth/api/workflow-todos').get_json()['data']
+    todo = next(item for item in workflow_payload if item.get('enrollment_id') == enrollment_id)
+    assert todo['workflow_status'] == 'waiting_teacher_proposal'
+    todo_id = todo['id']
+    logout()
+
+    login_as(teacher)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo_id}/teacher-proposal',
+        json={
+            'session_dates': [
+                {'date': '2026-03-20', 'time_start': '10:00', 'time_end': '12:00'},
+                {'date': '2026-03-23', 'time_start': '10:00', 'time_end': '12:00'},
+                {'date': '2026-03-25', 'time_start': '10:00', 'time_end': '12:00'},
+            ],
+            'note': '按学生反馈调整首周节奏',
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    logout()
+
+    login_as(admin)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo_id}/admin-send-to-student',
+        json={'force_save': True},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
     logout()
 
     login_as(student)
-    response = client.post(f'/auth/api/enrollments/{enrollment_id}/student-confirm')
+    response = client.post(f'/auth/api/workflow-todos/{todo_id}/student-confirm')
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['created_count'] == 3
@@ -537,6 +569,9 @@ def test_leave_approval_and_feedback_visibility(client, login_as, logout):
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['data']['status'] == 'approved'
+    assert payload['data']['next_workflow_id'] is not None
+    assert payload['data']['next_action_label'] == '提交补课建议'
+    assert '教务会继续发送给学生确认' in payload['data']['next_action_hint']
 
     response = client.post(
         f'/auth/api/schedules/{leave_schedule.id}/feedback',
@@ -549,6 +584,9 @@ def test_leave_approval_and_feedback_visibility(client, login_as, logout):
         json={'summary': '草稿总结', 'homework': '草稿作业', 'next_focus': '草稿重点'},
     )
     assert response.get_json()['success'] is True
+    draft_center = client.get('/auth/api/teacher/action-center').get_json()['data']
+    draft_item = next(item for item in draft_center['pending_feedback_schedules'] if item['id'] == feedback_schedule.id)
+    assert draft_item['feedback']['status'] == 'draft'
     logout()
 
     login_as(student)
@@ -579,6 +617,73 @@ def test_leave_approval_and_feedback_visibility(client, login_as, logout):
     response = client.get('/auth/api/chat/conversations')
     payload = response.get_json()
     assert any('请假审批' in item['last_message'] for item in payload['data'])
+
+
+def test_leave_request_rejects_invalid_makeup_preferences(client, login_as):
+    teacher = create_user(username='invalid-leave-teacher', display_name='非法请假老师', role='teacher')
+    student = create_user(username='invalid-leave-student', display_name='非法请假学生', role='student')
+    profile = create_student_profile(user=student, name='非法请假学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='非法请假学生',
+        course_name='非法请假课程',
+        student_profile=profile,
+        status='confirmed',
+    )
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='非法请假课程',
+        students='非法请假学生',
+        enrollment=enrollment,
+        schedule_date=date(2026, 3, 25),
+        time_start='10:00',
+        time_end='12:00',
+    )
+
+    login_as(student)
+    response = client.post('/auth/api/leave-requests', json={
+        'schedule_id': schedule.id,
+        'reason': '需要请假',
+        'makeup_available_slots': [{'day': 0, 'start': '20:00', 'end': '18:00'}],
+        'makeup_excluded_dates': ['2026/03/26'],
+    })
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert '结束时间必须晚于开始时间' in payload['error']
+    assert '禁排日期格式错误' in payload['error']
+
+
+def test_leave_request_requires_non_empty_reason(client, login_as):
+    teacher = create_user(username='blank-leave-teacher', display_name='空原因老师', role='teacher')
+    student = create_user(username='blank-leave-student', display_name='空原因学生', role='student')
+    profile = create_student_profile(user=student, name='空原因学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='空原因学生',
+        course_name='空原因课程',
+        student_profile=profile,
+        status='confirmed',
+    )
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='空原因课程',
+        students='空原因学生',
+        enrollment=enrollment,
+        schedule_date=date(2026, 3, 25),
+        time_start='10:00',
+        time_end='12:00',
+    )
+
+    login_as(student)
+    response = client.post('/auth/api/leave-requests', json={
+        'schedule_id': schedule.id,
+        'reason': '   ',
+    })
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert payload['error'] == '请填写请假原因'
 
 
 def test_time_based_leave_and_status_sync(client, login_as, logout):
@@ -640,7 +745,10 @@ def test_time_based_leave_and_status_sync(client, login_as, logout):
 
     login_as(admin)
     response = client.delete(f'/oa/api/schedules/{future_schedule.id}')
+    payload = response.get_json()
     assert response.status_code == 200
+    assert payload['success'] is True
+    assert db.session.get(CourseSchedule, future_schedule.id) is None
 
     refreshed = db.session.get(Enrollment, enrollment.id)
     assert refreshed.status == 'completed'
@@ -730,6 +838,23 @@ def test_teacher_proposal_warnings_surface_to_admin_action_center(client, app, l
     logout()
 
     login_as(teacher)
+    preview_response = client.post(
+        f'/auth/api/workflow-todos/{todo_id}/proposal-preview',
+        json={
+            'session_dates': [
+                {'date': '2026-03-17', 'time_start': '10:00', 'time_end': '12:00'},
+                {'date': '2026-03-18', 'time_start': '10:00', 'time_end': '12:00'},
+                {'date': '2026-03-20', 'time_start': '10:00', 'time_end': '12:00'},
+            ],
+        },
+    )
+    preview_payload = preview_response.get_json()
+    assert preview_response.status_code == 200
+    assert preview_payload['success'] is True
+    assert any('老师原始可用时间' in item for item in preview_payload['data']['warnings'])
+    assert any('不可上课日期' in item for item in preview_payload['data']['warnings'])
+    assert db.session.get(OATodo, todo_id).workflow_status == 'waiting_teacher_proposal'
+
     teacher_center = client.get('/auth/api/teacher/action-center').get_json()['data']
     teacher_todo = next(item for item in teacher_center['proposal_workflows'] if item['id'] == todo_id)
     assert '周一 10:00-12:00' in teacher_todo['context']['student_available_slots_summary']
@@ -1154,6 +1279,389 @@ def test_student_confirm_schedule_returns_readable_student_conflict_message(app)
     assert message == '2026-03-17 10:00-12:00 与同一学生现有课程冲突：已有课程 10:00-12:00'
 
 
+def test_legacy_student_confirm_conflict_stays_visible_in_student_action_center(client, login_as):
+    teacher = create_user(username='legacy-visible-teacher', display_name='可见老师', role='teacher')
+    other_teacher = create_user(username='legacy-visible-other-teacher', display_name='其他可见老师', role='teacher')
+    student = create_user(username='legacy-visible-student', display_name='可见学生用户', role='student')
+    profile = create_student_profile(user=student, name='可见学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='可见学生',
+        course_name='待确认课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        total_hours=2,
+        hours_per_session=2.0,
+    )
+    conflicting_enrollment = create_enrollment(
+        teacher=other_teacher,
+        student_name='可见学生',
+        course_name='已有课程',
+        student_profile=profile,
+        status='confirmed',
+        total_hours=2,
+        hours_per_session=2.0,
+    )
+    create_schedule(
+        teacher=other_teacher,
+        course_name='已有课程',
+        students='可见学生',
+        enrollment=conflicting_enrollment,
+        schedule_date=date(2026, 3, 17),
+        time_start='10:00',
+        time_end='12:00',
+    )
+    enrollment.confirmed_slot = json.dumps(_build_manual_plan([
+        {'date': '2026-03-17', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+    ]), ensure_ascii=False)
+    db.session.commit()
+
+    login_as(student)
+    response = client.post(f'/auth/api/enrollments/{enrollment.id}/student-confirm')
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert payload['error'] == '2026-03-17 10:00-12:00 与同一学生现有课程冲突：已有课程 10:00-12:00'
+
+    action_center = client.get('/auth/api/student/action-center').get_json()['data']
+    workflow = next(item for item in action_center['pending_workflows'] if item['enrollment_id'] == enrollment.id)
+    assert workflow['todo_type'] == 'enrollment_replan'
+    assert workflow['workflow_status'] == 'waiting_teacher_proposal'
+    assert workflow['latest_rejection_text'] == payload['error']
+    assert db.session.get(Enrollment, enrollment.id).status == 'pending_schedule'
+
+
+def test_confirm_slot_rejects_non_initial_enrollment_and_keeps_history(client, login_as):
+    admin = create_user(username='reconfirm-admin', display_name='重发教务', role='admin')
+    teacher = create_user(username='reconfirm-teacher', display_name='重发老师', role='teacher')
+    student = create_user(username='reconfirm-student', display_name='重发学生用户', role='student')
+    profile = create_student_profile(user=student, name='重发学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='重发学生',
+        course_name='已运行课程',
+        student_profile=profile,
+        status='active',
+        total_hours=2,
+        hours_per_session=2.0,
+        proposed_slots=[{
+            'weekly_slots': [{'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'}],
+            'session_dates': [
+                {'date': '2026-03-24', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+            ],
+        }],
+    )
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='已运行课程',
+        students='重发学生',
+        enrollment=enrollment,
+        schedule_date=date(2026, 3, 18),
+        time_start='10:00',
+        time_end='12:00',
+    )
+    todo = create_todo(
+        title='历史待办',
+        responsible_person='重发老师',
+        schedule=schedule,
+        enrollment=enrollment,
+    )
+    leave_request = create_leave_request(
+        schedule=schedule,
+        student_name='重发学生',
+        enrollment=enrollment,
+        status='pending',
+    )
+
+    login_as(admin)
+    response = client.post(f'/auth/api/enrollments/{enrollment.id}/confirm', json={'slot_index': 0})
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert payload['error'] == '当前状态不允许重新发送排课方案'
+    assert db.session.get(Enrollment, enrollment.id).status == 'active'
+    assert db.session.get(CourseSchedule, schedule.id) is not None
+    assert db.session.get(OATodo, todo.id) is not None
+    assert db.session.get(LeaveRequest, leave_request.id) is not None
+
+
+def test_legacy_send_routes_reject_when_replan_workflow_exists(client, login_as):
+    admin = create_user(username='legacy-block-admin', display_name='流程教务', role='admin')
+    teacher = create_user(username='legacy-block-teacher', display_name='流程老师', role='teacher')
+    student = create_user(username='legacy-block-student', display_name='流程学生用户', role='student')
+    profile = create_student_profile(user=student, name='流程学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='流程学生',
+        course_name='流程课程',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=2,
+        hours_per_session=2.0,
+        proposed_slots=[{
+            'weekly_slots': [{'day_of_week': 0, 'time_start': '10:00', 'time_end': '12:00'}],
+            'session_dates': [
+                {'date': '2026-03-23', 'day_of_week': 0, 'time_start': '10:00', 'time_end': '12:00'},
+            ],
+        }],
+    )
+    todo = create_todo(
+        title='流程中重排',
+        responsible_person='流程老师, 教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    login_as(admin)
+    response = client.post(f'/auth/api/enrollments/{enrollment.id}/confirm', json={'slot_index': 0})
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['error'] == '当前报名存在进行中的排课工作流，请通过工作流继续处理'
+
+    response = client.post(
+        f'/auth/api/enrollments/{enrollment.id}/manual-plan',
+        json={'session_dates': [{'date': '2026-03-23', 'time_start': '10:00', 'time_end': '12:00'}]},
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['error'] == '当前报名存在进行中的排课工作流，请通过工作流继续处理'
+    assert db.session.get(OATodo, todo.id).workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+
+
+def test_workflow_admin_send_rejects_when_legacy_pending_student_confirm_exists(client, login_as):
+    admin = create_user(username='workflow-guard-admin', display_name='守卫教务', role='admin')
+    teacher = create_user(username='workflow-guard-teacher', display_name='守卫老师', role='teacher')
+    student = create_user(username='workflow-guard-student', display_name='守卫学生用户', role='student')
+    profile = create_student_profile(user=student, name='守卫学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='守卫学生',
+        course_name='守卫课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        total_hours=2,
+        hours_per_session=2.0,
+        confirmed_slot=_build_manual_plan([
+            {'date': '2026-03-23', 'day_of_week': 0, 'time_start': '10:00', 'time_end': '12:00'},
+        ]),
+    )
+    todo = create_todo(
+        title='待教务发送',
+        responsible_person='教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW,
+        payload={
+            'current_proposal': {
+                'session_dates': [{'date': '2026-03-24', 'time_start': '10:00', 'time_end': '12:00'}],
+            },
+        },
+    )
+
+    login_as(admin)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/admin-send-to-student',
+        json={'force_save': True},
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['error'] == '当前报名已通过其他入口发送给学生确认，请刷新状态后再处理'
+    assert db.session.get(OATodo, todo.id).workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+
+
+def test_admin_teacher_can_preview_and_submit_workflow_proposal(client, login_as):
+    admin_teacher = create_user(username='admin-teacher-workflow', display_name='兼课教务', role='admin')
+    student = create_user(username='admin-teacher-student', display_name='兼课学生用户', role='student')
+    profile = create_student_profile(user=student, name='兼课学生')
+    enrollment = create_enrollment(
+        teacher=admin_teacher,
+        student_name='兼课学生',
+        course_name='兼课课程',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=2,
+        hours_per_session=2.0,
+    )
+    todo = create_todo(
+        title='兼课待提案',
+        responsible_person='兼课教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    login_as(admin_teacher)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/proposal-preview',
+        json={'session_dates': [{'date': '2026-03-23', 'time_start': '10:00', 'time_end': '12:00'}]},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['errors'] == []
+
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/teacher-proposal',
+        json={
+            'session_dates': [{'date': '2026-03-23', 'time_start': '10:00', 'time_end': '12:00'}],
+            'note': '兼课教务直接提案',
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert db.session.get(OATodo, todo.id).workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+
+
+def test_linked_schedule_query_matches_legacy_enrollment_notes_exactly(app):
+    teacher = create_user(username='legacy-query-teacher', display_name='LegacyQueryTeacher', role='teacher')
+    enrollments = [
+        create_enrollment(
+            teacher=teacher,
+            student_name=f'Legacy学生{i}',
+            course_name=f'Legacy课程{i}',
+            status='confirmed',
+        )
+        for i in range(10)
+    ]
+    target = enrollments[0]
+    other = enrollments[-1]
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='Legacy课程10',
+        students='Legacy学生10',
+        schedule_date=date(2026, 3, 18),
+        time_start='10:00',
+        time_end='12:00',
+        notes=f'自动排课 - 报名#{other.id}',
+    )
+
+    assert [item.id for item in _linked_schedule_query(target.id).all()] == []
+    assert [item.id for item in _linked_schedule_query(other.id).all()] == [schedule.id]
+
+
+def test_backfill_schedule_relationships_matches_legacy_notes_exactly(app):
+    teacher = create_user(username='legacy-backfill-teacher', display_name='LegacyBackfillTeacher', role='teacher')
+    enrollments = [
+        create_enrollment(
+            teacher=teacher,
+            student_name=f'Backfill学生{i}',
+            course_name=f'Backfill课程{i}',
+            status='confirmed',
+        )
+        for i in range(10)
+    ]
+    target = enrollments[0]
+    other = enrollments[-1]
+    exact_schedule = create_schedule(
+        teacher=teacher,
+        course_name='Backfill课程10',
+        students='Backfill学生10',
+        schedule_date=date(2026, 3, 18),
+        time_start='10:00',
+        time_end='12:00',
+        notes=f'自动排课 - 报名#{other.id}',
+    )
+    ambiguous_schedule = create_schedule(
+        teacher=teacher,
+        course_name='Backfill模糊课程',
+        students='Backfill模糊学生',
+        schedule_date=date(2026, 3, 19),
+        time_start='10:00',
+        time_end='12:00',
+        notes=f'自动排课 - 报名#{target.id} / 报名#{other.id}',
+    )
+    exact_schedule.enrollment_id = None
+    exact_schedule.teacher_id = None
+    ambiguous_schedule.enrollment_id = None
+    ambiguous_schedule.teacher_id = None
+    db.session.commit()
+
+    updated = backfill_schedule_relationships()
+    db.session.expire_all()
+
+    refreshed_exact = db.session.get(CourseSchedule, exact_schedule.id)
+    refreshed_ambiguous = db.session.get(CourseSchedule, ambiguous_schedule.id)
+    assert updated >= 1
+    assert refreshed_exact.enrollment_id == other.id
+    assert refreshed_exact.teacher_id == teacher.id
+    assert refreshed_ambiguous.enrollment_id is None
+    assert refreshed_ambiguous.teacher_id == teacher.id
+    assert refreshed_ambiguous.enrollment_id != target.id
+
+
+def test_update_intake_reopens_waiting_student_confirm_workflow_with_latest_profile_context(client, login_as, logout):
+    teacher = create_user(username='intake-refresh-teacher', display_name='改档老师', role='teacher')
+    admin = create_user(username='intake-refresh-admin', display_name='改档教务', role='admin')
+    student = create_user(username='intake-refresh-student', display_name='改档学生用户', role='student')
+    profile = create_student_profile(
+        user=student,
+        name='改档学生',
+        available_slots=[{'day': 0, 'start': '10:00', 'end': '12:00'}],
+        excluded_dates=['2026-03-28'],
+    )
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='改档学生',
+        course_name='改档课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        confirmed_slot=_build_manual_plan([
+            {'date': '2026-03-24', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+        ]),
+    )
+    workflow = create_todo(
+        title='待学生确认重排',
+        responsible_person='改档学生',
+        enrollment=enrollment,
+        due_date=date(2026, 3, 23),
+        priority=1,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM,
+        payload={
+            'current_proposal': {
+                'session_dates': [{'date': '2026-03-24', 'time_start': '10:00', 'time_end': '12:00'}],
+                'note': '旧方案',
+            },
+            'context': {
+                'student_available_slots_summary': '周一 10:00-12:00',
+                'student_excluded_dates_summary': '2026-03-28',
+            },
+            'sent_to_student_at': '2026-03-20T12:00:00',
+        },
+    )
+
+    login_as(student)
+    response = client.put(
+        f'/auth/api/enrollments/{enrollment.id}/intake',
+        json={
+            'name': '改档学生',
+            'phone': profile.phone,
+            'available_slots': [{'day': 2, 'start': '18:00', 'end': '20:00'}],
+            'excluded_dates': ['2026-03-30'],
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    refreshed_enrollment = db.session.get(Enrollment, enrollment.id)
+    refreshed_workflow = db.session.get(OATodo, workflow.id)
+    assert refreshed_enrollment.status == 'pending_schedule'
+    assert refreshed_enrollment.confirmed_slot is None
+    assert refreshed_workflow.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+    assert '学生信息已更新' in refreshed_workflow.notes
+    logout()
+
+    login_as(admin)
+    action_center = client.get('/auth/api/admin/action-center').get_json()['data']
+    assert all(item['enrollment_id'] != enrollment.id for item in action_center['waiting_student_confirm_workflows'])
+    assert any(item['id'] == enrollment.id for item in action_center['pending_schedule_enrollments'])
+    reopened = next(item for item in action_center['waiting_teacher_proposal_workflows'] if item['id'] == workflow.id)
+    assert '周三 18:00-20:00' in reopened['context_summary']
+    assert '2026-03-30' in reopened['context_summary']
+
+
 def test_workflow_schedule_feedback_contract_and_schedule_lock(client, app, login_as, logout):
     _require_workflow_contract(app)
     context = _build_workflow_enrollment(client, login_as, logout)
@@ -1231,10 +1739,13 @@ def test_workflow_schedule_feedback_contract_and_schedule_lock(client, app, logi
         f'/oa/api/schedules/{first_schedule_id}',
         json={
             'enrollment_id': None,
-            'course_name': '不允许直接改绑',
+            'course_name': '允许直接改绑',
         },
     )
-    assert response.status_code == 400
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['enrollment_id'] is None
     logout()
 
     with freeze_time('2026-03-18 12:30:00'):

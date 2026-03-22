@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from extensions import db
-from modules.auth.models import ChatMessage, Enrollment, User
+from modules.auth.models import ChatMessage, Enrollment, TeacherAvailability, User
 from tests.factories import create_chat_message, create_enrollment, create_student_profile, create_user
 
 
@@ -138,6 +138,82 @@ def test_chat_send_and_message_access_are_relationship_scoped(client, login_as, 
     payload = response.get_json()
     assert payload['success'] is True
     assert any(item['user_id'] == unrelated_student.id for item in payload['data'])
+
+
+def test_chat_contacts_include_all_allowed_partners_for_student_and_teacher(client, login_as, logout):
+    admin = create_user(username='contacts-admin', display_name='联系人教务', role='admin')
+    teacher = create_user(username='contacts-teacher', display_name='联系人老师', role='teacher')
+    unrelated_teacher = create_user(username='contacts-teacher-other', display_name='无关老师', role='teacher')
+    student = create_user(username='contacts-student', display_name='联系人学生', role='student')
+    related_profile = create_student_profile(user=student, name='联系人学生')
+    create_enrollment(
+        teacher=teacher,
+        student_name='联系人学生',
+        course_name='联系人课程',
+        student_profile=related_profile,
+        status='active',
+    )
+
+    login_as(student)
+    response = client.get('/auth/api/chat/contacts')
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert {item['id'] for item in payload['data']} == {admin.id, teacher.id}
+    assert all(item['id'] != unrelated_teacher.id for item in payload['data'])
+    logout()
+
+    login_as(teacher)
+    response = client.get('/auth/api/chat/contacts')
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert {item['id'] for item in payload['data']} == {admin.id, student.id}
+
+
+def test_chat_history_remains_visible_after_relationship_is_removed(client, login_as):
+    teacher = create_user(username='history-teacher', display_name='历史老师', role='teacher')
+    student = create_user(username='history-student', display_name='历史学生', role='student')
+    profile = create_student_profile(user=student, name='历史学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='历史学生',
+        course_name='历史聊天课程',
+        student_profile=profile,
+        status='active',
+    )
+    create_chat_message(sender=student, receiver=teacher, enrollment=enrollment, content='老师，我想确认一下时间', is_read=False)
+
+    enrollment.student_profile_id = None
+    db.session.commit()
+
+    login_as(teacher)
+    contacts = client.get('/auth/api/chat/contacts').get_json()['data']
+    assert all(item['id'] != student.id for item in contacts)
+
+    response = client.get('/auth/api/chat/conversations')
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert [item['user_id'] for item in payload['data']] == [student.id]
+    assert payload['data'][0]['unread_count'] == 1
+
+    response = client.get('/auth/api/chat/unread-count')
+    assert response.status_code == 200
+    assert response.get_json()['count'] == 1
+
+    response = client.get(f'/auth/api/chat/messages?with={student.id}')
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data'][0]['content'] == '老师，我想确认一下时间'
+
+    response = client.get('/auth/api/chat/unread-count')
+    assert response.status_code == 200
+    assert response.get_json()['count'] == 0
+
+    response = client.post('/auth/api/chat/send', json={'receiver_id': student.id, 'content': '继续追问'})
+    assert response.status_code == 403
 
 
 def test_student_and_teacher_access_are_scoped(client, login_as, logout):
@@ -275,10 +351,12 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     html = client.get('/auth/chat').get_data(as_text=True)
     assert 'msg-card' in html
     assert 'white-space:pre-wrap' in html
+    assert '/auth/api/chat/contacts' in html
 
     html = client.get('/auth/student/dashboard').get_data(as_text=True)
     assert 'pending-plan-calendar' in html
     assert 'renderPendingPlanCalendars' in html
+    assert '打开报名详情' not in html
     logout()
 
     login_as(admin)
@@ -286,3 +364,54 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     assert 'manualPlanModal' in html
     assert '/manual-plan' in html
     assert '手动微调' in html
+
+
+def test_oa_templates_expose_workflow_and_schedule_guard_hooks(client, login_as):
+    admin = create_user(username='oa-template-admin', display_name='OA模板管理员', role='admin')
+
+    login_as(admin)
+    todos_html = client.get('/oa/todos').get_data(as_text=True)
+    assert 'showWorkflowTodoHint' in todos_html
+    assert 'isWorkflowTodo' in todos_html
+    assert 'workflowHint' in todos_html
+
+    schedule_html = client.get('/oa/schedule').get_data(as_text=True)
+    assert 'courseGuardNotice' in schedule_html
+    assert 'admin_delete_block_reason' in schedule_html
+    assert 'admin_reschedule_block_reason' in schedule_html
+    assert 'id="qnTeacher"' in schedule_html
+    assert "teacher:     '—'" not in schedule_html
+
+
+def test_teacher_availability_validation_rejects_invalid_slots_and_keeps_existing_data(client, login_as):
+    teacher = create_user(username='availability-teacher', display_name='可用时间老师', role='teacher')
+
+    login_as(teacher)
+    response = client.post(
+        f'/auth/api/teacher/{teacher.id}/availability',
+        json={'available': [{'day': 1, 'start': '10:00', 'end': '12:00'}], 'preferred': []},
+    )
+    assert response.status_code == 200
+
+    response = client.post(
+        f'/auth/api/teacher/{teacher.id}/availability',
+        json={
+            'available': [
+                {'day': 7, 'start': '10:00', 'end': '12:00'},
+                {'day': 2, 'start': 'bad', 'end': '12:00'},
+                {'day': 3, 'start': '14:00', 'end': '13:00'},
+            ],
+            'preferred': [{'day': 1, 'start': '09:00', 'end': 'bad'}],
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert any('星期超出范围' in item for item in payload['errors'])
+    assert any('时间格式错误' in item for item in payload['errors'])
+    assert any('结束时间必须晚于开始时间' in item for item in payload['errors'])
+    slots = TeacherAvailability.query.filter_by(user_id=teacher.id).all()
+    assert len(slots) == 1
+    assert slots[0].day_of_week == 1
+    assert slots[0].time_start == '10:00'
+    assert slots[0].time_end == '12:00'

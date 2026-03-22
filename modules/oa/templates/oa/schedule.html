@@ -320,6 +320,60 @@
         border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer;
     }
     .btn-danger:hover { background: #fecaca; }
+    .quick-shift-section {
+        display: none;
+        margin-bottom: 14px;
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #f8fafc;
+    }
+    .quick-shift-section.active { display: block; }
+    .quick-shift-title {
+        display: flex; align-items: center; gap: 6px;
+        font-size: 0.82rem; font-weight: 600; color: #374151;
+        margin-bottom: 8px;
+    }
+    .quick-shift-title .material-icons { font-size: 1rem; color: #2563eb; }
+    .quick-shift-buttons {
+        display: flex; flex-wrap: wrap; gap: 8px;
+    }
+    .quick-shift-btn {
+        padding: 7px 10px;
+        border-radius: 999px;
+        border: 1px solid #cbd5e1;
+        background: white;
+        color: #1f2937;
+        font-size: 0.82rem;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .quick-shift-btn:hover:not(:disabled) {
+        border-color: #2563eb;
+        color: #2563eb;
+        background: #eff6ff;
+    }
+    .quick-shift-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+    .quick-shift-hint {
+        margin-top: 8px;
+        font-size: 0.75rem;
+        color: #6b7280;
+    }
+    .guard-notice {
+        display: none;
+        margin-bottom: 14px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        color: #991b1b;
+        font-size: 0.82rem;
+        line-height: 1.6;
+    }
+    .guard-notice strong { display: block; margin-bottom: 4px; }
 
     .toast {
         display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -399,6 +453,7 @@
         box-shadow: 0 0 0 3px rgba(249,115,22,0.12);
     }
     .qn-time-sep { color: #9ca3af; font-weight: 600; font-size: 1rem; flex-shrink: 0; }
+    .qn-select { margin-bottom: 8px; }
     /* Content input */
     .qn-input {
         width: 100%; padding: 9px 11px;
@@ -559,6 +614,7 @@
         </div>
         <div class="modal-body">
             <form id="courseForm" onsubmit="saveCourse(event)">
+                <div id="courseGuardNotice" class="guard-notice"></div>
                 <div class="form-group">
                     <label>日期</label>
                     <input type="date" id="courseDate" required>
@@ -572,6 +628,21 @@
                         <label>结束时间</label>
                         <input type="time" id="courseTimeEnd" required>
                     </div>
+                </div>
+                <div class="quick-shift-section" id="quickShiftSection">
+                    <div class="quick-shift-title">
+                        <span class="material-icons">bolt</span>
+                        快捷挪课
+                    </div>
+                    <div class="quick-shift-buttons">
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(0, -120, '前移2小时')">-2小时</button>
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(0, 120, '后移2小时')">+2小时</button>
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(0, 240, '后移4小时')">+4小时</button>
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(-1, 0, '前移1天')">前1天</button>
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(1, 0, '后移1天')">后1天</button>
+                        <button type="button" class="quick-shift-btn" data-quick-shift onclick="quickShiftCourse(7, 0, '后移7天')">后7天</button>
+                    </div>
+                    <div class="quick-shift-hint" id="quickShiftHint">一键把当前课次整体顺移，仍会触发冲突校验、历史冻结和工作流保护。</div>
                 </div>
                 <div class="form-group">
                     <label>授课教师</label>
@@ -642,6 +713,9 @@
         <span class="qn-time-sep">—</span>
         <input type="time" id="qnTimeEnd" class="qn-time-input" step="900">
     </div>
+    <select id="qnTeacher" class="qn-input qn-select">
+        <option value="">请选择授课教师</option>
+    </select>
     <!-- Note content -->
     <input
         type="text"
@@ -678,6 +752,7 @@ let weekStart = getWeekStart(new Date());
 let editingId = null;
 let scheduleData = [];
 let selectedColor = 'blue';
+let quickShiftBusy = false;
 window.progressMap = {};
 
 // ===== Zoom =====
@@ -798,30 +873,35 @@ async function loadTeachers() {
         const res = await fetch('/oa/api/schedules/teachers');
         const json = await res.json();
         if (json.success) {
-            const select = document.getElementById('courseTeacher');
-            const currentValue = select.value;
             const options = ['<option value="">请选择授课教师</option>']
                 .concat(json.data.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`));
-            select.innerHTML = options.join('');
-            if (currentValue) {
-                ensureTeacherOption(currentValue);
-                select.value = currentValue;
-            }
+            ['courseTeacher', 'qnTeacher'].forEach(id => {
+                const select = document.getElementById(id);
+                if (!select) return;
+                const currentValue = select.value;
+                select.innerHTML = options.join('');
+                if (currentValue) {
+                    ensureTeacherOption(currentValue);
+                    select.value = currentValue;
+                }
+            });
         }
     } catch(e) {}
 }
 
 function ensureTeacherOption(teacherName) {
-    const select = document.getElementById('courseTeacher');
-    if (!select || !teacherName) return;
-    const exists = Array.from(select.options).some(option => option.value === teacherName);
-    if (exists) return;
-
-    const option = document.createElement('option');
-    option.value = teacherName;
-    option.textContent = `${teacherName}（当前课表）`;
-    option.dataset.dynamic = 'true';
-    select.appendChild(option);
+    if (!teacherName) return;
+    ['courseTeacher', 'qnTeacher'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        const exists = Array.from(select.options).some(option => option.value === teacherName);
+        if (exists) return;
+        const option = document.createElement('option');
+        option.value = teacherName;
+        option.textContent = `${teacherName}（当前课表）`;
+        option.dataset.dynamic = 'true';
+        select.appendChild(option);
+    });
 }
 
 // ===== Week Navigation =====
@@ -1166,6 +1246,8 @@ function openAddModal(preDate) {
         document.getElementById('courseDate').value = preDate;
     }
     setSelectedColor('blue');
+    setQuickShiftVisible(false);
+    renderCourseGuardState(null);
     document.getElementById('courseModal').classList.add('active');
 }
 
@@ -1183,17 +1265,9 @@ async function openEditModal(id) {
         editingId = id;
 
         document.getElementById('courseModalTitle').textContent = '编辑课程';
-        document.getElementById('deleteBtn').style.display = 'inline-flex';
-        document.getElementById('courseDate').value = s.date;
-        document.getElementById('courseTimeStart').value = s.time_start;
-        document.getElementById('courseTimeEnd').value = s.time_end;
-        ensureTeacherOption(s.teacher);
-        document.getElementById('courseTeacher').value = s.teacher;
-        document.getElementById('courseName').value = s.course_name;
-        document.getElementById('courseStudents').value = s.students || '';
-        document.getElementById('courseLocation').value = s.location || '';
-        document.getElementById('courseNotes').value = s.notes || '';
-        setSelectedColor(s.color_tag || 'blue');
+        setQuickShiftVisible(true);
+        fillCourseForm(s);
+        renderCourseGuardState(s);
         document.getElementById('courseModal').classList.add('active');
     } catch (e) {
         showToast('加载失败');
@@ -1202,6 +1276,107 @@ async function openEditModal(id) {
 
 function closeCourseModal() {
     document.getElementById('courseModal').classList.remove('active');
+    setQuickShiftVisible(false);
+    renderCourseGuardState(null);
+}
+
+function fillCourseForm(schedule) {
+    document.getElementById('courseDate').value = schedule.date;
+    document.getElementById('courseTimeStart').value = schedule.time_start;
+    document.getElementById('courseTimeEnd').value = schedule.time_end;
+    ensureTeacherOption(schedule.teacher);
+    document.getElementById('courseTeacher').value = schedule.teacher;
+    document.getElementById('courseName').value = schedule.course_name;
+    document.getElementById('courseStudents').value = schedule.students || '';
+    document.getElementById('courseLocation').value = schedule.location || '';
+    document.getElementById('courseNotes').value = schedule.notes || '';
+    setSelectedColor(schedule.color_tag || 'blue');
+}
+
+function setQuickShiftVisible(visible) {
+    const section = document.getElementById('quickShiftSection');
+    section.classList.toggle('active', visible);
+    if (!visible) {
+        setQuickShiftButtonsDisabled(false);
+        document.getElementById('quickShiftHint').textContent = '一键把当前课次整体顺移，仍会触发冲突校验、历史冻结和工作流保护。';
+    }
+}
+
+function setQuickShiftButtonsDisabled(disabled) {
+    document.querySelectorAll('[data-quick-shift]').forEach(btn => {
+        btn.disabled = disabled;
+    });
+}
+
+async function quickShiftCourse(dateShiftDays, timeShiftMinutes, label) {
+    if (!editingId || quickShiftBusy) return;
+    quickShiftBusy = true;
+    setQuickShiftButtonsDisabled(true);
+
+    try {
+        const res = await fetch(`/oa/api/schedules/${editingId}/quick-shift`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date_shift_days: dateShiftDays,
+                time_shift_minutes: timeShiftMinutes,
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            fillCourseForm(json.data);
+            showToast(`${label}成功：${json.data.date} ${json.data.time_start}-${json.data.time_end}`);
+            await loadSchedules();
+        } else {
+            showToast(json.error || '快捷调课失败');
+        }
+    } catch (e) {
+        showToast('网络错误');
+    } finally {
+        quickShiftBusy = false;
+        setQuickShiftButtonsDisabled(false);
+    }
+}
+
+function renderCourseGuardState(schedule) {
+    const notice = document.getElementById('courseGuardNotice');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const quickShiftHint = document.getElementById('quickShiftHint');
+
+    if (!schedule) {
+        notice.style.display = 'none';
+        notice.innerHTML = '';
+        deleteBtn.style.display = 'none';
+        quickShiftHint.textContent = '一键把当前课次整体顺移，仍会触发冲突校验、历史冻结和工作流保护。';
+        setQuickShiftButtonsDisabled(false);
+        return;
+    }
+
+    const messages = [];
+    if (schedule.admin_reschedule_block_reason) {
+        messages.push(schedule.admin_reschedule_block_reason);
+        quickShiftHint.textContent = schedule.admin_reschedule_block_reason;
+        setQuickShiftButtonsDisabled(true);
+    } else {
+        quickShiftHint.textContent = '一键把当前课次整体顺移，仍会触发冲突校验、历史冻结和工作流保护。';
+        setQuickShiftButtonsDisabled(false);
+    }
+    if (!schedule.admin_can_delete && schedule.admin_delete_block_reason) {
+        if (!messages.includes(schedule.admin_delete_block_reason)) {
+            messages.push(schedule.admin_delete_block_reason);
+        }
+        deleteBtn.style.display = 'none';
+    } else {
+        deleteBtn.style.display = 'inline-flex';
+    }
+
+    if (messages.length) {
+        notice.innerHTML = `<strong>当前课次受保护</strong>${messages.map(item => `<div>${escapeHtml(item)}</div>`).join('')}`;
+        notice.style.display = 'block';
+    } else {
+        notice.style.display = 'none';
+        notice.innerHTML = '';
+    }
 }
 
 async function saveCourse(e) {
@@ -1404,6 +1579,11 @@ function _openQuickNote(dateStr, clientX, clientY, timeStart, timeEnd) {
     // Pre-fill time inputs
     document.getElementById('qnTimeStart').value = timeStart || '';
     document.getElementById('qnTimeEnd').value   = timeEnd   || '';
+    const currentTeacher = document.getElementById('courseTeacher').value;
+    if (currentTeacher) {
+        ensureTeacherOption(currentTeacher);
+        document.getElementById('qnTeacher').value = currentTeacher;
+    }
 
     // Position popup near mouse
     const popup  = document.getElementById('quickNotePopup');
@@ -1413,7 +1593,7 @@ function _openQuickNote(dateStr, clientX, clientY, timeStart, timeEnd) {
         popup.style.top = 'auto';
         popup.style.bottom = 'calc(12px + env(safe-area-inset-bottom, 0px))';
     } else {
-        const popupW = 280, popupH = 210;
+        const popupW = 280, popupH = 260;
         let left = clientX - popupW / 2;
         let top  = clientY + 12;
         left = Math.max(8, Math.min(left, window.innerWidth  - popupW - 8));
@@ -1445,16 +1625,18 @@ async function saveQuickNote() {
     const text      = document.getElementById('quickNoteInput').value.trim();
     const timeStart = document.getElementById('qnTimeStart').value;
     const timeEnd   = document.getElementById('qnTimeEnd').value;
+    const teacher   = document.getElementById('qnTeacher').value;
 
     if (!text)                   { showToast('请输入备注内容'); document.getElementById('quickNoteInput').focus(); return; }
     if (!timeStart || !timeEnd)  { showToast('请确认时间范围'); return; }
     if (timeStart >= timeEnd)    { showToast('结束时间需晚于开始时间'); return; }
+    if (!teacher)                { showToast('请选择授课教师'); document.getElementById('qnTeacher').focus(); return; }
 
     const data = {
         date:        quickNoteDate,
         time_start:  timeStart,
         time_end:    timeEnd,
-        teacher:     '—',
+        teacher:     teacher,
         course_name: text,
         students:    '',
         location:    '',
@@ -1485,11 +1667,16 @@ function openFullFormFromQuickNote() {
     const date      = quickNoteDate;
     const timeStart = document.getElementById('qnTimeStart').value;
     const timeEnd   = document.getElementById('qnTimeEnd').value;
+    const teacher   = document.getElementById('qnTeacher').value;
     const content   = document.getElementById('quickNoteInput').value.trim();
     closeQuickNote();
     openAddModal(date);
     if (timeStart) document.getElementById('courseTimeStart').value = timeStart;
     if (timeEnd)   document.getElementById('courseTimeEnd').value   = timeEnd;
+    if (teacher) {
+        ensureTeacherOption(teacher);
+        document.getElementById('courseTeacher').value = teacher;
+    }
     if (content)   document.getElementById('courseName').value      = content;
 }
 
