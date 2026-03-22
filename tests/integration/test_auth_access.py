@@ -319,6 +319,8 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
     assert any(item['course'] == '课程 A' for item in payload['data']['students'])
     response = client.get('/auth/teacher/dashboard')
     html = response.get_data(as_text=True)
+    assert '我提交后的案件' in html
+    assert 'trackingWorkflowList' in html
     assert '/auth/enrollments' in html
     assert '/oa/schedule' not in html
     assert '/oa/todos' not in html
@@ -354,12 +356,16 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     assert '/auth/api/chat/contacts' in html
 
     html = client.get('/auth/student/dashboard').get_data(as_text=True)
+    assert '案件跟踪中心' in html
+    assert '待我处理' in html
     assert 'pending-plan-calendar' in html
     assert 'renderPendingPlanCalendars' in html
     assert '打开报名详情' not in html
     logout()
 
     login_as(admin)
+    html = client.get('/auth/admin/dashboard').get_data(as_text=True)
+    assert 'waiting_student_confirm_items' in html
     html = client.get(f'/auth/enrollments/{enrollment.id}').get_data(as_text=True)
     assert 'manualPlanModal' in html
     assert '/manual-plan' in html

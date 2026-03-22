@@ -405,11 +405,37 @@ def api_teacher_action_center():
         build_workflow_todo_payload(todo, current_user)
         for todo in list_workflow_todos_for_user(current_user, status='open')
     ]
+    workflow_todos_all = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status=None)
+    ]
     proposal_workflows = _sort_action_items([
         item for item in workflow_todos
         if item.get('next_action_role') == 'teacher'
         and item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
         and _workflow_matches_teacher_actor(item, current_user)
+    ])
+    tracking_recent_cutoff = today - timedelta(days=14)
+    tracking_workflows = _sort_action_items([
+        item for item in workflow_todos_all
+        if item.get('todo_type') in {'enrollment_replan', 'leave_makeup'}
+        and _workflow_matches_teacher_actor(item, current_user)
+        and item.get('workflow_status') in {
+            'waiting_admin_review',
+            'waiting_student_confirm',
+            'completed',
+            'cancelled',
+        }
+        and (
+            item.get('workflow_status') in {'waiting_admin_review', 'waiting_student_confirm'}
+            or (
+                (
+                    _parse_iso_datetime(item.get('updated_at'))
+                    or _parse_iso_datetime(item.get('created_at'))
+                    or datetime.min
+                ).date() >= tracking_recent_cutoff
+            )
+        )
     ])
 
     feedback_schedule_payloads = [
@@ -448,12 +474,14 @@ def api_teacher_action_center():
         'data': {
             'availability_ready': TeacherAvailability.query.filter_by(user_id=current_user.id).count() > 0,
             'proposal_workflows': proposal_workflows,
+            'tracking_workflows': tracking_workflows,
             'pending_feedback_schedules': pending_feedback,
             'leave_requests': leave_requests,
             'upcoming_schedules': upcoming_schedules[:10],
             'students': _teacher_students_summary(current_user),
             'counts': {
                 'proposal_workflows': len(proposal_workflows),
+                'tracking_workflows': len(tracking_workflows),
                 'pending_feedback_schedules': len(pending_feedback),
                 'leave_requests': len(leave_requests),
                 'upcoming_schedules': len(upcoming_schedules),
@@ -549,11 +577,16 @@ def api_student_action_center():
     profile = current_user.student_profile
     if not profile:
         return jsonify({'success': True, 'data': {
+            'action_required_workflows': [],
+            'tracking_workflows': [],
             'pending_workflows': [],
             'pending_enrollments': [],
             'upcoming_schedules': [],
             'leave_requests': [],
             'counts': {
+                'action_required_workflows': 0,
+                'tracking_workflows': 0,
+                'action_required_items': 0,
                 'pending_workflows': 0,
                 'pending_enrollments': 0,
                 'leave_requests': 0,
@@ -566,9 +599,15 @@ def api_student_action_center():
         for todo in list_workflow_todos_for_user(current_user, status='open')
     ]
     pending_workflows = _sort_action_items(workflow_todos)
+    action_required_workflows = _sort_action_items([
+        item for item in pending_workflows if item.get('next_action_role') == 'student'
+    ])
+    tracking_workflows = _sort_action_items([
+        item for item in pending_workflows if item.get('next_action_role') != 'student'
+    ])
     workflow_enrollment_ids = {
         item.get('enrollment_id')
-        for item in pending_workflows
+        for item in action_required_workflows
         if item.get('todo_type') == 'enrollment_replan'
         and item.get('next_action_role') == 'student'
         and item.get('enrollment_id')
@@ -601,11 +640,16 @@ def api_student_action_center():
     return jsonify({
         'success': True,
         'data': {
+            'action_required_workflows': action_required_workflows,
+            'tracking_workflows': tracking_workflows,
             'pending_workflows': pending_workflows,
             'pending_enrollments': pending_enrollments,
             'upcoming_schedules': upcoming_schedules,
             'leave_requests': leave_requests,
             'counts': {
+                'action_required_workflows': len(action_required_workflows),
+                'tracking_workflows': len(tracking_workflows),
+                'action_required_items': len(action_required_workflows) + len(pending_enrollments),
                 'pending_workflows': len(pending_workflows),
                 'pending_enrollments': len(pending_enrollments),
                 'leave_requests': len(leave_requests),
@@ -660,6 +704,16 @@ def api_admin_action_center():
         ).order_by(Enrollment.updated_at.desc(), Enrollment.created_at.desc()).all()
         if enrollment.id not in workflow_enrollment_ids
     ])
+    waiting_student_confirm_items = _sort_action_items(
+        [
+            {**item, 'kind': 'workflow_waiting_confirm'}
+            for item in waiting_student_confirm_workflows
+        ]
+        + [
+            {**item, 'kind': 'pending_enrollment'}
+            for item in waiting_student_confirm_enrollments
+        ]
+    )
     pending_leave_requests = _sort_action_items([
         build_leave_request_payload(item, current_user)
         for item in LeaveRequest.query.filter(
@@ -685,6 +739,7 @@ def api_admin_action_center():
             'pending_admin_send_workflows': pending_admin_send,
             'waiting_student_confirm_workflows': waiting_student_confirm_workflows,
             'waiting_student_confirm_enrollments': waiting_student_confirm_enrollments,
+            'waiting_student_confirm_items': waiting_student_confirm_items,
             'pending_leave_requests': pending_leave_requests,
             'leave_cases': leave_cases,
             'pending_feedback_schedules': pending_feedback_schedules,
@@ -694,6 +749,7 @@ def api_admin_action_center():
                 'pending_admin_send_workflows': len(pending_admin_send),
                 'waiting_student_confirm_workflows': len(waiting_student_confirm_workflows),
                 'waiting_student_confirm_enrollments': len(waiting_student_confirm_enrollments),
+                'waiting_student_confirm_items': len(waiting_student_confirm_items),
                 'pending_leave_requests': len(pending_leave_requests),
                 'leave_cases': len(leave_cases),
                 'pending_feedback_schedules': len(pending_feedback_schedules),

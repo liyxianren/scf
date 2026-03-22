@@ -44,6 +44,10 @@
 .workflow-card .wf-status.proposal{background:#dbeafe;color:#1d4ed8}
 .workflow-card .wf-status.makeup{background:#f3e8ff;color:#7c3aed}
 .workflow-card .wf-status.feedback{background:#dcfce7;color:#166534}
+.workflow-card .wf-status.review{background:#e0f2fe;color:#0369a1}
+.workflow-card .wf-status.pending{background:#fef3c7;color:#92400e}
+.workflow-card .wf-status.done{background:#dcfce7;color:#166534}
+.workflow-card .wf-status.cancelled{background:#e2e8f0;color:#475569}
 .workflow-card .wf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .workflow-card.workflow-focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.12)}
 .nav-shortcuts{display:flex;gap:12px;flex-wrap:wrap}
@@ -145,6 +149,16 @@
         <div class="card">
             <div id="proposalWorkflowSummary" class="workflow-summary"></div>
             <div id="proposalWorkflowList" class="workflow-list">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><span class="material-icons">track_changes</span> 我提交后的案件</h2>
+        <div class="card">
+            <div id="trackingWorkflowSummary" class="workflow-summary"></div>
+            <div id="trackingWorkflowList" class="workflow-list">
                 <div class="empty">加载中...</div>
             </div>
         </div>
@@ -373,6 +387,7 @@ async function loadTeacherActionCenter(){
         teacherActionCenter = json.data || {};
         workflowTodos = teacherActionCenter.proposal_workflows || [];
         renderProposalWorkflows(workflowTodos);
+        renderTrackingWorkflows(teacherActionCenter.tracking_workflows || []);
         renderTeacherStudents(teacherActionCenter.students || []);
         renderUpcomingSchedules(teacherActionCenter.upcoming_schedules || []);
         renderPendingFeedback(teacherActionCenter.pending_feedback_schedules || []);
@@ -522,6 +537,78 @@ function renderProposalWorkflows(items){
                     <button class="inline-btn" onclick="openProposalModal(${item.id})">
                         <span class="material-icons">draw</span> 填写建议
                     </button>
+                    ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderTrackingWorkflowSummary(items){
+    const box = document.getElementById('trackingWorkflowSummary');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<span class="workflow-chip">暂无我提交后的案件</span>';
+        return;
+    }
+    const counts = items.reduce((acc, item) => {
+        const key = item.workflow_status || 'unknown';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+    box.innerHTML = Object.entries(counts).map(([status, count]) => `
+        <span class="workflow-chip">${escapeHtml(workflowStatusLabel(status))} ${count}</span>
+    `).join('');
+}
+
+function trackingWorkflowStatusClass(item){
+    if(item.workflow_status === 'waiting_admin_review') return 'review';
+    if(item.workflow_status === 'waiting_student_confirm') return 'pending';
+    if(item.workflow_status === 'completed') return 'done';
+    if(item.workflow_status === 'cancelled') return 'cancelled';
+    return item.todo_type === 'leave_makeup' ? 'makeup' : 'proposal';
+}
+
+function renderTrackingWorkflows(items){
+    const box = document.getElementById('trackingWorkflowList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">暂无我提交后仍在推进的案件</div>';
+        renderTrackingWorkflowSummary([]);
+        return;
+    }
+    renderTrackingWorkflowSummary(items);
+    box.innerHTML = items.map(item => {
+        const payload = parseWorkflowPayload(item);
+        const title = item.title || item.name || workflowTypeLabel(item.todo_type);
+        const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
+        const sessionPreviewLines = item.session_preview_lines || payload.session_preview_lines || [];
+        const contextLines = [
+            item.context_summary || payload.context_summary || '',
+            item.current_plan_summary || payload.current_plan_summary ? `方案概览：${item.current_plan_summary || payload.current_plan_summary}` : '',
+            item.proposal_note || payload.proposal_note ? `已提交备注：${item.proposal_note || payload.proposal_note}` : '',
+            item.latest_rejection_text || payload.latest_rejection_text ? `最新问题：${item.latest_rejection_text || payload.latest_rejection_text}` : '',
+            sessionPreviewLines.length ? `课次预览：${sessionPreviewLines.join('；')}` : '',
+            item.current_stage_label ? `当前阶段：${item.current_stage_label}` : '',
+            proposalFocusState.workflowId === item.id && proposalFocusState.hint ? `下一步：${proposalFocusState.hint}` : (item.next_step_hint ? `下一步：${item.next_step_hint}` : ''),
+        ].filter(Boolean);
+        return `
+            <div class="workflow-card ${proposalFocusState.workflowId === item.id ? 'workflow-focus' : ''}" data-workflow-id="${item.id}">
+                <div class="wf-head">
+                    <div>
+                        <div class="wf-title">${escapeHtml(title)}</div>
+                        <div class="wf-subtitle">${escapeHtml(workflowTypeLabel(item.todo_type))} · ${escapeHtml(item.enrollment_name || item.course_name || item.enrollment_title || '-')}</div>
+                    </div>
+                    <span class="wf-status ${trackingWorkflowStatusClass(item)}">${escapeHtml(workflowStatusLabel(item.workflow_status))}</span>
+                </div>
+                <div class="wf-context">${contextLines.map(line => `<div>${escapeHtml(line)}</div>`).join('') || '暂无上下文'}</div>
+                <div class="wf-meta">
+                    ${item.revision !== undefined && item.revision !== null ? `<span>revision ${item.revision}</span>` : ''}
+                    ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
+                    ${item.waiting_since ? `<span>等待开始：${escapeHtml(item.waiting_since)}</span>` : ''}
+                    ${item.due_date ? `<span>截止：${escapeHtml(item.due_date)}</span>` : ''}
+                </div>
+                <div class="wf-actions">
                     ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
                 </div>
             </div>

@@ -183,6 +183,22 @@ def test_role_action_centers_group_items_and_sort_overdue(client, login_as):
             'sent_to_student_at': '2026-03-20T12:00:00',
         },
     )
+    completed_followup_todo = create_todo(
+        title='老师提案已完成',
+        responsible_person='教务',
+        enrollment=teacher_replan_enrollment,
+        due_date=date(2026, 3, 20),
+        priority=2,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_COMPLETED,
+        is_completed=True,
+        payload={
+            'current_proposal': {
+                'session_dates': [{'date': '2026-03-26', 'time_start': '15:00', 'time_end': '17:00'}],
+                'submitted_at': '2026-03-20T16:00:00',
+            },
+        },
+    )
 
     login_as(teacher)
     payload = client.get('/auth/api/teacher/action-center').get_json()['data']
@@ -190,6 +206,13 @@ def test_role_action_centers_group_items_and_sort_overdue(client, login_as):
         approved_leave_todo.id,
         teacher_replan_todo.id,
     ]
+    assert [item['id'] for item in payload['tracking_workflows']] == [
+        admin_review_todo.id,
+        waiting_student_todo.id,
+        completed_followup_todo.id,
+    ]
+    assert payload['tracking_workflows'][0]['workflow_status'] == 'waiting_admin_review'
+    assert payload['tracking_workflows'][2]['workflow_status'] == 'completed'
     assert [item['id'] for item in payload['pending_feedback_schedules'][:2]] == [
         overdue_feedback_schedule.id,
         current_feedback_schedule.id,
@@ -213,6 +236,12 @@ def test_role_action_centers_group_items_and_sort_overdue(client, login_as):
     assert [item['id'] for item in payload['waiting_student_confirm_workflows']] == [waiting_student_todo.id]
     assert payload['waiting_student_confirm_workflows'][0]['payload']['current_proposal']['session_dates'][0]['date'] == '2026-03-25'
     assert [item['id'] for item in payload['waiting_student_confirm_enrollments']] == [enrollment_waiting_confirm.id]
+    assert [item['id'] for item in payload['waiting_student_confirm_items']] == [
+        waiting_student_todo.id,
+        enrollment_waiting_confirm.id,
+    ]
+    assert payload['waiting_student_confirm_items'][0]['kind'] == 'workflow_waiting_confirm'
+    assert payload['waiting_student_confirm_items'][1]['kind'] == 'pending_enrollment'
     assert payload['waiting_student_confirm_enrollments'][0]['session_preview_lines'] == ['2026-03-24 10:00-12:00']
     assert payload['pending_feedback_schedules'][0]['id'] == overdue_feedback_schedule.id
     assert payload['pending_feedback_schedules'][0]['feedback_delay_days'] == 3
@@ -234,6 +263,12 @@ def test_role_action_centers_group_items_and_sort_overdue(client, login_as):
         teacher_replan_todo.id,
         admin_review_todo.id,
         waiting_student_todo.id,
+    ]
+    assert [item['id'] for item in payload['action_required_workflows']] == [waiting_student_todo.id]
+    assert [item['id'] for item in payload['tracking_workflows']] == [
+        approved_leave_todo.id,
+        teacher_replan_todo.id,
+        admin_review_todo.id,
     ]
     assert [item['id'] for item in payload['pending_enrollments']] == [enrollment_waiting_confirm.id]
     assert [item['id'] for item in payload['leave_requests']] == [approved_leave.id, pending_leave.id]

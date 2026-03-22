@@ -330,7 +330,7 @@ function renderWorkflowSummary(groups){
     if(!box) return;
     const teacherCount = (groups.waiting_teacher_proposal_workflows || []).length;
     const adminCount = (groups.pending_admin_send_workflows || []).length;
-    const studentCount = (groups.waiting_student_confirm_workflows || []).length + (groups.waiting_student_confirm_enrollments || []).length;
+    const studentCount = (groups.waiting_student_confirm_items || []).length;
     if(!teacherCount && !adminCount && !studentCount){
         box.innerHTML = '<span class="workflow-chip">当前没有待老师提案、待教务发送或待学生确认的动作</span>';
         return;
@@ -370,9 +370,8 @@ function renderWorkflowTodos(groups){
     if(!box) return;
     const teacherItems = groups.waiting_teacher_proposal_workflows || [];
     const adminItems = groups.pending_admin_send_workflows || [];
-    const studentWorkflowItems = groups.waiting_student_confirm_workflows || [];
-    const studentEnrollmentItems = groups.waiting_student_confirm_enrollments || [];
-    if(!teacherItems.length && !adminItems.length && !studentWorkflowItems.length && !studentEnrollmentItems.length){
+    const studentItems = groups.waiting_student_confirm_items || [];
+    if(!teacherItems.length && !adminItems.length && !studentItems.length){
         box.innerHTML = '<div class="empty">当前没有待老师提案、待教务发送或待学生确认的动作</div>';
         renderWorkflowSummary(groups);
         return;
@@ -450,7 +449,7 @@ function renderWorkflowTodos(groups){
     box.innerHTML = `
         ${teacherItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin-bottom:10px">待老师提案</div>${teacherItems.map(item => renderWorkflowItem(item, '待老师提案', item.todo_type === 'leave_makeup' ? 'makeup' : 'replan')).join('')}` : ''}
         ${adminItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length ? '18px 0 10px' : '0 0 10px'}">待教务发送给学生</div>${adminItems.map(item => renderWorkflowItem(item, '待教务发送', 'review')).join('')}` : ''}
-        ${studentWorkflowItems.length || studentEnrollmentItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length || adminItems.length ? '18px 0 10px' : '0 0 10px'}">待学生确认</div>${studentWorkflowItems.map(item => renderWorkflowItem(item, '待学生确认', 'pending')).join('')}${studentEnrollmentItems.map(renderEnrollmentItem).join('')}` : ''}
+        ${studentItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length || adminItems.length ? '18px 0 10px' : '0 0 10px'}">待学生确认</div>${studentItems.map(item => item.kind === 'pending_enrollment' ? renderEnrollmentItem(item) : renderWorkflowItem(item, '待学生确认', 'pending')).join('')}` : ''}
     `;
 }
 

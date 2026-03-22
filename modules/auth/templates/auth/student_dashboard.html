@@ -124,7 +124,7 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">account_tree</span> 确认中心</h2>
+        <h2><span class="material-icons">account_tree</span> 案件跟踪中心</h2>
         <div class="card">
             <div id="workflowSummary" class="workflow-summary"></div>
             <div id="workflowList" class="workflow-list">
@@ -270,9 +270,9 @@ async function loadStudentData(){
                     extra = `
                     <div class="confirm-preview">
                         <div class="preview-title">当前有待确认方案</div>
-                        <div class="preview-detail">${escapeHtml(e.current_plan_summary || '请到确认中心查看完整课次、周历预览和确认按钮。')}</div>
+                        <div class="preview-detail">${escapeHtml(e.current_plan_summary || '请到案件跟踪中心查看完整课次、周历预览和确认按钮。')}</div>
                         ${e.next_step_hint ? `<div class="preview-range">${escapeHtml(e.next_step_hint)}</div>` : ''}
-                        <div style="margin-top:10px"><a class="inline-btn" href="#workflowList">打开确认中心</a></div>
+                        <div style="margin-top:10px"><a class="inline-btn" href="#workflowList">打开案件跟踪</a></div>
                     </div>`;
                 }
                 const editLink = e.can_edit ? `<div style="margin-top:10px"><a href="${e.edit_intake_url}" style="font-size:.82rem;color:#0369a1;font-weight:700;text-decoration:none">修改上课时间与信息</a></div>` : '';
@@ -602,39 +602,22 @@ function validateLeavePreferenceInputs(){
     };
 }
 
-function renderWorkflowSummary(items){
+function renderWorkflowSummary(groups){
     const box = document.getElementById('workflowSummary');
     if(!box) return;
-    if(!items.length){
-        box.innerHTML = '<span class="workflow-chip">当前没有待确认动作</span>';
+    const actionItems = groups.actionItems || [];
+    const trackingItems = groups.trackingItems || [];
+    if(!actionItems.length && !trackingItems.length){
+        box.innerHTML = '<span class="workflow-chip">当前没有待我处理事项</span>';
         return;
     }
-    const counts = items.reduce((acc, item) => {
-        const key = item.kind || item.workflow_status || item.todo_type || 'unknown';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-    }, {});
-    const labelMap = {
-        pending_enrollment: '待确认排课',
-        waiting_teacher_proposal: '待老师提案',
-        waiting_admin_review: '待教务处理',
-        waiting_student_confirm: '待学生确认',
-        completed: '已完成',
-        cancelled: '已取消',
-    };
-    box.innerHTML = Object.entries(counts).map(([status, count]) => `<span class="workflow-chip">${escapeHtml(labelMap[status] || workflowStatusLabel(status))} ${count}</span>`).join('');
+    box.innerHTML = [
+        actionItems.length ? `<span class="workflow-chip">待我处理 ${actionItems.length}</span>` : '',
+        trackingItems.length ? `<span class="workflow-chip">流程跟踪 ${trackingItems.length}</span>` : '',
+    ].filter(Boolean).join('');
 }
 
-function renderWorkflowTodos(items){
-    const box = document.getElementById('workflowList');
-    if(!box) return;
-    if(!items.length){
-        box.innerHTML = '<div class="empty">当前没有待确认动作</div>';
-        renderWorkflowSummary([]);
-        return;
-    }
-    renderWorkflowSummary(items);
-    box.innerHTML = items.map(item => {
+function renderWorkflowCard(item){
         const payload = item.kind === 'pending_enrollment' ? {} : parseWorkflowPayload(item);
         const title = item.kind === 'pending_enrollment'
             ? `${item.course_name || '课程'}`
@@ -671,8 +654,30 @@ function renderWorkflowTodos(items){
                 </div>` : ''}
             </div>
         `;
-    }).join('');
-    renderWorkflowPreviewCalendars(items);
+}
+
+function renderWorkflowSection(title, items, emptyText, marginTop = ''){
+    const headingStyle = marginTop ? `margin:${marginTop}` : 'margin:0 0 10px';
+    const content = items.length
+        ? items.map(renderWorkflowCard).join('')
+        : `<div class="empty">${escapeHtml(emptyText)}</div>`;
+    return `
+        <div style="font-size:.85rem;font-weight:800;color:#0f172a;${headingStyle}">${escapeHtml(title)}</div>
+        ${content}
+    `;
+}
+
+function renderWorkflowTodos(groups){
+    const box = document.getElementById('workflowList');
+    if(!box) return;
+    const actionItems = groups.actionItems || [];
+    const trackingItems = groups.trackingItems || [];
+    renderWorkflowSummary({actionItems, trackingItems});
+    box.innerHTML = `
+        ${renderWorkflowSection('待我处理', actionItems, '当前没有待我处理事项')}
+        ${renderWorkflowSection('流程跟踪', trackingItems, '当前没有进行中的流程', '18px 0 10px')}
+    `;
+    renderWorkflowPreviewCalendars([...actionItems, ...trackingItems]);
 }
 
 async function loadStudentActionCenter(){
@@ -680,7 +685,7 @@ async function loadStudentActionCenter(){
         const res = await fetch('/auth/api/student/action-center');
         const json = await res.json();
         if(!json.success){
-            renderWorkflowTodos([]);
+            renderWorkflowTodos({actionItems: [], trackingItems: []});
             return;
         }
         studentActionCenter = json.data || {};
@@ -691,14 +696,17 @@ async function loadStudentActionCenter(){
                 workflowTodoMap[item.enrollment_id] = item;
             }
         });
-        renderWorkflowTodos([
-            ...((studentActionCenter.pending_enrollments || []).map(item => ({...item, kind: 'pending_enrollment'}))),
-            ...workflowTodos,
-        ]);
+        renderWorkflowTodos({
+            actionItems: [
+                ...((studentActionCenter.pending_enrollments || []).map(item => ({...item, kind: 'pending_enrollment'}))),
+                ...(studentActionCenter.action_required_workflows || []),
+            ],
+            trackingItems: studentActionCenter.tracking_workflows || [],
+        });
         renderLeaveRequests(studentActionCenter.leave_requests || []);
     }catch(e){
         console.error(e);
-        renderWorkflowTodos([]);
+        renderWorkflowTodos({actionItems: [], trackingItems: []});
     }
 }
 
