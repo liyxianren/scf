@@ -4,7 +4,7 @@ import queue
 import threading
 
 from flask import request, jsonify, Response, stream_with_context, current_app
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from extensions import db
 from modules.oa import oa_bp
@@ -155,14 +155,26 @@ def _confirm_delete(data):
     if not ids:
         return jsonify({'success': False, 'error': '没有要删除的课程'}), 400
 
-    deleted = CourseSchedule.query.filter(CourseSchedule.id.in_(ids)).delete(
-        synchronize_session=False
-    )
+    from modules.oa import schedule_actions
+
+    cancelled = 0
+    errors = []
+    for schedule in CourseSchedule.query.filter(CourseSchedule.id.in_(ids)).all():
+        _, error = schedule_actions.cancel_schedule(
+            schedule,
+            actor=current_user,
+            reason=(data.get('summary') or '').strip() or '通过 AI 助手取消课次',
+        )
+        if error:
+            errors.append({'id': schedule.id, 'error': error[0]})
+            continue
+        cancelled += 1
     db.session.commit()
     return jsonify({
         'success': True,
-        'message': f'已成功删除 {deleted} 节课程',
-        'affected_count': deleted,
+        'message': f'已成功取消 {cancelled} 节课程',
+        'affected_count': cancelled,
+        'errors': errors,
     })
 
 

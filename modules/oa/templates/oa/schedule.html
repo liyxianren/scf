@@ -679,7 +679,7 @@
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-danger" id="deleteBtn" style="display:none;" onclick="deleteCourse()">
-                        <span class="material-icons" style="font-size:1rem;">delete</span> 删除
+                        <span class="material-icons" style="font-size:1rem;">delete</span> 取消课次
                     </button>
                     <button type="submit" class="btn-primary">保存</button>
                 </div>
@@ -1416,12 +1416,20 @@ async function saveCourse(e) {
 }
 
 async function deleteCourse() {
-    if (!editingId || !confirm('确定要删除这条课程吗？')) return;
+    if (!editingId) return;
+    const confirmed = confirm('确定要取消这条课程吗？系统会保留历史记录，并同步关闭相关待办。');
+    if (!confirmed) return;
+    const reason = prompt('请填写取消原因', '学生暂不继续上课');
+    if (reason === null) return;
     try {
-        const res = await fetch(`/oa/api/schedules/${editingId}`, { method: 'DELETE' });
+        const res = await fetch(`/oa/api/schedules/${editingId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: (reason || '').trim() }),
+        });
         const json = await res.json();
         if (json.success) {
-            showToast('已删除');
+            showToast(json.message || '已取消课次');
             closeCourseModal();
             loadSchedules();
         } else {

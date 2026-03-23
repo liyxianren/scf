@@ -472,6 +472,7 @@ def find_schedule_conflicts(
     teacher_query = CourseSchedule.query.filter(
         CourseSchedule.date == course_date,
         or_(*teacher_clauses),
+        CourseSchedule.is_cancelled == False,
     )
     if exclude_schedule_id:
         teacher_query = teacher_query.filter(CourseSchedule.id != exclude_schedule_id)
@@ -484,6 +485,7 @@ def find_schedule_conflicts(
         enrollment_query = CourseSchedule.query.filter(
             CourseSchedule.enrollment_id == enrollment_id,
             CourseSchedule.date == course_date,
+            CourseSchedule.is_cancelled == False,
         )
         if exclude_schedule_id:
             enrollment_query = enrollment_query.filter(CourseSchedule.id != exclude_schedule_id)
@@ -500,6 +502,7 @@ def find_schedule_conflicts(
         student_query = CourseSchedule.query.filter(
             student_schedule_profile_clause(student_profile_id, schedule_model=CourseSchedule),
             CourseSchedule.date == course_date,
+            CourseSchedule.is_cancelled == False,
         )
         if enrollment_id:
             student_query = student_query.filter(

@@ -4,6 +4,7 @@ from flask_login import current_user, login_required
 from modules.auth import auth_bp
 from modules.auth.decorators import role_required
 from modules.auth.workflow_services import (
+    admin_return_workflow_to_teacher,
     admin_send_workflow_to_student,
     build_workflow_todo_payload,
     get_workflow_todo,
@@ -96,6 +97,23 @@ def api_admin_send_workflow_to_student(todo_id):
         session_dates=session_dates,
         note=data.get('note', ''),
         force_save=bool(data.get('force_save')),
+    )
+    status_code = result.pop('status_code', 200)
+    return jsonify(result), status_code
+
+
+@auth_bp.route('/api/workflow-todos/<int:todo_id>/admin-return-to-teacher', methods=['POST'])
+@role_required('admin')
+def api_admin_return_workflow_to_teacher(todo_id):
+    todo = get_workflow_todo(todo_id)
+    if not todo:
+        return jsonify({'success': False, 'error': '工作流待办不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    result = admin_return_workflow_to_teacher(
+        todo,
+        current_user,
+        data.get('message', ''),
     )
     status_code = result.pop('status_code', 200)
     return jsonify(result), status_code

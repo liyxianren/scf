@@ -3,6 +3,7 @@ import json
 from datetime import date
 
 import pytest
+from freezegun import freeze_time
 from openpyxl import Workbook
 from openpyxl.utils.datetime import to_excel
 
@@ -28,11 +29,11 @@ pytestmark = pytest.mark.integration
 def _build_import_workbook():
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = '3月'
+    sheet.title = '4月'
     sheet['H1'] = 'todo'
-    sheet['A2'] = int(to_excel(date(2026, 3, 16)))
-    sheet['B2'] = int(to_excel(date(2026, 3, 17)))
-    sheet['C2'] = int(to_excel(date(2026, 3, 18)))
+    sheet['A2'] = int(to_excel(date(2026, 4, 16)))
+    sheet['B2'] = int(to_excel(date(2026, 4, 17)))
+    sheet['C2'] = int(to_excel(date(2026, 4, 18)))
     sheet['A3'] = '10:00-12:00 ImportTeacher\nImportCourse AI\nImportStudent'
     sheet['B3'] = '10:00-12:00 ImportTeacher\nUnknownCourse AI\nUnknownStudent'
     sheet['C3'] = '10:00-12:00 ImportTeacher\nConflictImport AI\nOtherStudent'
@@ -432,7 +433,7 @@ def test_excel_import_creates_binding_todo_and_feedback_workflow(client, login_a
         teacher=teacher,
         course_name='ExistingConflict',
         students='OtherStudent',
-        schedule_date=date(2026, 3, 18),
+        schedule_date=date(2026, 4, 18),
         time_start='10:00',
         time_end='12:00',
     )
@@ -453,7 +454,7 @@ def test_excel_import_creates_binding_todo_and_feedback_workflow(client, login_a
 
     bound_schedule = CourseSchedule.query.filter_by(
         enrollment_id=enrollment.id,
-        date=date(2026, 3, 16),
+        date=date(2026, 4, 16),
         course_name='ImportCourse AI',
     ).first()
     assert bound_schedule is not None
@@ -464,7 +465,7 @@ def test_excel_import_creates_binding_todo_and_feedback_workflow(client, login_a
 
     unmatched_schedule = CourseSchedule.query.filter_by(
         enrollment_id=None,
-        date=date(2026, 3, 17),
+        date=date(2026, 4, 17),
         course_name='UnknownCourse AI',
     ).first()
     assert unmatched_schedule is not None
@@ -546,7 +547,7 @@ def test_excel_reimport_unmatched_cancels_stale_feedback_workflow(client, login_
         data={
             'file': (
                 _build_custom_import_workbook([
-                    (date(2026, 3, 16), '10:00-12:00 ImportRebindTeacher\nRebindCourse AI\nImportRebindStudent'),
+                    (date(2026, 4, 16), '10:00-12:00 ImportRebindTeacher\nRebindCourse AI\nImportRebindStudent'),
                 ]),
                 '2026-rebind-initial.xlsx',
             )
@@ -558,7 +559,7 @@ def test_excel_reimport_unmatched_cancels_stale_feedback_workflow(client, login_
     schedule = CourseSchedule.query.filter_by(
         enrollment_id=enrollment.id,
         course_name='RebindCourse AI',
-        date=date(2026, 3, 16),
+        date=date(2026, 4, 16),
     ).first()
     assert schedule is not None
     feedback_todo = OATodo.query.filter_by(
@@ -573,7 +574,7 @@ def test_excel_reimport_unmatched_cancels_stale_feedback_workflow(client, login_
         data={
             'file': (
                 _build_custom_import_workbook([
-                    (date(2026, 3, 16), '10:00-12:00 ImportRebindTeacher\nUnknownCourse AI\nUnknownStudent'),
+                    (date(2026, 4, 16), '10:00-12:00 ImportRebindTeacher\nUnknownCourse AI\nUnknownStudent'),
                 ]),
                 '2026-rebind-unmatched.xlsx',
             )
@@ -601,6 +602,57 @@ def test_excel_reimport_unmatched_cancels_stale_feedback_workflow(client, login_
     assert refreshed_feedback_todo.is_completed is True
     assert binding_todo is not None
     assert binding_todo.is_completed is False
+
+
+@freeze_time('2026-04-02 12:00:00')
+def test_historical_imported_schedule_before_april_is_hidden_and_cancelled_from_feedback_views(client, login_as):
+    admin = create_user(username='oa-p1-history-cutoff-admin', display_name='HistoryCutoffAdmin', role='admin')
+    teacher = create_user(username='oa-p1-history-cutoff-teacher', display_name='HistoryCutoffTeacher', role='teacher')
+
+    import_run = ScheduleImportRun(
+        original_filename='history-cutoff.xlsx',
+        uploaded_by=admin.id,
+        status='completed',
+    )
+    db.session.add(import_run)
+    db.session.flush()
+
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='HistoryCutoffCourse',
+        students='HistoryCutoffStudent',
+        schedule_date=date(2026, 3, 16),
+        time_start='10:00',
+        time_end='12:00',
+    )
+    schedule.import_run_id = import_run.id
+    db.session.commit()
+
+    feedback_todo = create_todo(
+        title='历史课次反馈',
+        responsible_person=teacher.display_name,
+        schedule=schedule,
+        due_date=schedule.date,
+        todo_type=OATodo.TODO_TYPE_SCHEDULE_FEEDBACK,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    login_as(admin)
+    action_center = client.get('/auth/api/admin/action-center').get_json()['data']
+    assert action_center['pending_feedback_schedules'] == []
+
+    todo_payload = client.get('/oa/api/todos?status=pending').get_json()
+    assert todo_payload['success'] is True
+    assert all(item['id'] != feedback_todo.id for item in todo_payload['data'])
+
+    stats_payload = client.get('/oa/api/dashboard-stats').get_json()['data']
+    assert stats_payload['pending_todos'] == 0
+
+    db.session.expire_all()
+    refreshed_todo = db.session.get(OATodo, feedback_todo.id)
+    assert refreshed_todo.workflow_status == OATodo.WORKFLOW_STATUS_CANCELLED
+    assert refreshed_todo.is_completed is True
+    assert '2026-04-01' in (refreshed_todo.get_payload_data().get('cancel_reason') or '')
 
 
 def test_excel_reimport_conflict_keeps_existing_imported_schedule(client, login_as):

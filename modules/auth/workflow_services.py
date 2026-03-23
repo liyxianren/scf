@@ -273,12 +273,30 @@ def list_workflow_todos_for_user(user, *, status='open', todo_type=None, enrollm
             OATodo.enrollment.has(Enrollment.student_profile_id == profile.id),
         )
 
-    return query.order_by(
+    todos = query.order_by(
         OATodo.is_completed,
         OATodo.priority,
         OATodo.due_date.asc().nullslast(),
         OATodo.created_at.desc(),
     ).all()
+    visible_todos = []
+    changed = False
+    for todo in todos:
+        if (
+            todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
+            and not auth_services.schedule_requires_course_feedback(todo.schedule)
+        ):
+            if not todo.is_completed:
+                cancel_schedule_feedback_todo(
+                    todo.schedule_id,
+                    reason=auth_services.get_course_feedback_skip_reason(todo.schedule) or '',
+                )
+                changed = True
+            continue
+        visible_todos.append(todo)
+    if changed:
+        db.session.commit()
+    return visible_todos
 
 
 def get_workflow_todo(todo_id):
@@ -463,6 +481,7 @@ def build_workflow_todo_payload(todo, actor=None):
         'workflow_status_label': _workflow_status_label(todo.todo_type, todo.workflow_status),
         'can_teacher_propose': False,
         'can_admin_send': False,
+        'can_admin_return_to_teacher': False,
         'can_student_confirm': False,
         'can_student_reject': False,
         'can_submit_feedback': False,
@@ -489,10 +508,11 @@ def build_workflow_todo_payload(todo, actor=None):
             payload['can_admin_send'] = todo.todo_type in {
                 OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
                 OATodo.TODO_TYPE_LEAVE_MAKEUP,
-            } and todo.workflow_status in {
-                OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
-                OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW,
-            }
+            } and todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+            payload['can_admin_return_to_teacher'] = todo.todo_type in {
+                OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+                OATodo.TODO_TYPE_LEAVE_MAKEUP,
+            } and todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
         elif actor.role == 'student':
             payload['can_student_confirm'] = todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM
             payload['can_student_reject'] = todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM
@@ -506,7 +526,7 @@ def build_workflow_todo_payload(todo, actor=None):
     }.get(todo.workflow_status, payload.get('next_action_label'))
     payload['next_step_hint'] = {
         OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL: '老师提交建议后，教务会继续微调并发送给学生。',
-        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW: '教务确认后会把方案发给学生。',
+        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW: '教务确认后会把方案发给学生，或退回老师重新提案。',
         OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM: (
             '学生确认后补课时间会正式生效。'
             if todo.todo_type == OATodo.TODO_TYPE_LEAVE_MAKEUP
@@ -539,7 +559,24 @@ def get_schedule_workflow_todos(schedule_id, actor=None, *, include_closed=False
     if actor and getattr(actor, 'role', None) == 'student':
         query = query.filter(OATodo.todo_type.in_(tuple(PROCESS_WORKFLOW_TYPES)))
     todos = query.order_by(OATodo.created_at.desc()).all()
-    return [build_workflow_todo_payload(todo, actor) for todo in todos]
+    visible_todos = []
+    changed = False
+    for todo in todos:
+        if (
+            todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
+            and not auth_services.schedule_requires_course_feedback(todo.schedule)
+        ):
+            if not todo.is_completed:
+                cancel_schedule_feedback_todo(
+                    todo.schedule_id,
+                    reason=auth_services.get_course_feedback_skip_reason(todo.schedule) or '',
+                )
+                changed = True
+            continue
+        visible_todos.append(todo)
+    if changed:
+        db.session.commit()
+    return [build_workflow_todo_payload(todo, actor) for todo in visible_todos]
 
 
 def get_leave_request_workflow(leave_request_id, actor=None):
@@ -1021,6 +1058,58 @@ def submit_teacher_workflow_proposal(todo, actor, session_dates, note=''):
     }
 
 
+def admin_return_workflow_to_teacher(todo, actor, message_text=''):
+    if not user_can_access_workflow_todo(actor, todo) or actor.role != 'admin':
+        return {
+            'success': False,
+            'status_code': 403,
+            'error': '无权退回该工作流',
+        }
+    if todo.todo_type not in {
+        OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        OATodo.TODO_TYPE_LEAVE_MAKEUP,
+    }:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前工作流不支持退回老师重提',
+        }
+    if todo.workflow_status != OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '当前工作流不在待教务审核状态',
+        }
+
+    message = (message_text or '').strip()
+    if not message:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '请填写退回原因',
+        }
+
+    payload = _workflow_base_payload(todo)
+    _append_rejection(payload, actor, message)
+    payload['revision'] = int(payload.get('revision') or 0) + 1
+    payload['current_proposal'] = _copy_jsonable(payload.get('current_proposal'))
+    payload.pop('sent_to_student_at', None)
+    payload.pop('sent_to_student_by', None)
+    payload.pop('sent_to_student_by_name', None)
+    todo.description = message
+    todo.notes = message
+    todo.responsible_person = _teacher_admin_responsible_people(todo.enrollment)
+    _set_todo_state(todo, OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL)
+    todo.set_payload_data(payload)
+    db.session.commit()
+    return {
+        'success': True,
+        'status_code': 200,
+        'message': '已退回老师重新提案',
+        'data': build_workflow_todo_payload(todo, actor),
+    }
+
+
 def _send_makeup_notification(leave_request):
     enrollment = leave_request.enrollment or (leave_request.schedule.enrollment if leave_request.schedule else None)
     profile = enrollment.student_profile if enrollment else None
@@ -1058,10 +1147,13 @@ def admin_send_workflow_to_student(todo, actor, *, session_dates=None, note='', 
             'status_code': 400,
             'error': '当前工作流不支持发送给学生确认',
         }
-    if todo.workflow_status not in {
-        OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
-        OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW,
-    }:
+    if todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '老师尚未提交方案，请先等待老师提案或退回老师重提',
+        }
+    if todo.workflow_status != OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW:
         return {
             'success': False,
             'status_code': 400,
@@ -1356,14 +1448,20 @@ def ensure_schedule_feedback_todo(schedule, *, created_by=None):
     auth_services._hydrate_schedule_teacher_id(schedule)
     if not schedule.teacher_id:
         return None
-    latest_leave = auth_services._latest_leave_request(schedule)
-    if latest_leave and latest_leave.status == 'approved':
-        return cancel_schedule_feedback_todo(schedule.id, reason='课程已请假')
-
     todo = OATodo.query.filter_by(
         todo_type=OATodo.TODO_TYPE_SCHEDULE_FEEDBACK,
         schedule_id=schedule.id,
     ).order_by(OATodo.created_at.desc()).first()
+    if not auth_services.schedule_requires_course_feedback(schedule):
+        if todo and not (todo.is_completed and todo.workflow_status == OATodo.WORKFLOW_STATUS_COMPLETED):
+            return cancel_schedule_feedback_todo(
+                schedule.id,
+                reason=auth_services.get_course_feedback_skip_reason(schedule) or '',
+            )
+        return todo
+    latest_leave = auth_services._latest_leave_request(schedule)
+    if latest_leave and latest_leave.status == 'approved':
+        return cancel_schedule_feedback_todo(schedule.id, reason='课程已请假')
     if not todo:
         todo = OATodo(
             title=f'课后反馈：{schedule.course_name} · {schedule.students or "未绑定学生"}',

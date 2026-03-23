@@ -24,6 +24,7 @@ from modules.auth.services import (
     delete_student_user_hard,
     get_accessible_enrollment_query,
     get_business_today,
+    schedule_requires_course_feedback,
     save_course_feedback,
     seed_staff_accounts,
     user_can_access_schedule,
@@ -71,7 +72,10 @@ def _feedback_permission_error(schedule):
 
 
 def _teacher_schedule_query(user, start=None, end=None):
-    query = CourseSchedule.query.filter(_teacher_schedule_identity_filter(CourseSchedule, user))
+    query = CourseSchedule.query.filter(
+        _teacher_schedule_identity_filter(CourseSchedule, user),
+        CourseSchedule.is_cancelled == False,
+    )
     if start is not None:
         query = query.filter(CourseSchedule.date >= start)
     if end is not None:
@@ -85,7 +89,8 @@ def _student_schedule_query(user, start=None, end=None):
         return CourseSchedule.query.filter(False)
 
     query = CourseSchedule.query.filter(
-        student_schedule_profile_clause(profile.id, schedule_model=CourseSchedule)
+        student_schedule_profile_clause(profile.id, schedule_model=CourseSchedule),
+        CourseSchedule.is_cancelled == False,
     )
 
     if start is not None:
@@ -290,6 +295,7 @@ def api_admin_stats():
     week_courses = CourseSchedule.query.filter(
         CourseSchedule.date >= week_start,
         CourseSchedule.date <= week_end,
+        CourseSchedule.is_cancelled == False,
     ).count()
     active_students = StudentProfile.query.count()
 
@@ -723,9 +729,11 @@ def api_admin_action_center():
     pending_feedback_schedules = _sort_action_items(_annotate_pending_feedback_risk([
         build_schedule_payload(schedule, current_user)
         for schedule in CourseSchedule.query.filter(
-            CourseSchedule.date <= today
+            CourseSchedule.date <= today,
+            CourseSchedule.is_cancelled == False,
         ).order_by(CourseSchedule.date.desc(), CourseSchedule.time_start.asc()).all()
-        if _schedule_has_started(schedule)
+        if schedule_requires_course_feedback(schedule)
+        and _schedule_has_started(schedule)
         and not (schedule.feedback and schedule.feedback.status == 'submitted')
         and not (_latest_leave_request(schedule) and _latest_leave_request(schedule).status == 'approved')
     ]))

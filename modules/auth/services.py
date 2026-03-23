@@ -19,6 +19,7 @@ SCHEDULE_PREFIX = "[排课方案]"
 BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 UTC = timezone.utc
 LEGACY_ENROLLMENT_NOTE_PATTERN = re.compile(r'(?<!\d)报名#\s*(\d+)(?!\d)')
+IMPORTED_SCHEDULE_FEEDBACK_START_DATE = date(2026, 4, 1)
 
 
 def get_business_now():
@@ -42,6 +43,29 @@ def serialize_business_datetime(value, *, assume_utc=True):
 
 def get_business_today():
     return get_business_now().date()
+
+
+def schedule_requires_course_feedback(schedule):
+    if not schedule or not schedule.date:
+        return False
+    if getattr(schedule, 'is_cancelled', False):
+        return False
+    if getattr(schedule, 'import_run_id', None) and schedule.date < IMPORTED_SCHEDULE_FEEDBACK_START_DATE:
+        return False
+    return True
+
+
+def get_course_feedback_skip_reason(schedule):
+    if not schedule or not schedule.date:
+        return '课次信息不完整，暂不生成课程反馈待办'
+    if getattr(schedule, 'is_cancelled', False):
+        return (getattr(schedule, 'cancel_reason', None) or '课次已取消，当前无需提交课程反馈').strip()
+    if getattr(schedule, 'import_run_id', None) and schedule.date < IMPORTED_SCHEDULE_FEEDBACK_START_DATE:
+        return (
+            f'{IMPORTED_SCHEDULE_FEEDBACK_START_DATE.isoformat()} 前导入的历史课次'
+            '不要求补录课程反馈'
+        )
+    return None
 
 
 def generate_intake_token():
@@ -1216,6 +1240,7 @@ def _collect_teacher_schedule_conflicts(enrollment, session_dates, *, ignore_sch
     query = CourseSchedule.query.filter(
         CourseSchedule.date.in_([date.fromisoformat(value) for value in session_dates_by_date]),
         or_(*teacher_filters),
+        CourseSchedule.is_cancelled == False,
     )
     if ignore_ids:
         query = query.filter(~CourseSchedule.id.in_(ignore_ids))
@@ -1255,6 +1280,7 @@ def _collect_student_schedule_conflicts(enrollment, session_dates, *, ignore_sch
     query = CourseSchedule.query.filter(
         student_schedule_profile_clause(enrollment.student_profile_id, schedule_model=CourseSchedule),
         CourseSchedule.date.in_([date.fromisoformat(value) for value in session_dates_by_date]),
+        CourseSchedule.is_cancelled == False,
     )
     if ignore_ids:
         query = query.filter(~CourseSchedule.id.in_(ignore_ids))
@@ -1392,33 +1418,37 @@ def _extract_legacy_enrollment_id(note_text):
     return next(iter(matches))
 
 
-def _linked_schedule_ids(enrollment_id):
+def _linked_schedule_ids(enrollment_id, *, include_cancelled=False):
     from modules.oa.models import CourseSchedule
 
     if not enrollment_id:
         return []
 
+    direct_filters = [CourseSchedule.enrollment_id == enrollment_id]
+    if not include_cancelled:
+        direct_filters.append(CourseSchedule.is_cancelled == False)
     schedule_ids = {
         row[0]
-        for row in db.session.query(CourseSchedule.id).filter(
-            CourseSchedule.enrollment_id == enrollment_id
-        ).all()
+        for row in db.session.query(CourseSchedule.id).filter(*direct_filters).all()
     }
-    legacy_candidates = CourseSchedule.query.filter(
+    legacy_candidate_filters = [
         CourseSchedule.enrollment_id.is_(None),
         CourseSchedule.notes.isnot(None),
         CourseSchedule.notes.contains('报名#'),
-    ).all()
+    ]
+    if not include_cancelled:
+        legacy_candidate_filters.append(CourseSchedule.is_cancelled == False)
+    legacy_candidates = CourseSchedule.query.filter(*legacy_candidate_filters).all()
     for schedule in legacy_candidates:
         if _extract_legacy_enrollment_id(schedule.notes) == enrollment_id:
             schedule_ids.add(schedule.id)
     return sorted(schedule_ids)
 
 
-def _linked_schedule_query(enrollment_id):
+def _linked_schedule_query(enrollment_id, *, include_cancelled=False):
     from modules.oa.models import CourseSchedule
 
-    linked_ids = _linked_schedule_ids(enrollment_id)
+    linked_ids = _linked_schedule_ids(enrollment_id, include_cancelled=include_cancelled)
     if not linked_ids:
         return CourseSchedule.query.filter(False)
     return CourseSchedule.query.filter(CourseSchedule.id.in_(linked_ids))
@@ -1508,6 +1538,8 @@ def user_can_request_leave(user, schedule):
         return False
     if user.role != 'student':
         return False
+    if getattr(schedule, 'is_cancelled', False):
+        return False
     if _schedule_has_started(schedule):
         return False
     if latest_leave and latest_leave.status in {'pending', 'approved'}:
@@ -1581,6 +1613,8 @@ def user_can_submit_feedback(user, schedule):
         and _actor_can_manage_schedule_feedback(user, schedule)
     ):
         return False
+    if not schedule_requires_course_feedback(schedule):
+        return False
     if not _schedule_has_started(schedule):
         return False
     latest_leave = _latest_leave_request(schedule)
@@ -1590,6 +1624,22 @@ def user_can_submit_feedback(user, schedule):
     if feedback and feedback.status == 'submitted':
         return False
     return True
+
+
+def get_schedule_feedback_permission_error(user, schedule):
+    if not schedule or not _actor_can_manage_schedule_feedback(user, schedule):
+        return '无权提交该课程反馈'
+    if not schedule_requires_course_feedback(schedule):
+        return get_course_feedback_skip_reason(schedule) or '该课程当前无需填写反馈'
+    feedback = getattr(schedule, 'feedback', None)
+    if feedback and feedback.status == 'submitted':
+        return '该课程反馈已提交'
+    latest_leave = _latest_leave_request(schedule)
+    if latest_leave and latest_leave.status == 'approved':
+        return '该课程已批准请假，不能提交反馈'
+    if not _schedule_has_started(schedule):
+        return '课程尚未开始，暂不能提交反馈'
+    return None
 
 
 def build_feedback_payload(feedback, actor=None):
@@ -1702,6 +1752,7 @@ def build_schedule_payload(schedule, actor=None):
     payload = schedule.to_dict()
     latest_leave = _latest_leave_request(schedule)
     feedback = getattr(schedule, 'feedback', None)
+    feedback_required = schedule_requires_course_feedback(schedule)
     workflow_todos = get_schedule_workflow_todos(schedule.id, actor)
     if actor and getattr(actor, 'is_authenticated', False) and actor.role == 'student':
         if feedback and feedback.status != 'submitted':
@@ -1714,18 +1765,40 @@ def build_schedule_payload(schedule, actor=None):
         'feedback_status': feedback.status if feedback else None,
         'feedback_submitted_at': feedback.submitted_at.isoformat() if feedback and feedback.submitted_at else None,
         'is_delivered': bool(feedback and feedback.status == 'submitted'),
-        'can_edit': bool(actor and getattr(actor, 'is_authenticated', False) and actor.role == 'admin'),
+        'can_edit': bool(
+            actor
+            and getattr(actor, 'is_authenticated', False)
+            and actor.role == 'admin'
+            and not payload.get('is_cancelled')
+        ),
         'can_confirm': False,
         'can_reject': False,
         'can_request_leave': bool(actor and user_can_request_leave(actor, schedule)),
         'can_approve_leave': bool(actor and latest_leave and latest_leave.status == 'pending' and user_can_approve_leave(actor, latest_leave)),
         'can_submit_feedback': bool(actor and user_can_submit_feedback(actor, schedule)),
         'workflow_todos': workflow_todos,
-        'feedback_due_at': _datetime_to_iso(_schedule_end_datetime(schedule)) if _schedule_has_started(schedule) else None,
-        'feedback_delay_days': max((get_business_today() - schedule.date).days, 0) if _schedule_has_started(schedule) else 0,
+        'feedback_due_at': (
+            _datetime_to_iso(_schedule_end_datetime(schedule))
+            if feedback_required and _schedule_has_started(schedule)
+            else None
+        ),
+        'feedback_delay_days': (
+            max((get_business_today() - schedule.date).days, 0)
+            if feedback_required and _schedule_has_started(schedule)
+            else 0
+        ),
         'missing_feedback_count_for_teacher_recent': 0,
         'is_repeat_late_teacher': False,
     })
+    if payload.get('is_cancelled'):
+        payload.update(build_next_action_meta(
+            role='none',
+            label='课次已取消',
+            status='cancelled',
+            waiting_since=payload.get('cancelled_at') or payload.get('updated_at') or payload.get('created_at'),
+            is_overdue=False,
+        ))
+        return payload
     active_todo = next(
         (
             item for item in workflow_todos
@@ -1741,10 +1814,12 @@ def build_schedule_payload(schedule, actor=None):
             'waiting_since': active_todo.get('waiting_since'),
             'is_overdue': bool(active_todo.get('is_overdue')),
         })
-    elif user_can_submit_feedback(actor, schedule) or (
-        _schedule_has_started(schedule)
-        and not (feedback and feedback.status == 'submitted')
-        and not (latest_leave and latest_leave.status == 'approved')
+    elif feedback_required and (
+        user_can_submit_feedback(actor, schedule) or (
+            _schedule_has_started(schedule)
+            and not (feedback and feedback.status == 'submitted')
+            and not (latest_leave and latest_leave.status == 'approved')
+        )
     ):
         payload.update(build_next_action_meta(
             role='teacher',
@@ -1863,6 +1938,7 @@ def build_leave_request_payload(leave_request, actor=None):
         'waiting_admin_review': '待教务发送',
         'waiting_student_confirm': '待学生确认补课',
         'confirmed': '已确认补课',
+        'cancelled': '已取消',
         'rejected': '已驳回',
         'approved': '补课安排中',
     }.get(payload.get('case_stage'), payload.get('next_action_label') or payload.get('status'))
@@ -1872,6 +1948,7 @@ def build_leave_request_payload(leave_request, actor=None):
         'waiting_admin_review': '教务确认后会把补课方案发给学生。',
         'waiting_student_confirm': '学生确认后补课时间会正式生效。',
         'confirmed': '请按已确认的补课时间正常上课。',
+        'cancelled': '该请假关联课次已取消，请按最新安排与教务沟通。',
         'rejected': '请查看处理说明后重新发起请假。',
     }.get(payload.get('case_stage'))
     return payload
@@ -1901,7 +1978,11 @@ def _get_enrollment_delivery_meta(enrollment):
         if latest_leave and latest_leave.status == 'approved':
             approved_leave_count += 1
         feedback = getattr(schedule, 'feedback', None)
-        if _schedule_has_started(schedule, now) and not (feedback and feedback.status == 'submitted'):
+        if (
+            schedule_requires_course_feedback(schedule)
+            and _schedule_has_started(schedule, now)
+            and not (feedback and feedback.status == 'submitted')
+        ):
             if not latest_leave or latest_leave.status != 'approved':
                 pending_feedback_count += 1
 
@@ -2145,6 +2226,8 @@ def sync_enrollment_status(enrollment):
         }
     has_open_delivery = False
     for schedule in started_schedules:
+        if not schedule_requires_course_feedback(schedule):
+            continue
         latest_leave = _latest_leave_request(schedule)
         approved_leave = bool(latest_leave and latest_leave.status == 'approved')
         delivered = schedule.id in submitted_feedback_schedule_ids
@@ -2188,7 +2271,8 @@ def find_matching_slots(enrollment_id):
         or_(
             CourseSchedule.teacher_id == enrollment.teacher_id,
             CourseSchedule.teacher == teacher_name,
-        )
+        ),
+        CourseSchedule.is_cancelled == False,
     ).all()
     existing_by_day = {}
     for schedule in existing_schedules:
@@ -2557,6 +2641,68 @@ def send_leave_status_notification(leave_request):
     ))
 
 
+def process_leave_request_decision(leave_request, actor, *, approve, decision_comment=''):
+    from modules.auth.workflow_services import cancel_schedule_feedback_todo, ensure_leave_makeup_workflow
+
+    if not leave_request:
+        return {
+            'success': False,
+            'status_code': 404,
+            'error': '请假记录不存在',
+        }
+    if not user_can_approve_leave(actor, leave_request):
+        return {
+            'success': False,
+            'status_code': 403,
+            'error': '无权审批该请假申请',
+        }
+    if leave_request.status != 'pending':
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '该请假申请已处理',
+        }
+
+    cleaned_comment = (decision_comment or '').strip()
+    if not approve and not cleaned_comment:
+        return {
+            'success': False,
+            'status_code': 400,
+            'error': '请先填写处理说明',
+        }
+
+    leave_request.status = 'approved' if approve else 'rejected'
+    leave_request.decision_comment = cleaned_comment or None
+    leave_request.approved_by = getattr(actor, 'id', None)
+    send_leave_status_notification(leave_request)
+
+    linked_enrollment = leave_request.enrollment or (
+        leave_request.schedule.enrollment if leave_request.schedule else None
+    )
+    if linked_enrollment:
+        sync_enrollment_status(linked_enrollment)
+
+    workflow_todo = None
+    if approve:
+        if leave_request.schedule_id:
+            cancel_schedule_feedback_todo(leave_request.schedule_id, reason='课程请假已批准')
+        workflow_todo = ensure_leave_makeup_workflow(leave_request, actor_user=actor)
+
+    db.session.commit()
+
+    payload = build_leave_request_payload(leave_request, actor)
+    if approve:
+        payload['next_workflow_id'] = workflow_todo.id if workflow_todo else None
+        payload['next_action_label'] = '提交补课建议'
+        payload['next_action_hint'] = '请到待我提案里补充补课时间，教务会继续发送给学生确认。'
+
+    return {
+        'success': True,
+        'status_code': 200,
+        'data': payload,
+    }
+
+
 def save_course_feedback(schedule, teacher_id, data, *, submit=False):
     from modules.oa.models import CourseFeedback
     from modules.auth.models import Enrollment
@@ -2725,7 +2871,7 @@ def delete_enrollment_hard(enrollment_id):
     if not enrollment:
         return False, '报名记录不存在'
 
-    linked_schedules = _linked_schedule_query(enrollment.id).all()
+    linked_schedules = _linked_schedule_query(enrollment.id, include_cancelled=True).all()
     schedule_ids = [schedule.id for schedule in linked_schedules]
 
     if schedule_ids:

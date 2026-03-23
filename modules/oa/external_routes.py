@@ -14,9 +14,12 @@ from modules.auth.services import (
     delete_enrollment_hard,
     export_enrollment_schedule_xlsx,
     find_matching_slots,
+    get_course_feedback_skip_reason,
+    process_leave_request_decision,
     propose_enrollment_schedule,
     reject_enrollment_schedule,
     save_student_profile_record,
+    schedule_requires_course_feedback,
     student_confirm_schedule,
     submit_enrollment_intake,
 )
@@ -35,6 +38,39 @@ def _get_json_payload():
     if not data:
         return None, external_error('请提供 JSON 数据')
     return data, None
+
+
+def _filter_visible_todos(todos, *, reconcile_feedback_visibility=False):
+    visible = []
+    changed = False
+    for todo in todos:
+        if (
+            todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
+            and not schedule_requires_course_feedback(getattr(todo, 'schedule', None))
+        ):
+            if reconcile_feedback_visibility and not todo.is_completed:
+                from modules.auth.workflow_services import cancel_schedule_feedback_todo
+
+                cancel_schedule_feedback_todo(
+                    todo.schedule_id,
+                    reason=get_course_feedback_skip_reason(getattr(todo, 'schedule', None)) or '',
+                )
+                changed = True
+            continue
+        visible.append(todo)
+    if changed:
+        db.session.commit()
+    return visible
+
+
+def _guard_external_generic_todo_mutation(todo):
+    if todo and todo.is_workflow:
+        return external_error(
+            '工作流待办不能通过通用待办接口修改，请使用对应工作流动作',
+            status=400,
+            code='workflow_todo_guarded',
+        )
+    return None
 
 
 def _parse_iso_date(value, field_name='date'):
@@ -87,7 +123,10 @@ def _serialize_teacher_availability(slots):
 def external_dashboard_stats():
     today = date.today()
     today_count = CourseSchedule.query.filter(CourseSchedule.date == today).count()
-    pending_count = OATodo.query.filter(OATodo.is_completed == False).count()
+    pending_count = len(_filter_visible_todos(
+        OATodo.query.filter(OATodo.is_completed == False).all(),
+        reconcile_feedback_visibility=True,
+    ))
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     week_count = CourseSchedule.query.filter(
@@ -346,11 +385,14 @@ def external_list_todos():
     if priority:
         query = query.filter(OATodo.priority == priority)
 
-    todos = query.order_by(
-        OATodo.is_completed,
-        OATodo.priority,
-        OATodo.due_date.asc().nullslast()
-    ).all()
+    todos = _filter_visible_todos(
+        query.order_by(
+            OATodo.is_completed,
+            OATodo.priority,
+            OATodo.due_date.asc().nullslast()
+        ).all(),
+        reconcile_feedback_visibility=True,
+    )
     return external_success({'items': [todo.to_dict() for todo in todos], 'total': len(todos)})
 
 
@@ -401,6 +443,9 @@ def external_update_todo(todo_id):
     todo = OATodo.query.get(todo_id)
     if not todo:
         return external_error('待办不存在', status=404)
+    guarded = _guard_external_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     data, error = _get_json_payload()
     if error:
@@ -434,6 +479,9 @@ def external_delete_todo(todo_id):
     todo = OATodo.query.get(todo_id)
     if not todo:
         return external_error('待办不存在', status=404)
+    guarded = _guard_external_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     db.session.delete(todo)
     db.session.commit()
@@ -446,6 +494,9 @@ def external_toggle_todo(todo_id):
     todo = OATodo.query.get(todo_id)
     if not todo:
         return external_error('待办不存在', status=404)
+    guarded = _guard_external_generic_todo_mutation(todo)
+    if guarded:
+        return guarded
 
     todo.is_completed = not todo.is_completed
     db.session.commit()
@@ -467,6 +518,10 @@ def external_batch_todos():
     todos = OATodo.query.filter(OATodo.id.in_(ids)).all()
     if not todos:
         return external_error('未找到匹配的待办', status=404)
+
+    guarded_todo = next((todo for todo in todos if todo.is_workflow), None)
+    if guarded_todo:
+        return _guard_external_generic_todo_mutation(guarded_todo)
 
     if action == 'complete':
         for todo in todos:
@@ -878,25 +933,39 @@ def external_create_leave_request():
 @external_api_required
 def external_approve_leave_request(request_id):
     leave_request = LeaveRequest.query.get(request_id)
-    if not leave_request:
-        return external_error('请假记录不存在', status=404)
-
     data = request.get_json(silent=True) or {}
-    leave_request.status = 'approved'
-    leave_request.approved_by = data.get('approved_by')
-    db.session.commit()
-    return external_success(leave_request.to_dict())
+    approved_by = data.get('approved_by')
+    actor = db.session.get(User, approved_by) if approved_by else None
+    if not actor:
+        return external_error('缺少有效的 approved_by', status=400, code='missing_approved_by')
+
+    result = process_leave_request_decision(
+        leave_request,
+        actor,
+        approve=True,
+        decision_comment=data.get('comment'),
+    )
+    if not result.get('success'):
+        return external_error(result.get('error') or '审批失败', status=result.get('status_code', 400))
+    return external_success(result.get('data'))
 
 
 @oa_bp.route('/api/external/leave-requests/<int:request_id>/reject', methods=['PUT'])
 @external_api_required
 def external_reject_leave_request(request_id):
     leave_request = LeaveRequest.query.get(request_id)
-    if not leave_request:
-        return external_error('请假记录不存在', status=404)
-
     data = request.get_json(silent=True) or {}
-    leave_request.status = 'rejected'
-    leave_request.approved_by = data.get('approved_by')
-    db.session.commit()
-    return external_success(leave_request.to_dict())
+    approved_by = data.get('approved_by')
+    actor = db.session.get(User, approved_by) if approved_by else None
+    if not actor:
+        return external_error('缺少有效的 approved_by', status=400, code='missing_approved_by')
+
+    result = process_leave_request_decision(
+        leave_request,
+        actor,
+        approve=False,
+        decision_comment=data.get('comment'),
+    )
+    if not result.get('success'):
+        return external_error(result.get('error') or '审批失败', status=result.get('status_code', 400))
+    return external_success(result.get('data'))

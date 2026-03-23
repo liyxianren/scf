@@ -11,13 +11,17 @@ from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.auth.services import (
     _schedule_effective_student_profile_id,
     build_schedule_payload,
+    get_course_feedback_skip_reason,
     get_business_today,
     schedule_has_historical_facts,
+    schedule_requires_course_feedback,
     sync_schedule_student_snapshot,
     sync_enrollment_status,
 )
 from modules.oa import oa_bp
+from . import schedule_actions
 from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
+from modules.oa.reminder_services import record_schedule_action_reminders
 from modules.oa.services import (
     apply_schedule_excel_import,
     delivery_mode_from_color_tag,
@@ -35,6 +39,29 @@ def _get_staff_options():
     except Exception:
         pass
     return ['李宇', '范晓东', '周行', '包睿旻', '黎怡君', '张渝', '陈冠如', '王艳龙', '卢老师', '田鹏', '陈东豪']
+
+
+def _filter_visible_todos(todos, *, reconcile_feedback_visibility=False):
+    visible = []
+    changed = False
+    for todo in todos:
+        if (
+            todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
+            and not schedule_requires_course_feedback(getattr(todo, 'schedule', None))
+        ):
+            if reconcile_feedback_visibility and not todo.is_completed:
+                from modules.auth.workflow_services import cancel_schedule_feedback_todo
+
+                cancel_schedule_feedback_todo(
+                    todo.schedule_id,
+                    reason=get_course_feedback_skip_reason(getattr(todo, 'schedule', None)) or '',
+                )
+                changed = True
+            continue
+        visible.append(todo)
+    if changed:
+        db.session.commit()
+    return visible
 
 
 def _time_to_minutes(time_str):
@@ -321,32 +348,22 @@ def _apply_schedule_update_context(schedule, context):
 
 
 def _schedule_factual_edit_block_reason(schedule):
-    mutation_probe = {
-        'date': schedule.date.isoformat() if schedule.date else None,
-        'time_start': schedule.time_start,
-        'time_end': schedule.time_end,
-        'teacher': schedule.teacher,
-        'enrollment_id': schedule.enrollment_id,
-        'course_name': schedule.course_name,
-        'students': schedule.students,
-    }
-    if _schedule_locked_by_leave(schedule, mutation_probe):
-        return '该课程已有请假记录，请通过调课流程处理，不能直接覆盖'
-    workflow_error = _direct_schedule_update_workflow_error(schedule, mutation_probe)
-    if workflow_error:
-        return workflow_error
-    if schedule_has_historical_facts(schedule):
-        return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
-    return None
+    return schedule_actions.schedule_factual_edit_block_reason(schedule)
 
 
 def _build_oa_schedule_payload(schedule):
     payload = build_schedule_payload(schedule, current_user)
+    delete_block_reason = schedule_actions.schedule_cancel_block_reason(schedule)
+    reschedule_block_reason = (
+        '该课程已取消'
+        if getattr(schedule, 'is_cancelled', False)
+        else schedule_actions.schedule_factual_edit_block_reason(schedule)
+    )
     payload.update({
-        'admin_can_delete': True,
-        'admin_delete_block_reason': None,
-        'admin_can_reschedule': True,
-        'admin_reschedule_block_reason': None,
+        'admin_can_delete': delete_block_reason is None,
+        'admin_delete_block_reason': delete_block_reason,
+        'admin_can_reschedule': reschedule_block_reason is None,
+        'admin_reschedule_block_reason': reschedule_block_reason,
     })
     return payload
 
@@ -355,6 +372,26 @@ def _guard_generic_todo_mutation(todo):
     if todo and todo.is_workflow:
         return jsonify({'success': False, 'error': '工作流待办不能通过通用待办接口修改，请使用对应工作流动作'}), 400
     return None
+
+
+def _workflow_todo_target(todo):
+    if not todo or not todo.is_workflow:
+        return None, None
+    if todo.enrollment_id:
+        return f'/auth/enrollments/{todo.enrollment_id}', '打开报名流程'
+    if todo.schedule_id:
+        return '/oa/schedule', '打开课表查看'
+    return None, None
+
+
+def _build_oa_todo_payload(todo):
+    payload = todo.to_dict()
+    target_url, target_label = _workflow_todo_target(todo)
+    payload.update({
+        'workflow_target_url': target_url,
+        'workflow_target_label': target_label,
+    })
+    return payload
 
 
 # ========== 页面路由 ==========
@@ -401,6 +438,7 @@ def api_list_schedules():
     schedules = CourseSchedule.query.filter(
         CourseSchedule.date >= start_date,
         CourseSchedule.date <= end_date,
+        CourseSchedule.is_cancelled == False,
     ).order_by(CourseSchedule.date, CourseSchedule.time_start).all()
 
     return jsonify({
@@ -419,7 +457,7 @@ def api_schedules_date_range():
         func.min(CourseSchedule.date),
         func.max(CourseSchedule.date),
         func.count(CourseSchedule.id),
-    ).first()
+    ).filter(CourseSchedule.is_cancelled == False).first()
     if result and result[0]:
         return jsonify({
             'success': True,
@@ -449,6 +487,7 @@ def api_schedules_by_date():
     schedules = CourseSchedule.query.filter(
         CourseSchedule.date >= start_date,
         CourseSchedule.date <= end_date,
+        CourseSchedule.is_cancelled == False,
     ).order_by(CourseSchedule.date, CourseSchedule.time_start).all()
 
     return jsonify({
@@ -486,7 +525,7 @@ def api_create_schedule():
     except ValueError:
         return jsonify({'success': False, 'error': '日期格式错误，请使用 YYYY-MM-DD'}), 400
 
-    teacher_user, error = _resolve_teacher_or_error(data['teacher'])
+    teacher_user, error = schedule_actions.resolve_teacher_or_error(data['teacher'])
     if error:
         return jsonify({'success': False, 'error': error}), 400
 
@@ -500,7 +539,7 @@ def api_create_schedule():
     else:
         enrollment = None
 
-    conflict_error = _validate_schedule_conflicts(
+    conflict_error = schedule_actions.validate_schedule_conflicts_or_error(
         course_date=course_date,
         time_start=data['time_start'],
         time_end=data['time_end'],
@@ -543,11 +582,20 @@ def api_update_schedule(schedule_id):
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
 
-    data = request.get_json()
-    context, error = _build_schedule_update_context(schedule, data, allow_admin_override=True)
-    if error:
-        return jsonify({'success': False, 'error': error[0]}), error[1]
-    _apply_schedule_update_context(schedule, context)
+    before_payload = schedule_actions.build_schedule_preview_payload(schedule)
+    result = schedule_actions.apply_schedule_update(
+        schedule,
+        request.get_json(),
+        allow_admin_override=True,
+    )
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error')}), result.get('status_code', 400)
+    record_schedule_action_reminders(
+        schedule,
+        actor=current_user,
+        action_key='schedule.reschedule.apply',
+        before_payload=before_payload,
+    )
 
     return jsonify({'success': True, 'data': _build_oa_schedule_payload(schedule)})
 
@@ -559,39 +607,33 @@ def api_quick_shift_schedule(schedule_id):
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
 
-    data = request.get_json() or {}
-    try:
-        date_shift_days = int(data.get('date_shift_days', 0) or 0)
-        time_shift_minutes = int(data.get('time_shift_minutes', 0) or 0)
-    except (TypeError, ValueError):
-        return jsonify({'success': False, 'error': '快捷调课参数必须是整数'}), 400
+    update_payload, meta_or_error = schedule_actions.prepare_quick_shift_payload(
+        schedule,
+        request.get_json() or {},
+    )
+    if update_payload is None:
+        return jsonify({'success': False, 'error': meta_or_error[0]}), meta_or_error[1]
 
-    if date_shift_days == 0 and time_shift_minutes == 0:
-        return jsonify({'success': False, 'error': '请至少提供一个时间或日期调整量'}), 400
-
-    next_time_start = _shift_schedule_time_value(schedule.time_start, time_shift_minutes)
-    next_time_end = _shift_schedule_time_value(schedule.time_end, time_shift_minutes)
-    if not next_time_start or not next_time_end:
-        return jsonify({'success': False, 'error': '快捷调课不能跨天，请改用完整编辑'}), 400
-
-    next_date = schedule.date + timedelta(days=date_shift_days)
-    update_payload = {
-        'date': next_date.isoformat(),
-        'time_start': next_time_start,
-        'time_end': next_time_end,
-    }
-    context, error = _build_schedule_update_context(schedule, update_payload, allow_admin_override=True)
-    if error:
-        return jsonify({'success': False, 'error': error[0]}), error[1]
-    _apply_schedule_update_context(schedule, context)
+    before_payload = schedule_actions.build_schedule_preview_payload(schedule)
+    result = schedule_actions.apply_schedule_update(
+        schedule,
+        update_payload,
+        allow_admin_override=True,
+    )
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error')}), result.get('status_code', 400)
+    record_schedule_action_reminders(
+        schedule,
+        actor=current_user,
+        action_key='schedule.quick_shift.apply',
+        before_payload=before_payload,
+        extra_payload=meta_or_error,
+    )
 
     return jsonify({
         'success': True,
         'data': _build_oa_schedule_payload(schedule),
-        'meta': {
-            'date_shift_days': date_shift_days,
-            'time_shift_minutes': time_shift_minutes,
-        },
+        'meta': meta_or_error,
     })
 
 
@@ -601,19 +643,24 @@ def api_delete_schedule(schedule_id):
     schedule = db.session.get(CourseSchedule, schedule_id)
     if not schedule:
         return jsonify({'success': False, 'error': '课程不存在'}), 404
-    enrollment_id = schedule.enrollment_id
-
-    OATodo.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
-    LeaveRequest.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
-    CourseFeedback.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
-    db.session.delete(schedule)
-    db.session.flush()
-    if enrollment_id:
-        enrollment = db.session.get(Enrollment, enrollment_id)
-        if enrollment:
-            sync_enrollment_status(enrollment)
+    data = request.get_json(silent=True) or {}
+    _, error = schedule_actions.cancel_schedule(
+        schedule,
+        actor=current_user,
+        reason=data.get('reason', ''),
+    )
+    if error:
+        return jsonify({'success': False, 'error': error[0]}), error[1]
     db.session.commit()
-    return jsonify({'success': True, 'data': {'id': schedule_id}})
+    return jsonify({
+        'success': True,
+        'message': '课次已取消并保留业务记录',
+        'data': {
+            'id': schedule_id,
+            'status': 'cancelled',
+            'cancel_reason': schedule.cancel_reason,
+        },
+    })
 
 
 @oa_bp.route('/api/schedules/teachers', methods=['GET'])
@@ -641,7 +688,9 @@ def api_list_students():
 @oa_bp.route('/api/schedules/progress', methods=['GET'])
 @role_required('admin')
 def api_schedule_progress():
-    all_schedules = CourseSchedule.query.order_by(
+    all_schedules = CourseSchedule.query.filter(
+        CourseSchedule.is_cancelled == False,
+    ).order_by(
         CourseSchedule.date,
         CourseSchedule.time_start,
     ).all()
@@ -695,8 +744,11 @@ def api_list_todos():
     if todo_type:
         query = query.filter(OATodo.todo_type == todo_type)
 
-    todos = query.order_by(OATodo.is_completed, OATodo.priority, OATodo.due_date.asc().nullslast()).all()
-    return jsonify({'success': True, 'data': [todo.to_dict() for todo in todos], 'total': len(todos)})
+    todos = _filter_visible_todos(
+        query.order_by(OATodo.is_completed, OATodo.priority, OATodo.due_date.asc().nullslast()).all(),
+        reconcile_feedback_visibility=True,
+    )
+    return jsonify({'success': True, 'data': [_build_oa_todo_payload(todo) for todo in todos], 'total': len(todos)})
 
 
 @oa_bp.route('/api/todos/<int:todo_id>', methods=['GET'])
@@ -705,7 +757,7 @@ def api_get_todo(todo_id):
     todo = db.session.get(OATodo, todo_id)
     if not todo:
         return jsonify({'success': False, 'error': '待办不存在'}), 404
-    return jsonify({'success': True, 'data': todo.to_dict()})
+    return jsonify({'success': True, 'data': _build_oa_todo_payload(todo)})
 
 
 @oa_bp.route('/api/todos', methods=['POST'])
@@ -880,18 +932,26 @@ def api_import_excel():
 @role_required('admin')
 def api_dashboard_stats():
     today = get_business_today()
-    today_count = CourseSchedule.query.filter(CourseSchedule.date == today).count()
-    pending_count = OATodo.query.filter(OATodo.is_completed == False).count()
+    today_count = CourseSchedule.query.filter(
+        CourseSchedule.date == today,
+        CourseSchedule.is_cancelled == False,
+    ).count()
+    pending_count = len(_filter_visible_todos(
+        OATodo.query.filter(OATodo.is_completed == False).all(),
+        reconcile_feedback_visibility=True,
+    ))
 
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     week_count = CourseSchedule.query.filter(
         CourseSchedule.date >= monday,
         CourseSchedule.date <= sunday,
+        CourseSchedule.is_cancelled == False,
     ).count()
 
     today_schedules = CourseSchedule.query.filter(
-        CourseSchedule.date == today
+        CourseSchedule.date == today,
+        CourseSchedule.is_cancelled == False,
     ).order_by(CourseSchedule.time_start).all()
 
     return jsonify({

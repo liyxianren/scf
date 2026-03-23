@@ -22,16 +22,14 @@ from modules.auth.services import (
     get_accessible_enrollment_query,
     get_business_now,
     get_business_today,
+    process_leave_request_decision,
     propose_enrollment_schedule,
     reject_enrollment_schedule,
     save_manual_enrollment_plan,
-    send_leave_status_notification,
-    sync_enrollment_status,
     student_confirm_schedule,
     submit_enrollment_intake,
     update_enrollment_intake,
     user_can_access_enrollment,
-    user_can_approve_leave,
     user_can_edit_enrollment_intake,
     user_can_request_leave,
 )
@@ -450,63 +448,30 @@ def api_create_leave_request():
 @auth_bp.route('/api/leave-requests/<int:request_id>/approve', methods=['PUT'])
 @role_required('teacher', 'admin')
 def api_approve_leave(request_id):
-    from modules.auth.workflow_services import cancel_schedule_feedback_todo, ensure_leave_makeup_workflow
-
     leave_request = db.session.get(LeaveRequest, request_id)
-    if not leave_request:
-        return jsonify({'success': False, 'error': '请假记录不存在'}), 404
-    if not user_can_approve_leave(current_user, leave_request):
-        return jsonify({'success': False, 'error': '无权审批该请假申请'}), 403
-    if leave_request.status != 'pending':
-        return jsonify({'success': False, 'error': '该请假申请已处理'}), 400
-
     data = request.get_json(silent=True) or {}
-    decision_comment = (data.get('comment') or '').strip() or None
-
-    leave_request.status = 'approved'
-    leave_request.decision_comment = decision_comment
-    leave_request.approved_by = current_user.id
-    send_leave_status_notification(leave_request)
-    linked_enrollment = leave_request.enrollment or (
-        leave_request.schedule.enrollment if leave_request.schedule else None
+    result = process_leave_request_decision(
+        leave_request,
+        current_user,
+        approve=True,
+        decision_comment=data.get('comment'),
     )
-    if linked_enrollment:
-        sync_enrollment_status(linked_enrollment)
-    if leave_request.schedule_id:
-        cancel_schedule_feedback_todo(leave_request.schedule_id, reason='课程请假已批准')
-    workflow_todo = ensure_leave_makeup_workflow(leave_request, actor_user=current_user)
-    db.session.commit()
-    payload = build_leave_request_payload(leave_request, current_user)
-    payload['next_workflow_id'] = workflow_todo.id if workflow_todo else None
-    payload['next_action_label'] = '提交补课建议'
-    payload['next_action_hint'] = '请到待我提案里补充补课时间，教务会继续发送给学生确认。'
-    return jsonify({'success': True, 'data': payload})
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error')}), result.get('status_code', 400)
+    return jsonify({'success': True, 'data': result.get('data')})
 
 
 @auth_bp.route('/api/leave-requests/<int:request_id>/reject', methods=['PUT'])
 @role_required('teacher', 'admin')
 def api_reject_leave(request_id):
     leave_request = db.session.get(LeaveRequest, request_id)
-    if not leave_request:
-        return jsonify({'success': False, 'error': '请假记录不存在'}), 404
-    if not user_can_approve_leave(current_user, leave_request):
-        return jsonify({'success': False, 'error': '无权审批该请假申请'}), 403
-    if leave_request.status != 'pending':
-        return jsonify({'success': False, 'error': '该请假申请已处理'}), 400
-
     data = request.get_json(silent=True) or {}
-    decision_comment = (data.get('comment') or '').strip()
-    if not decision_comment:
-        return jsonify({'success': False, 'error': '请先填写处理说明'}), 400
-
-    leave_request.status = 'rejected'
-    leave_request.decision_comment = decision_comment
-    leave_request.approved_by = current_user.id
-    send_leave_status_notification(leave_request)
-    linked_enrollment = leave_request.enrollment or (
-        leave_request.schedule.enrollment if leave_request.schedule else None
+    result = process_leave_request_decision(
+        leave_request,
+        current_user,
+        approve=False,
+        decision_comment=data.get('comment'),
     )
-    if linked_enrollment:
-        sync_enrollment_status(linked_enrollment)
-    db.session.commit()
-    return jsonify({'success': True, 'data': build_leave_request_payload(leave_request, current_user)})
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error')}), result.get('status_code', 400)
+    return jsonify({'success': True, 'data': result.get('data')})

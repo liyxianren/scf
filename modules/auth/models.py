@@ -22,6 +22,18 @@ class User(UserMixin, db.Model):
     teacher_slots = db.relationship('TeacherAvailability', backref='user', lazy=True,
                                     cascade='all, delete-orphan')
     student_profile = db.relationship('StudentProfile', backref='user', uselist=False, lazy=True)
+    external_identities = db.relationship(
+        'ExternalIdentity',
+        backref='user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    reminder_events = db.relationship(
+        'ReminderEvent',
+        back_populates='target_user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -258,4 +270,190 @@ class ChatMessage(db.Model):
             'content': self.content,
             'is_read': self.is_read,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ExternalIdentity(db.Model):
+    __tablename__ = 'external_identities'
+    __table_args__ = (
+        db.UniqueConstraint('provider', 'external_user_id', name='uq_external_identity_provider_user'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(50), nullable=False)
+    external_user_id = db.Column(db.String(255), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='active')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'provider': self.provider,
+            'external_user_id': self.external_user_id,
+            'user_id': self.user_id,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class IntegrationActionLog(db.Model):
+    __tablename__ = 'integration_action_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.String(120), unique=True, nullable=False)
+    client_name = db.Column(db.String(50), nullable=False)
+    provider = db.Column(db.String(50), nullable=False)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    action = db.Column(db.String(120), nullable=False)
+    payload_json = db.Column(db.Text)
+    result_json = db.Column(db.Text)
+    status = db.Column(db.String(20), nullable=False, default='processing')
+    error_message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    actor = db.relationship('User', foreign_keys=[actor_user_id])
+
+    def get_payload_data(self):
+        if not self.payload_json:
+            return {}
+        try:
+            data = json.loads(self.payload_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_payload_data(self, value):
+        if value is None:
+            self.payload_json = None
+            return
+        self.payload_json = json.dumps(value, ensure_ascii=False)
+
+    def get_result_data(self):
+        if not self.result_json:
+            return {}
+        try:
+            data = json.loads(self.result_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_result_data(self, value):
+        if value is None:
+            self.result_json = None
+            return
+        self.result_json = json.dumps(value, ensure_ascii=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'request_id': self.request_id,
+            'client_name': self.client_name,
+            'provider': self.provider,
+            'actor_user_id': self.actor_user_id,
+            'action': self.action,
+            'payload': self.get_payload_data(),
+            'result': self.get_result_data(),
+            'status': self.status,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ReminderEvent(db.Model):
+    __tablename__ = 'reminder_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_key = db.Column(db.String(255), unique=True, nullable=False)
+    event_type = db.Column(db.String(120), nullable=False)
+    target_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    target_role = db.Column(db.String(20), nullable=False)
+    scope_type = db.Column(db.String(50), nullable=False)
+    scope_id = db.Column(db.Integer, nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    summary = db.Column(db.Text)
+    action_key = db.Column(db.String(120))
+    payload_json = db.Column(db.Text)
+    status = db.Column(db.String(20), nullable=False, default='pending')
+    source_request_id = db.Column(db.String(120))
+    source_action = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    target_user = db.relationship('User', foreign_keys=[target_user_id], back_populates='reminder_events')
+    deliveries = db.relationship(
+        'ReminderDelivery',
+        back_populates='event',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+
+    def get_payload_data(self):
+        if not self.payload_json:
+            return {}
+        try:
+            data = json.loads(self.payload_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_payload_data(self, value):
+        if value is None:
+            self.payload_json = None
+            return
+        self.payload_json = json.dumps(value, ensure_ascii=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_key': self.event_key,
+            'event_type': self.event_type,
+            'target_user_id': self.target_user_id,
+            'target_role': self.target_role,
+            'scope_type': self.scope_type,
+            'scope_id': self.scope_id,
+            'title': self.title,
+            'summary': self.summary,
+            'action_key': self.action_key,
+            'payload': self.get_payload_data(),
+            'status': self.status,
+            'source_request_id': self.source_request_id,
+            'source_action': self.source_action,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ReminderDelivery(db.Model):
+    __tablename__ = 'reminder_deliveries'
+    __table_args__ = (
+        db.UniqueConstraint('event_id', 'channel', 'receiver_external_id', name='uq_reminder_delivery_event_channel_receiver'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('reminder_events.id'), nullable=False)
+    channel = db.Column(db.String(50), nullable=False, default='openclaw_feed')
+    receiver_external_id = db.Column(db.String(255), nullable=False)
+    delivery_status = db.Column(db.String(20), nullable=False, default='pending')
+    fetched_at = db.Column(db.DateTime)
+    acked_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    event = db.relationship('ReminderEvent', foreign_keys=[event_id], back_populates='deliveries')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_id': self.event_id,
+            'channel': self.channel,
+            'receiver_external_id': self.receiver_external_id,
+            'delivery_status': self.delivery_status,
+            'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
+            'acked_at': self.acked_at.isoformat() if self.acked_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

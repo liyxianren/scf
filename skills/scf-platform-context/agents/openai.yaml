@@ -1,0 +1,4 @@
+interface:
+  display_name: "SCF Platform Context"
+  short_description: "SCF platform context and integration guidance"
+  default_prompt: "Use $scf-platform-context to guide SCF OA, scheduling, feedback, Mini Program, Feishu, OpenClaw, or productization architecture decisions."

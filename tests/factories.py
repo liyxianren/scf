@@ -6,7 +6,11 @@ from extensions import db
 from modules.auth.models import (
     ChatMessage,
     Enrollment,
+    ExternalIdentity,
+    IntegrationActionLog,
     LeaveRequest,
+    ReminderDelivery,
+    ReminderEvent,
     StudentProfile,
     TeacherAvailability,
     User,
@@ -261,3 +265,95 @@ def create_leave_request(
         approved_by=approved_by.id if approved_by else None,
     )
     return _persist(leave)
+
+
+def create_external_identity(
+    *,
+    user,
+    provider='feishu',
+    external_user_id=None,
+    status='active',
+):
+    identity = ExternalIdentity(
+        provider=provider,
+        external_user_id=external_user_id or f'{provider}-{user.username}',
+        user_id=user.id,
+        status=status,
+    )
+    return _persist(identity)
+
+
+def create_integration_action_log(
+    *,
+    request_id=None,
+    client_name='openclaw',
+    provider='feishu',
+    actor=None,
+    action='test.action',
+    payload=None,
+    result=None,
+    status='processing',
+    error_message=None,
+):
+    log = IntegrationActionLog(
+        request_id=request_id or _next_name('req'),
+        client_name=client_name,
+        provider=provider,
+        actor_user_id=actor.id if actor else None,
+        action=action,
+        status=status,
+        error_message=error_message,
+    )
+    log.set_payload_data(payload or {})
+    log.set_result_data(result)
+    return _persist(log)
+
+
+def create_reminder_event(
+    *,
+    event_type='workflow.todo',
+    target_user,
+    target_role=None,
+    scope_type='workflow_todo',
+    scope_id=1,
+    title='提醒',
+    summary='提醒摘要',
+    action_key=None,
+    payload=None,
+    status='pending',
+    source_request_id=None,
+):
+    event = ReminderEvent(
+        event_type=event_type,
+        target_user_id=target_user.id,
+        target_role=target_role or target_user.role,
+        scope_type=scope_type,
+        scope_id=str(scope_id),
+        title=title,
+        summary=summary,
+        action_key=action_key,
+        status=status,
+        source_request_id=source_request_id,
+    )
+    event.set_payload_data(payload or {})
+    return _persist(event)
+
+
+def create_reminder_delivery(
+    *,
+    event,
+    channel='openclaw_feed',
+    receiver_external_id='feishu-user',
+    delivery_status='pending',
+    fetched_at=None,
+    acked_at=None,
+):
+    delivery = ReminderDelivery(
+        event_id=event.id,
+        channel=channel,
+        receiver_external_id=receiver_external_id,
+        delivery_status=delivery_status,
+        fetched_at=fetched_at,
+        acked_at=acked_at,
+    )
+    return _persist(delivery)

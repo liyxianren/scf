@@ -49,12 +49,14 @@ def _workflow_contract_ready(app):
         ['/auth/api/workflow-todos'],
         ['/auth/api/workflow-todos/<int:id>/proposal-preview', '/auth/api/workflow-todos/<int:todo_id>/proposal-preview'],
         ['/auth/api/workflow-todos/<int:id>/teacher-proposal', '/auth/api/workflow-todos/<int:todo_id>/teacher-proposal'],
+        ['/auth/api/workflow-todos/<int:id>/admin-return-to-teacher', '/auth/api/workflow-todos/<int:todo_id>/admin-return-to-teacher'],
         ['/auth/api/workflow-todos/<int:id>/admin-send-to-student', '/auth/api/workflow-todos/<int:todo_id>/admin-send-to-student'],
         ['/auth/api/workflow-todos/<int:id>/student-confirm', '/auth/api/workflow-todos/<int:todo_id>/student-confirm'],
         ['/auth/api/workflow-todos/<int:id>/student-reject', '/auth/api/workflow-todos/<int:todo_id>/student-reject'],
     ]
     method_sets = [
         {'GET'},
+        {'POST'},
         {'POST'},
         {'POST'},
         {'POST'},
@@ -748,7 +750,9 @@ def test_time_based_leave_and_status_sync(client, login_as, logout):
     payload = response.get_json()
     assert response.status_code == 200
     assert payload['success'] is True
-    assert db.session.get(CourseSchedule, future_schedule.id) is None
+    refreshed_schedule = db.session.get(CourseSchedule, future_schedule.id)
+    assert refreshed_schedule is not None
+    assert refreshed_schedule.is_cancelled is True
 
     refreshed = db.session.get(Enrollment, enrollment.id)
     assert refreshed.status == 'completed'
@@ -1512,6 +1516,75 @@ def test_admin_teacher_can_preview_and_submit_workflow_proposal(client, login_as
     assert response.status_code == 200
     assert payload['success'] is True
     assert db.session.get(OATodo, todo.id).workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+
+
+def test_admin_can_return_workflow_to_teacher_and_cannot_skip_teacher_stage(client, app, login_as, logout):
+    _require_workflow_contract(app)
+    admin = create_user(username='workflow-return-admin', display_name='退回教务', role='admin')
+    teacher = create_user(username='workflow-return-teacher', display_name='退回老师', role='teacher')
+    student = create_user(username='workflow-return-student', display_name='退回学生用户', role='student')
+    profile = create_student_profile(user=student, name='退回学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='退回学生',
+        course_name='退回流程课程',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=2,
+        hours_per_session=2.0,
+    )
+    todo = create_todo(
+        title='退回待提案',
+        responsible_person='退回老师, 教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    login_as(admin)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/admin-send-to-student',
+        json={'force_save': True},
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['error'] == '老师尚未提交方案，请先等待老师提案或退回老师重提'
+    logout()
+
+    login_as(teacher)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/teacher-proposal',
+        json={
+            'session_dates': [{'date': '2026-03-24', 'time_start': '10:00', 'time_end': '12:00'}],
+            'note': '老师先给一版初稿',
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert db.session.get(OATodo, todo.id).workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+    logout()
+
+    login_as(admin)
+    response = client.post(
+        f'/auth/api/workflow-todos/{todo.id}/admin-return-to-teacher',
+        json={'message': '这版时间太靠前，请改成下午档'},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    refreshed = db.session.get(OATodo, todo.id)
+    assert refreshed.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+    assert _as_json(refreshed.payload)['latest_rejection']['reason'] == '这版时间太靠前，请改成下午档'
+    logout()
+
+    login_as(teacher)
+    response = client.get('/auth/api/workflow-todos')
+    payload = response.get_json()
+    reopened = next(item for item in payload['data'] if item['id'] == todo.id)
+    assert reopened['can_teacher_propose'] is True
+    assert reopened['can_admin_send'] is False
+    assert reopened['latest_rejection_text'] == '这版时间太靠前，请改成下午档'
 
 
 def test_linked_schedule_query_matches_legacy_enrollment_notes_exactly(app):

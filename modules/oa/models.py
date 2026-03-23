@@ -23,6 +23,10 @@ class CourseSchedule(db.Model):
     color_tag = db.Column(db.String(20), default='blue')
     delivery_mode = db.Column(db.String(20), default='unknown')
     import_run_id = db.Column(db.Integer, db.ForeignKey('schedule_import_runs.id'), nullable=True)
+    is_cancelled = db.Column(db.Boolean, default=False, nullable=False)
+    cancelled_at = db.Column(db.DateTime)
+    cancel_reason = db.Column(db.Text)
+    cancelled_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -42,6 +46,11 @@ class CourseSchedule(db.Model):
         cascade='all, delete-orphan',
     )
     enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id], lazy=True, back_populates='schedules')
+    cancelled_by = db.relationship('User', foreign_keys=[cancelled_by_user_id], lazy=True)
+
+    @classmethod
+    def active_query(cls):
+        return cls.query.filter(cls.is_cancelled == False)
 
     def to_dict(self):
         return {
@@ -61,6 +70,11 @@ class CourseSchedule(db.Model):
             'color_tag': self.color_tag,
             'delivery_mode': self.delivery_mode,
             'import_run_id': self.import_run_id,
+            'is_cancelled': self.is_cancelled,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'cancel_reason': self.cancel_reason,
+            'cancelled_by_user_id': self.cancelled_by_user_id,
+            'cancelled_by_name': self.cancelled_by.display_name if self.cancelled_by else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

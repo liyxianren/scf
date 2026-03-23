@@ -22,6 +22,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TESTING = False
     OA_EXTERNAL_API_KEY = 'scf233'
+    OPENCLAW_INTEGRATION_TOKEN = os.environ.get('OPENCLAW_INTEGRATION_TOKEN') or 'openclaw233'
 
     # 代码执行配置
     CODE_EXECUTION_TIMEOUT = 5  # 秒

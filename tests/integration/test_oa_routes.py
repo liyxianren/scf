@@ -19,7 +19,7 @@ from tests.factories import (
 pytestmark = pytest.mark.integration
 
 
-def test_oa_schedule_delete_cleans_todo_for_unprotected_schedule(client, login_as):
+def test_oa_schedule_delete_cancels_schedule_and_preserves_flow_records(client, login_as):
     admin = create_user(username='oa-admin', display_name='OA管理员', role='admin')
     teacher = create_user(username='oa-teacher', display_name='OA老师', role='teacher')
 
@@ -70,18 +70,46 @@ def test_oa_schedule_delete_cleans_todo_for_unprotected_schedule(client, login_a
     )
     assert response.status_code == 201
 
-    response = client.delete(f'/oa/api/schedules/{schedule_id}')
+    leave_request = create_leave_request(
+        schedule=db.session.get(CourseSchedule, schedule_id),
+        student_name='排课学生',
+        status='pending',
+    )
+
+    response = client.delete(
+        f'/oa/api/schedules/{schedule_id}',
+        json={'reason': '学生暂不继续上课'},
+    )
     payload = response.get_json()
     assert payload['success'] is True
-    assert db.session.get(CourseSchedule, schedule_id) is None
+    cancelled_schedule = db.session.get(CourseSchedule, schedule_id)
+    assert cancelled_schedule is not None
+    assert cancelled_schedule.is_cancelled is True
+    assert cancelled_schedule.cancel_reason == '学生暂不继续上课'
 
-    response = client.get('/oa/api/todos')
+    generic_todo = OATodo.query.filter_by(title='课后跟进').first()
+    assert generic_todo is not None
+    assert generic_todo.is_completed is True
+    assert '学生暂不继续上课' in (generic_todo.notes or '')
+
+    feedback_todo = OATodo.query.filter_by(
+        schedule_id=schedule_id,
+        todo_type=OATodo.TODO_TYPE_SCHEDULE_FEEDBACK,
+    ).first()
+    assert feedback_todo is not None
+    assert feedback_todo.workflow_status == OATodo.WORKFLOW_STATUS_CANCELLED
+
+    refreshed_leave = db.session.get(LeaveRequest, leave_request.id)
+    assert refreshed_leave.status == 'cancelled'
+    assert '学生暂不继续上课' in (refreshed_leave.decision_comment or '')
+
+    response = client.get('/oa/api/schedules?year=2026&month=3')
     payload = response.get_json()
     assert payload['success'] is True
-    assert payload['total'] == 0
+    assert all(item['id'] != schedule_id for item in payload['data'])
 
 
-def test_admin_can_edit_and_delete_historical_schedules(client, login_as):
+def test_admin_cannot_cancel_historical_schedules(client, login_as):
     admin = create_user(username='history-admin', display_name='历史管理员', role='admin')
     teacher = create_user(username='history-teacher', display_name='历史老师', role='teacher')
 
@@ -125,11 +153,15 @@ def test_admin_can_edit_and_delete_historical_schedules(client, login_as):
     assert payload['data']['location'] == '线下教室'
     assert payload['data']['color_tag'] == 'green'
 
-    response = client.delete(f'/oa/api/schedules/{started_schedule.id}')
+    response = client.delete(
+        f'/oa/api/schedules/{started_schedule.id}',
+        json={'reason': '历史课次不允许取消'},
+    )
     payload = response.get_json()
-    assert response.status_code == 200
-    assert payload['success'] is True
-    assert db.session.get(CourseSchedule, started_schedule.id) is None
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert payload['error'] == '该课程已产生交付事实，不能直接取消课次'
+    assert db.session.get(CourseSchedule, started_schedule.id) is not None
 
     feedback_schedule = create_schedule(
         teacher=teacher,
@@ -141,13 +173,14 @@ def test_admin_can_edit_and_delete_historical_schedules(client, login_as):
     )
     create_feedback(schedule=feedback_schedule, teacher=teacher, status='submitted')
 
-    response = client.put(
+    response = client.delete(
         f'/oa/api/schedules/{feedback_schedule.id}',
-        json={'teacher': teacher.display_name, 'course_name': '改名失败课程'},
+        json={'reason': '已反馈课程不可取消'},
     )
     payload = response.get_json()
-    assert response.status_code == 200
-    assert payload['data']['course_name'] == '改名失败课程'
+    assert response.status_code == 400
+    assert payload['error'] == '该课程已产生交付事实，不能直接取消课次'
+    assert db.session.get(CourseSchedule, feedback_schedule.id) is not None
 
     leave_schedule = create_schedule(
         teacher=teacher,
@@ -160,21 +193,20 @@ def test_admin_can_edit_and_delete_historical_schedules(client, login_as):
     create_leave_request(schedule=leave_schedule, student_name='请假学生', status='rejected', approved_by=teacher)
     create_todo(title='保留待办', responsible_person='历史管理员', schedule=leave_schedule)
 
-    response = client.put(
+    response = client.delete(
         f'/oa/api/schedules/{leave_schedule.id}',
-        json={'teacher': teacher.display_name, 'students': '新学生'},
+        json={'reason': '已有请假记录的历史课次不可取消'},
     )
     payload = response.get_json()
     assert response.status_code == 200
-    assert payload['data']['students'] == '新学生'
-
-    response = client.delete(f'/oa/api/schedules/{leave_schedule.id}')
-    payload = response.get_json()
-    assert response.status_code == 200
     assert payload['success'] is True
-    assert db.session.get(CourseSchedule, leave_schedule.id) is None
-    assert LeaveRequest.query.filter_by(schedule_id=leave_schedule.id).count() == 0
-    assert OATodo.query.filter_by(schedule_id=leave_schedule.id).count() == 0
+    refreshed_leave_schedule = db.session.get(CourseSchedule, leave_schedule.id)
+    assert refreshed_leave_schedule is not None
+    assert refreshed_leave_schedule.is_cancelled is True
+    assert LeaveRequest.query.filter_by(schedule_id=leave_schedule.id).count() == 1
+    assert OATodo.query.filter_by(schedule_id=leave_schedule.id).count() == 1
+    assert LeaveRequest.query.filter_by(schedule_id=leave_schedule.id).first().status == 'rejected'
+    assert OATodo.query.filter_by(schedule_id=leave_schedule.id).first().is_completed is True
 
 
 def test_schedule_payload_exposes_admin_guard_reasons(client, login_as):
@@ -196,10 +228,37 @@ def test_schedule_payload_exposes_admin_guard_reasons(client, login_as):
     payload = response.get_json()
     assert response.status_code == 200
     assert payload['success'] is True
-    assert payload['data']['admin_can_delete'] is True
-    assert payload['data']['admin_delete_block_reason'] is None
-    assert payload['data']['admin_can_reschedule'] is True
-    assert payload['data']['admin_reschedule_block_reason'] is None
+    assert payload['data']['admin_can_delete'] is False
+    assert payload['data']['admin_delete_block_reason'] == '该课程已产生交付事实，不能直接取消课次'
+    assert payload['data']['admin_can_reschedule'] is False
+    assert payload['data']['admin_reschedule_block_reason'] == '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+
+
+def test_oa_workflow_todos_expose_business_target_links(client, login_as):
+    admin = create_user(username='todo-workflow-admin', display_name='流程待办管理员', role='admin')
+    teacher = create_user(username='todo-workflow-teacher', display_name='流程待办老师', role='teacher')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='流程待办学生',
+        course_name='流程待办课程',
+        status='pending_schedule',
+    )
+    workflow_todo = create_todo(
+        title='待老师提案',
+        responsible_person='流程待办老师, 教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    login_as(admin)
+    response = client.get('/oa/api/todos')
+    payload = response.get_json()
+    assert response.status_code == 200
+    todo_payload = next(item for item in payload['data'] if item['id'] == workflow_todo.id)
+    assert todo_payload['is_workflow'] is True
+    assert todo_payload['workflow_target_url'] == f'/auth/enrollments/{enrollment.id}'
+    assert todo_payload['workflow_target_label'] == '打开报名流程'
 
 
 def test_admin_can_create_schedule_for_pending_workflow_enrollment(client, login_as):

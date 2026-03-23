@@ -651,6 +651,7 @@ function renderWorkflowPanel(){
     : '保存并发送给学生';
   const canTeacherPropose = CURRENT_USER_ROLE === 'teacher' && !!active.can_teacher_propose;
   const canAdminSend = CURRENT_USER_ROLE === 'admin' && !!active.can_admin_send;
+  const canAdminReturn = CURRENT_USER_ROLE === 'admin' && !!active.can_admin_return_to_teacher;
   const canEditWorkflow = canTeacherPropose || canAdminSend;
   panel.style.display = '';
   panel.innerHTML = `
@@ -672,6 +673,10 @@ function renderWorkflowPanel(){
       <button class="btn-secondary" onclick="openManualEditor(${JSON.stringify(plan || {}).replace(/</g, '\\u003c')}, '${escapeJs(active.title || workflowTypeLabel(active.todo_type))}', {mode: '${canTeacherPropose ? 'teacher-proposal' : 'admin-send'}', workflowTodoId: ${active.id}})">
         <span class="material-icons" style="font-size:1rem">tune</span> ${actionLabel}
       </button>` : `<span class="slot-chip" style="background:#fff;border-color:#dbeafe;color:#1d4ed8">当前流程无需排课提案</span>`}
+      ${canAdminReturn ? `
+      <button class="btn-danger" onclick="returnWorkflowToTeacher(${active.id})">
+        <span class="material-icons" style="font-size:1rem">undo</span> 退回老师重提
+      </button>` : ''}
       ${(active.proposal_warning_summary || payload.proposal_warning_summary) ? `<span class="slot-chip" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">方案提醒：${escapeHtml(active.proposal_warning_summary || payload.proposal_warning_summary)}</span>` : ''}
       ${(active.latest_rejection_text || payload.latest_rejection_text) ? `<span class="slot-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c">退回原因：${escapeHtml(active.latest_rejection_text || payload.latest_rejection_text)}</span>` : ''}
     </div>
@@ -952,6 +957,32 @@ async function saveManualPlan(forceSave){
       : manualPlanMode === 'admin-send'
         ? '保存并发送给学生'
         : '保存并通知学生';
+  }
+}
+
+async function returnWorkflowToTeacher(todoId){
+  const message = prompt('请填写退回原因');
+  if(message === null) return;
+  const trimmed = message.trim();
+  if(!trimmed){
+    showToast('请先填写退回原因');
+    return;
+  }
+  try{
+    const res = await fetch(`/auth/api/workflow-todos/${todoId}/admin-return-to-teacher`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: trimmed}),
+    });
+    const json = await res.json();
+    if(json.success){
+      showToast(json.message || '已退回老师重提');
+      setTimeout(() => location.reload(), 700);
+      return;
+    }
+    showToast(json.error || '退回失败');
+  }catch(e){
+    showToast('退回失败');
   }
 }
 
