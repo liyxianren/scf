@@ -5,6 +5,7 @@ import pytest
 from extensions import db
 from modules.auth.models import Enrollment, ReminderDelivery
 from modules.oa import sms_reminder_services
+from modules.oa import services as oa_services
 from modules.oa.models import CourseSchedule
 from tests.factories import create_enrollment, create_schedule, create_student_profile, create_user
 
@@ -126,6 +127,49 @@ def test_oa_schedule_create_rejects_legacy_green_color_tag(client, login_as):
     )
     assert response.status_code == 400
     assert response.get_json()['error'] == '课程颜色已改为线上/线下两种模式；仅支持 blue 或 orange'
+
+
+def test_backfill_schedule_delivery_sms_state_normalizes_legacy_teal_color(app):
+    teacher = create_user(username='legacy-teal-teacher', display_name='历史颜色老师', role='teacher')
+    student = create_user(username='legacy-teal-student', display_name='历史颜色学生', role='student')
+    profile = create_student_profile(user=student, name='历史颜色学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='历史颜色学生',
+        course_name='历史社团课',
+        student_profile=profile,
+        status='confirmed',
+        delivery_preference='online',
+    )
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='历史社团课',
+        students='历史颜色学生',
+        schedule_date=date(2026, 3, 16),
+        time_start='19:00',
+        time_end='21:00',
+        enrollment=enrollment,
+        color_tag='blue',
+        delivery_mode='online',
+        location='线上',
+    )
+    schedule.color_tag = 'teal'
+    schedule.delivery_mode = 'unknown'
+    schedule.meeting_provider = None
+    schedule.meeting_status = 'not_required'
+    db.session.commit()
+
+    result = oa_services.backfill_schedule_delivery_sms_state()
+    db.session.refresh(schedule)
+
+    assert result['schedule_updates'] >= 1
+    assert result['legacy_color_backfills']
+    assert result['legacy_color_backfills'][0]['from_color_tag'] == 'teal'
+    assert result['legacy_color_backfills'][0]['to_delivery_mode'] == 'online'
+    assert schedule.color_tag == 'blue'
+    assert schedule.delivery_mode == 'online'
+    assert schedule.meeting_provider == 'tencent_meeting'
+    assert schedule.meeting_status == 'pending'
 
 
 def test_internal_sms_reminder_job_is_idempotent_and_reconciles(client, app):

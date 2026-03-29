@@ -73,6 +73,12 @@ MEETING_STATUS_LABELS = {
     'failed': '会议链接创建失败',
 }
 LEGACY_UNSUPPORTED_COLOR_TAGS = {'green', 'purple', 'red', 'teal'}
+LEGACY_COLOR_TAG_BACKFILL_DEFAULTS = {
+    'teal': DELIVERY_MODE_ONLINE,
+    'purple': DELIVERY_MODE_ONLINE,
+    'green': DELIVERY_MODE_OFFLINE,
+    'red': DELIVERY_MODE_OFFLINE,
+}
 
 
 class ScheduleSemanticsError(ValueError):
@@ -1699,41 +1705,95 @@ def backfill_schedule_semantics():
     }
 
 
+def _infer_legacy_schedule_delivery_mode(schedule):
+    current_delivery_mode = normalize_delivery_mode(
+        getattr(schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
+        allow_unknown=True,
+    )
+    if current_delivery_mode in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}:
+        return current_delivery_mode, 'existing_delivery_mode'
+
+    enrollment = getattr(schedule, 'enrollment', None)
+    enrollment_delivery_preference = normalize_delivery_mode(
+        getattr(enrollment, 'delivery_preference', DELIVERY_MODE_UNKNOWN),
+        allow_unknown=True,
+    )
+    if enrollment_delivery_preference in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}:
+        return enrollment_delivery_preference, 'enrollment_delivery_preference'
+
+    meeting_status = str(getattr(schedule, 'meeting_status', '') or '').strip().lower()
+    if (
+        getattr(schedule, 'meeting_provider', None)
+        or getattr(schedule, 'meeting_join_url', None)
+        or getattr(schedule, 'meeting_external_id', None)
+        or getattr(schedule, 'meeting_code', None)
+        or meeting_status in {'pending', 'creating', 'ready', 'ended', 'failed'}
+    ):
+        return DELIVERY_MODE_ONLINE, 'meeting_signal'
+
+    context_text = ' '.join([
+        str(getattr(schedule, 'location', '') or ''),
+        str(getattr(schedule, 'notes', '') or ''),
+        str(getattr(schedule, 'course_name', '') or ''),
+    ]).strip().lower()
+    if context_text:
+        if any(keyword in context_text for keyword in {'线上', 'online', 'zoom', '腾讯会议', 'meeting'}):
+            return DELIVERY_MODE_ONLINE, 'text_context_online'
+        if any(keyword in context_text for keyword in {'线下', 'offline', '教室', '校区', 'room', 'classroom'}):
+            return DELIVERY_MODE_OFFLINE, 'text_context_offline'
+
+    legacy_color_tag = str(getattr(schedule, 'color_tag', '') or '').strip().lower()
+    if legacy_color_tag in LEGACY_COLOR_TAG_BACKFILL_DEFAULTS:
+        return LEGACY_COLOR_TAG_BACKFILL_DEFAULTS[legacy_color_tag], 'legacy_color_default'
+
+    return DELIVERY_MODE_ONLINE, 'safe_default_online'
+
+
 def backfill_schedule_delivery_sms_state():
     from extensions import db
     from modules.auth.models import Enrollment
     from modules.oa.models import CourseSchedule
 
     schedules = CourseSchedule.query.order_by(CourseSchedule.id.asc()).all()
-    unsupported = []
+    schedule_updates = 0
+    enrollment_updates = 0
+    legacy_color_backfills = []
     for schedule in schedules:
         normalized_color_tag = str(schedule.color_tag or '').strip().lower()
+        effective_color_tag = schedule.color_tag
+        normalized_delivery_mode = normalize_delivery_mode(
+            getattr(schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
+            allow_unknown=True,
+        )
+        fallback_delivery_mode = (
+            schedule.delivery_mode
+            if normalized_delivery_mode in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}
+            else delivery_mode_from_color_tag(schedule.color_tag)
+        )
+        delivery_mode_input = (
+            schedule.delivery_mode
+            if normalized_delivery_mode in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}
+            else None
+        )
         if normalized_color_tag and normalized_color_tag not in COLOR_TAG_TO_DELIVERY_MODE:
-            unsupported.append({
+            inferred_delivery_mode, inference_reason = _infer_legacy_schedule_delivery_mode(schedule)
+            fallback_delivery_mode = inferred_delivery_mode
+            effective_color_tag = color_tag_from_delivery_mode(inferred_delivery_mode)
+            delivery_mode_input = inferred_delivery_mode
+            legacy_color_backfills.append({
                 'schedule_id': schedule.id,
                 'date': schedule.date.isoformat() if schedule.date else None,
                 'time_start': schedule.time_start,
                 'time_end': schedule.time_end,
                 'teacher': schedule.teacher,
-                'color_tag': normalized_color_tag,
+                'from_color_tag': normalized_color_tag,
+                'to_delivery_mode': inferred_delivery_mode,
+                'to_color_tag': effective_color_tag,
+                'reason': inference_reason,
             })
-    if unsupported:
-        raise RuntimeError(
-            '发现历史课次存在非蓝/橙颜色，已停止静默迁移: '
-            + json.dumps(unsupported[:20], ensure_ascii=False)
-        )
-
-    schedule_updates = 0
-    enrollment_updates = 0
-    for schedule in schedules:
-        fallback_delivery_mode = (
-            schedule.delivery_mode
-            if str(schedule.delivery_mode or '').strip().lower() in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}
-            else delivery_mode_from_color_tag(schedule.color_tag)
-        )
         fields = build_schedule_delivery_fields(
-            delivery_mode=schedule.delivery_mode,
-            color_tag=schedule.color_tag,
+            delivery_mode=delivery_mode_input,
+            color_tag=effective_color_tag,
             fallback_delivery_mode=fallback_delivery_mode,
             existing_schedule=schedule,
             allow_unknown=True,
@@ -1775,5 +1835,5 @@ def backfill_schedule_delivery_sms_state():
     return {
         'schedule_updates': schedule_updates,
         'enrollment_updates': enrollment_updates,
-        'unsupported_colors': unsupported,
+        'legacy_color_backfills': legacy_color_backfills,
     }
