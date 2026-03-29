@@ -172,6 +172,44 @@ def test_backfill_schedule_delivery_sms_state_normalizes_legacy_teal_color(app):
     assert schedule.meeting_status == 'pending'
 
 
+def test_backfill_schedule_delivery_sms_state_tolerates_legacy_special_delivery_mode(app):
+    teacher = create_user(username='legacy-special-teacher', display_name='历史特殊老师', role='teacher')
+    student = create_user(username='legacy-special-student', display_name='历史特殊学生', role='student')
+    profile = create_student_profile(user=student, name='历史特殊学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='历史特殊学生',
+        course_name='历史特殊课',
+        student_profile=profile,
+        status='confirmed',
+        delivery_preference='special',
+    )
+    schedule = create_schedule(
+        teacher=teacher,
+        course_name='历史特殊课',
+        students='历史特殊学生',
+        schedule_date=date(2026, 3, 17),
+        time_start='19:00',
+        time_end='21:00',
+        enrollment=enrollment,
+        color_tag='blue',
+        delivery_mode='online',
+        location='线上',
+    )
+    schedule.delivery_mode = 'special'
+    enrollment.delivery_preference = 'special'
+    db.session.commit()
+
+    result = oa_services.backfill_schedule_delivery_sms_state()
+    db.session.refresh(schedule)
+    db.session.refresh(enrollment)
+
+    assert result['schedule_updates'] >= 1
+    assert schedule.delivery_mode == 'online'
+    assert schedule.color_tag == 'blue'
+    assert enrollment.delivery_preference == 'online'
+
+
 def test_internal_sms_reminder_job_is_idempotent_and_reconciles(client, app):
     teacher = create_user(username='sms-teacher', display_name='短信老师', role='teacher')
     student = create_user(username='sms-student', display_name='短信学生', role='student')

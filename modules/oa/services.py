@@ -455,17 +455,28 @@ def normalize_delivery_mode(value, *, allow_unknown=True, default=DELIVERY_MODE_
     return normalized
 
 
+def normalize_delivery_mode_loose(value, *, default=DELIVERY_MODE_UNKNOWN):
+    try:
+        return normalize_delivery_mode(
+            value,
+            allow_unknown=True,
+            default=default,
+        )
+    except ScheduleSemanticsError:
+        return default
+
+
 def delivery_mode_from_color_tag(color_tag):
     return COLOR_TAG_TO_DELIVERY_MODE.get((color_tag or '').strip().lower(), DELIVERY_MODE_UNKNOWN)
 
 
 def color_tag_from_delivery_mode(delivery_mode):
-    normalized = normalize_delivery_mode(delivery_mode, allow_unknown=True)
+    normalized = normalize_delivery_mode_loose(delivery_mode)
     return DELIVERY_MODE_TO_COLOR_TAG.get(normalized, 'blue')
 
 
 def delivery_mode_label(delivery_mode):
-    normalized = normalize_delivery_mode(delivery_mode, allow_unknown=True)
+    normalized = normalize_delivery_mode_loose(delivery_mode)
     return DELIVERY_MODE_LABELS.get(normalized, DELIVERY_MODE_LABELS[DELIVERY_MODE_UNKNOWN])
 
 
@@ -538,9 +549,8 @@ def build_schedule_delivery_fields(
     if final_delivery_mode == DELIVERY_MODE_ONLINE:
         preserved_online = (
             existing_schedule is not None
-            and normalize_delivery_mode(
+            and normalize_delivery_mode_loose(
                 getattr(existing_schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
-                allow_unknown=True,
             ) == DELIVERY_MODE_ONLINE
         )
         fields.update({
@@ -1706,17 +1716,15 @@ def backfill_schedule_semantics():
 
 
 def _infer_legacy_schedule_delivery_mode(schedule):
-    current_delivery_mode = normalize_delivery_mode(
+    current_delivery_mode = normalize_delivery_mode_loose(
         getattr(schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
-        allow_unknown=True,
     )
     if current_delivery_mode in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}:
         return current_delivery_mode, 'existing_delivery_mode'
 
     enrollment = getattr(schedule, 'enrollment', None)
-    enrollment_delivery_preference = normalize_delivery_mode(
+    enrollment_delivery_preference = normalize_delivery_mode_loose(
         getattr(enrollment, 'delivery_preference', DELIVERY_MODE_UNKNOWN),
-        allow_unknown=True,
     )
     if enrollment_delivery_preference in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}:
         return enrollment_delivery_preference, 'enrollment_delivery_preference'
@@ -1761,9 +1769,8 @@ def backfill_schedule_delivery_sms_state():
     for schedule in schedules:
         normalized_color_tag = str(schedule.color_tag or '').strip().lower()
         effective_color_tag = schedule.color_tag
-        normalized_delivery_mode = normalize_delivery_mode(
+        normalized_delivery_mode = normalize_delivery_mode_loose(
             getattr(schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
-            allow_unknown=True,
         )
         fallback_delivery_mode = (
             schedule.delivery_mode
@@ -1808,16 +1815,15 @@ def backfill_schedule_delivery_sms_state():
 
     enrollments = Enrollment.query.order_by(Enrollment.id.asc()).all()
     for enrollment in enrollments:
-        current = normalize_delivery_mode(
+        current = normalize_delivery_mode_loose(
             getattr(enrollment, 'delivery_preference', DELIVERY_MODE_UNKNOWN),
-            allow_unknown=True,
         )
         if current != DELIVERY_MODE_UNKNOWN:
             continue
         linked_modes = {
-            normalize_delivery_mode(schedule.delivery_mode, allow_unknown=True)
+            normalize_delivery_mode_loose(schedule.delivery_mode)
             for schedule in (enrollment.schedules or [])
-            if normalize_delivery_mode(schedule.delivery_mode, allow_unknown=True) in {
+            if normalize_delivery_mode_loose(schedule.delivery_mode) in {
                 DELIVERY_MODE_ONLINE,
                 DELIVERY_MODE_OFFLINE,
             }
