@@ -6,7 +6,10 @@ from modules.auth import services as auth_services
 from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.oa.models import CourseSchedule, OATodo
 from modules.oa.services import (
+    build_schedule_delivery_fields,
     delivery_mode_from_color_tag,
+    delivery_mode_label,
+    meeting_status_label,
     resolve_schedule_teacher_reference,
     validate_schedule_conflicts,
 )
@@ -117,7 +120,7 @@ def direct_schedule_update_workflow_error(schedule, updates):
         touched_fields & process_locked_fields
         and has_open_process_workflow(schedule_id=schedule.id, enrollment_id=target_enrollment_id)
     ):
-        return '该课程关联未完成的工作流，仅允许修改备注、地点或颜色'
+        return '该课程关联未完成的工作流，仅允许修改备注、地点或上课方式'
 
     relationship_locked_fields = {'enrollment_id'}
     if (
@@ -129,7 +132,7 @@ def direct_schedule_update_workflow_error(schedule, updates):
 
 
 def normalize_schedule_compare_value(field, value):
-    if field in {'teacher', 'time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag'}:
+    if field in {'teacher', 'time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag', 'delivery_mode'}:
         return str(value or '').strip()
     return value
 
@@ -147,9 +150,9 @@ def historical_schedule_mutation_error(schedule, *, proposed_values=None, deleti
     }
     if not changed_fields:
         return None
-    if changed_fields.issubset({'notes', 'location', 'color_tag'}):
+    if changed_fields.issubset({'notes', 'location', 'color_tag', 'delivery_mode'}):
         return None
-    return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+    return '该课程已产生交付事实，仅允许修改备注、地点或上课方式'
 
 
 def build_schedule_update_context(schedule, data, *, allow_admin_override=False):
@@ -200,7 +203,36 @@ def build_schedule_update_context(schedule, data, *, allow_admin_override=False)
         )
     next_location = data.get('location', schedule.location)
     next_notes = data.get('notes', schedule.notes)
-    next_color_tag = data.get('color_tag', schedule.color_tag)
+    current_delivery_mode = (schedule.delivery_mode or '').strip().lower()
+    fallback_delivery_mode = (
+        current_delivery_mode
+        if current_delivery_mode in {'online', 'offline'}
+        else delivery_mode_from_color_tag(schedule.color_tag)
+    )
+    if 'delivery_mode' in data or 'color_tag' in data:
+        try:
+            delivery_fields = build_schedule_delivery_fields(
+                delivery_mode=data.get('delivery_mode'),
+                color_tag=data.get('color_tag'),
+                fallback_delivery_mode=fallback_delivery_mode,
+                existing_schedule=schedule,
+                allow_unknown=False,
+            )
+        except ValueError as exc:
+            return None, (str(exc), 400)
+    else:
+        delivery_fields = {
+            'delivery_mode': schedule.delivery_mode,
+            'color_tag': schedule.color_tag,
+            'meeting_provider': schedule.meeting_provider,
+            'meeting_status': schedule.meeting_status,
+            'meeting_join_url': schedule.meeting_join_url,
+            'meeting_external_id': schedule.meeting_external_id,
+            'meeting_code': schedule.meeting_code,
+            'meeting_password': schedule.meeting_password,
+            'meeting_created_at': schedule.meeting_created_at,
+            'meeting_ended_at': schedule.meeting_ended_at,
+        }
 
     if not allow_admin_override:
         workflow_error = direct_schedule_update_workflow_error(schedule, data)
@@ -219,7 +251,8 @@ def build_schedule_update_context(schedule, data, *, allow_admin_override=False)
                 'students': next_students,
                 'location': next_location,
                 'notes': next_notes,
-                'color_tag': next_color_tag,
+                'color_tag': delivery_fields['color_tag'],
+                'delivery_mode': delivery_fields['delivery_mode'],
                 'enrollment_id': next_enrollment_id,
             },
         )
@@ -251,16 +284,18 @@ def build_schedule_update_context(schedule, data, *, allow_admin_override=False)
         'next_students': next_students or '',
         'next_location': next_location,
         'next_notes': next_notes,
-        'next_color_tag': next_color_tag,
+        'delivery_fields': delivery_fields,
         'next_enrollment_id': next_enrollment_id,
     }, None
 
 
 def apply_schedule_update_context(schedule, context):
     from modules.auth.workflow_services import sync_schedule_feedback_todo
+    from modules.oa.tencent_meeting_services import _extract_schedule_meeting_state, sync_schedule_meeting_after_update
 
     original_enrollment_id = context['original_enrollment_id']
     enrollment = context['enrollment']
+    previous_meeting_state = _extract_schedule_meeting_state(schedule)
 
     schedule.date = context['next_date']
     schedule.day_of_week = context['next_date'].weekday()
@@ -272,8 +307,8 @@ def apply_schedule_update_context(schedule, context):
     schedule.students = context['next_students']
     schedule.location = context['next_location']
     schedule.notes = context['next_notes']
-    schedule.color_tag = context['next_color_tag']
-    schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
+    for field, value in context['delivery_fields'].items():
+        setattr(schedule, field, value)
     schedule.enrollment_id = context['next_enrollment_id']
     if context.get('preserve_student_snapshot'):
         historical_student_profile_id = context.get('historical_student_profile_id')
@@ -292,6 +327,7 @@ def apply_schedule_update_context(schedule, context):
             enrollment=enrollment,
             preserve_history=False,
         )
+    sync_schedule_meeting_after_update(schedule, previous_state=previous_meeting_state)
 
     db.session.flush()
     if original_enrollment_id:
@@ -323,7 +359,7 @@ def schedule_factual_edit_block_reason(schedule):
     if getattr(schedule, 'is_cancelled', False):
         return '该课程已取消'
     if auth_services.schedule_has_historical_facts(schedule):
-        return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+        return '该课程已产生交付事实，仅允许修改备注、地点或上课方式'
     return None
 
 
@@ -355,6 +391,7 @@ def cancel_schedule(schedule, *, actor=None, reason=''):
         close_process_workflows_for_schedule,
         ensure_leave_makeup_workflow,
     )
+    from modules.oa.tencent_meeting_services import sync_schedule_meeting_after_cancel
 
     block_reason = schedule_cancel_block_reason(schedule)
     if block_reason:
@@ -418,6 +455,7 @@ def cancel_schedule(schedule, *, actor=None, reason=''):
                 workflow.description = reopen_reason
 
     linked_enrollment = schedule.enrollment
+    sync_schedule_meeting_after_cancel(schedule, cancel_reason=cancel_reason)
     db.session.flush()
     if linked_enrollment:
         auth_services.sync_enrollment_status(linked_enrollment)
@@ -439,6 +477,16 @@ def build_schedule_preview_payload(schedule, *, overrides=None, teacher_user=Non
         'notes': schedule.notes,
         'color_tag': schedule.color_tag,
         'delivery_mode': schedule.delivery_mode,
+        'delivery_mode_label': delivery_mode_label(schedule.delivery_mode),
+        'meeting_status': schedule.meeting_status,
+        'meeting_status_label': meeting_status_label(schedule.meeting_status),
+        'meeting_provider': schedule.meeting_provider,
+        'meeting_join_url': schedule.meeting_join_url,
+        'meeting_external_id': schedule.meeting_external_id,
+        'meeting_code': schedule.meeting_code,
+        'meeting_password': schedule.meeting_password,
+        'meeting_created_at': schedule.meeting_created_at.isoformat() if schedule.meeting_created_at else None,
+        'meeting_ended_at': schedule.meeting_ended_at.isoformat() if schedule.meeting_ended_at else None,
         'enrollment_id': schedule.enrollment_id,
     }
     if teacher_user is not None:
@@ -453,8 +501,43 @@ def build_schedule_preview_payload(schedule, *, overrides=None, teacher_user=Non
         else:
             payload[field] = value
 
-    color_tag = payload.get('color_tag') or schedule.color_tag
-    payload['delivery_mode'] = delivery_mode_from_color_tag(color_tag)
+    current_delivery_mode = (schedule.delivery_mode or '').strip().lower()
+    fallback_delivery_mode = (
+        current_delivery_mode
+        if current_delivery_mode in {'online', 'offline'}
+        else delivery_mode_from_color_tag(schedule.color_tag)
+    )
+    try:
+        delivery_fields = build_schedule_delivery_fields(
+            delivery_mode=payload.get('delivery_mode'),
+            color_tag=payload.get('color_tag'),
+            fallback_delivery_mode=fallback_delivery_mode,
+            existing_schedule=schedule,
+            allow_unknown=True,
+        )
+        payload.update({
+            'delivery_mode': delivery_fields['delivery_mode'],
+            'color_tag': delivery_fields['color_tag'],
+            'meeting_provider': delivery_fields.get('meeting_provider'),
+            'meeting_status': delivery_fields.get('meeting_status'),
+            'meeting_join_url': delivery_fields.get('meeting_join_url'),
+            'meeting_external_id': delivery_fields.get('meeting_external_id'),
+            'meeting_code': delivery_fields.get('meeting_code'),
+            'meeting_password': delivery_fields.get('meeting_password'),
+            'meeting_created_at': (
+                delivery_fields.get('meeting_created_at').isoformat()
+                if delivery_fields.get('meeting_created_at') else None
+            ),
+            'meeting_ended_at': (
+                delivery_fields.get('meeting_ended_at').isoformat()
+                if delivery_fields.get('meeting_ended_at') else None
+            ),
+        })
+    except ValueError:
+        payload['delivery_mode'] = payload.get('delivery_mode') or schedule.delivery_mode or 'unknown'
+        payload['color_tag'] = payload.get('color_tag') or schedule.color_tag or 'blue'
+    payload['delivery_mode_label'] = delivery_mode_label(payload['delivery_mode'])
+    payload['meeting_status_label'] = meeting_status_label(payload.get('meeting_status'))
     return payload
 
 
@@ -495,7 +578,8 @@ def _build_context_after_payload(schedule, context):
             'students': context['next_students'],
             'location': context['next_location'],
             'notes': context['next_notes'],
-            'color_tag': context['next_color_tag'],
+            'delivery_mode': context['delivery_fields']['delivery_mode'],
+            'color_tag': context['delivery_fields']['color_tag'],
             'enrollment_id': context['next_enrollment_id'],
         },
         teacher_user=context['teacher_user'],

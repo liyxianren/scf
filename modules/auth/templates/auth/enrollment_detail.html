@@ -147,6 +147,8 @@
         {% elif enrollment.status == 'completed' %}已完成
         {% else %}{{ enrollment.status }}{% endif %}
       </span>
+      <a href="/auth/api/enrollments/{{ enrollment.id }}/feedback-report.pdf" class="btn-secondary" style="text-decoration:none"><span class="material-icons" style="font-size:1rem">picture_as_pdf</span> 导出反馈 PDF</a>
+      <button class="btn-secondary" onclick="generateFeedbackShareLink()"><span class="material-icons" style="font-size:1rem">share</span> 家长分享链接</button>
       {% if enrollment.can_edit %}
       <a href="{{ enrollment.edit_intake_url }}" class="btn-primary" style="text-decoration:none"><span class="material-icons" style="font-size:1rem">edit</span> 修改学生信息</a>
       {% endif %}
@@ -274,6 +276,9 @@
       <div class="feedback-label" style="color:#0369a1">最近一次老师反馈</div>
       {% if enrollment.latest_teacher_feedback_detail.summary %}
       <div class="feedback-text" style="color:#0f172a"><strong>课程总结：</strong>{{ enrollment.latest_teacher_feedback_detail.summary }}</div>
+      {% endif %}
+      {% if enrollment.latest_teacher_feedback_detail.student_performance %}
+      <div class="feedback-text" style="color:#0f172a;margin-top:8px"><strong>学生表现：</strong>{{ enrollment.latest_teacher_feedback_detail.student_performance }}</div>
       {% endif %}
       {% if enrollment.latest_teacher_feedback_detail.homework %}
       <div class="feedback-text" style="color:#0f172a;margin-top:8px"><strong>课后作业：</strong>{{ enrollment.latest_teacher_feedback_detail.homework }}</div>
@@ -1034,6 +1039,30 @@ async function deleteEnrollment(){
     }
   }catch(e){
     showToast('删除失败');
+  }
+}
+
+async function generateFeedbackShareLink(){
+  try{
+    const res = await fetch(`/auth/api/enrollments/${ENROLLMENT_ID}/feedback-share-links`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({})
+    });
+    const json = await res.json();
+    if(!json.success){
+      showToast(json.error || '生成失败');
+      return;
+    }
+    const shareUrl = json.data && json.data.share_url ? json.data.share_url : '';
+    if(!shareUrl){
+      showToast('链接生成失败');
+      return;
+    }
+    await navigator.clipboard.writeText(shareUrl);
+    showToast('家长分享链接已复制');
+  }catch(e){
+    showToast('生成失败');
   }
 }
 </script>

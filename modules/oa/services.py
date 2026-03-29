@@ -39,14 +39,44 @@ COLOR_SEMANTICS = {
     'FFD9E1F4': ('online', 'blue'),
     'FFFEE796': ('offline', 'orange'),
     'FFFFE699': ('offline', 'orange'),
-    'FF63FFD8': ('special', 'teal'),
 }
 
-COLOR_TAG_TO_DELIVERY_MODE = {
-    'blue': 'online',
-    'orange': 'offline',
-    'teal': 'special',
+DELIVERY_MODE_UNKNOWN = 'unknown'
+DELIVERY_MODE_ONLINE = 'online'
+DELIVERY_MODE_OFFLINE = 'offline'
+SUPPORTED_DELIVERY_MODES = {
+    DELIVERY_MODE_ONLINE,
+    DELIVERY_MODE_OFFLINE,
+    DELIVERY_MODE_UNKNOWN,
 }
+COLOR_TAG_TO_DELIVERY_MODE = {
+    'blue': DELIVERY_MODE_ONLINE,
+    'orange': DELIVERY_MODE_OFFLINE,
+}
+DELIVERY_MODE_TO_COLOR_TAG = {
+    DELIVERY_MODE_ONLINE: 'blue',
+    DELIVERY_MODE_OFFLINE: 'orange',
+    DELIVERY_MODE_UNKNOWN: 'blue',
+}
+DELIVERY_MODE_LABELS = {
+    DELIVERY_MODE_ONLINE: '线上',
+    DELIVERY_MODE_OFFLINE: '线下',
+    DELIVERY_MODE_UNKNOWN: '待确认',
+}
+MEETING_STATUS_LABELS = {
+    'pending': '待创建链接',
+    'creating': '正在创建会议',
+    'ready': '会议链接已就绪',
+    'ended': '会议已结束',
+    'not_required': '无需会议链接',
+    'cancelled': '会议已取消',
+    'failed': '会议链接创建失败',
+}
+LEGACY_UNSUPPORTED_COLOR_TAGS = {'green', 'purple', 'red', 'teal'}
+
+
+class ScheduleSemanticsError(ValueError):
+    """Raised when schedule delivery/color semantics are invalid."""
 
 COURSE_KEYWORDS = (
     '项目', '课程', '辅导', '竞赛', '训练', '面试', '工作坊', '技术课', '工程',
@@ -408,8 +438,160 @@ def resolve_schedule_teacher_reference(teacher_name):
     return teacher_user, teacher_user.display_name, alias_hit, None
 
 
+def normalize_delivery_mode(value, *, allow_unknown=True, default=DELIVERY_MODE_UNKNOWN):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return default
+    if normalized not in SUPPORTED_DELIVERY_MODES:
+        raise ScheduleSemanticsError(f'不支持的上课方式: {value}')
+    if normalized == DELIVERY_MODE_UNKNOWN and not allow_unknown:
+        raise ScheduleSemanticsError('上课方式必须是 online 或 offline')
+    return normalized
+
+
 def delivery_mode_from_color_tag(color_tag):
-    return COLOR_TAG_TO_DELIVERY_MODE.get((color_tag or '').strip().lower(), 'unknown')
+    return COLOR_TAG_TO_DELIVERY_MODE.get((color_tag or '').strip().lower(), DELIVERY_MODE_UNKNOWN)
+
+
+def color_tag_from_delivery_mode(delivery_mode):
+    normalized = normalize_delivery_mode(delivery_mode, allow_unknown=True)
+    return DELIVERY_MODE_TO_COLOR_TAG.get(normalized, 'blue')
+
+
+def delivery_mode_label(delivery_mode):
+    normalized = normalize_delivery_mode(delivery_mode, allow_unknown=True)
+    return DELIVERY_MODE_LABELS.get(normalized, DELIVERY_MODE_LABELS[DELIVERY_MODE_UNKNOWN])
+
+
+def meeting_status_label(meeting_status):
+    normalized = str(meeting_status or '').strip().lower()
+    return MEETING_STATUS_LABELS.get(normalized, normalized or None)
+
+
+def resolve_schedule_delivery_semantics(
+    *,
+    delivery_mode=None,
+    color_tag=None,
+    fallback_delivery_mode=None,
+    allow_unknown=False,
+):
+    normalized_color_tag = str(color_tag or '').strip().lower()
+    normalized_delivery_mode = None
+    if delivery_mode not in (None, ''):
+        normalized_delivery_mode = normalize_delivery_mode(
+            delivery_mode,
+            allow_unknown=allow_unknown,
+            default=DELIVERY_MODE_UNKNOWN,
+        )
+
+    if normalized_color_tag:
+        mapped_delivery_mode = COLOR_TAG_TO_DELIVERY_MODE.get(normalized_color_tag)
+        if mapped_delivery_mode is None:
+            if normalized_color_tag in LEGACY_UNSUPPORTED_COLOR_TAGS:
+                raise ScheduleSemanticsError('课程颜色已改为线上/线下两种模式；仅支持 blue 或 orange')
+            raise ScheduleSemanticsError(f'无法识别的 color_tag: {normalized_color_tag}')
+        if normalized_delivery_mode and normalized_delivery_mode != mapped_delivery_mode:
+            raise ScheduleSemanticsError('delivery_mode 与 color_tag 不一致')
+        normalized_delivery_mode = mapped_delivery_mode
+
+    if normalized_delivery_mode is None:
+        normalized_delivery_mode = normalize_delivery_mode(
+            fallback_delivery_mode,
+            allow_unknown=allow_unknown,
+            default=DELIVERY_MODE_UNKNOWN,
+        )
+
+    if normalized_delivery_mode == DELIVERY_MODE_UNKNOWN and not allow_unknown:
+        raise ScheduleSemanticsError('缺少 delivery_mode，且 color_tag 不能唯一推导')
+
+    return {
+        'delivery_mode': normalized_delivery_mode,
+        'color_tag': color_tag_from_delivery_mode(normalized_delivery_mode),
+    }
+
+
+def build_schedule_delivery_fields(
+    *,
+    delivery_mode=None,
+    color_tag=None,
+    fallback_delivery_mode=None,
+    existing_schedule=None,
+    allow_unknown=False,
+):
+    semantics = resolve_schedule_delivery_semantics(
+        delivery_mode=delivery_mode,
+        color_tag=color_tag,
+        fallback_delivery_mode=fallback_delivery_mode,
+        allow_unknown=allow_unknown,
+    )
+    final_delivery_mode = semantics['delivery_mode']
+    fields = {
+        'delivery_mode': final_delivery_mode,
+        'color_tag': semantics['color_tag'],
+    }
+    if final_delivery_mode == DELIVERY_MODE_ONLINE:
+        preserved_online = (
+            existing_schedule is not None
+            and normalize_delivery_mode(
+                getattr(existing_schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
+                allow_unknown=True,
+            ) == DELIVERY_MODE_ONLINE
+        )
+        fields.update({
+            'meeting_provider': (
+                getattr(existing_schedule, 'meeting_provider', None)
+                if preserved_online and getattr(existing_schedule, 'meeting_provider', None)
+                else 'tencent_meeting'
+            ),
+            'meeting_status': (
+                getattr(existing_schedule, 'meeting_status', None)
+                if preserved_online and getattr(existing_schedule, 'meeting_status', None) not in {None, '', 'not_required'}
+                else 'pending'
+            ),
+            'meeting_join_url': (
+                getattr(existing_schedule, 'meeting_join_url', None)
+                if preserved_online else None
+            ),
+            'meeting_external_id': (
+                getattr(existing_schedule, 'meeting_external_id', None)
+                if preserved_online else None
+            ),
+            'meeting_code': (
+                getattr(existing_schedule, 'meeting_code', None)
+                if preserved_online else None
+            ),
+            'meeting_password': (
+                getattr(existing_schedule, 'meeting_password', None)
+                if preserved_online else None
+            ),
+            'meeting_created_at': (
+                getattr(existing_schedule, 'meeting_created_at', None)
+                if preserved_online else None
+            ),
+            'meeting_ended_at': (
+                getattr(existing_schedule, 'meeting_ended_at', None)
+                if preserved_online else None
+            ),
+        })
+    else:
+        fields.update({
+            'meeting_provider': None,
+            'meeting_status': 'not_required' if final_delivery_mode == DELIVERY_MODE_OFFLINE else 'pending',
+            'meeting_join_url': None,
+            'meeting_external_id': None,
+            'meeting_code': None,
+            'meeting_password': None,
+            'meeting_created_at': None,
+            'meeting_ended_at': None,
+        })
+    return fields
+
+
+def apply_schedule_delivery_fields(schedule, **kwargs):
+    fields = build_schedule_delivery_fields(existing_schedule=schedule, **kwargs)
+    for field, value in fields.items():
+        setattr(schedule, field, value)
+    return fields
 
 
 def _time_to_minutes(time_str):
@@ -739,12 +921,12 @@ def _extract_fill_rgb(cell):
 
 def _resolve_color_semantics(fill_rgb):
     if not fill_rgb:
-        return 'unknown', 'blue', None
+        return None, None, 'NO_FILL'
 
     semantics = COLOR_SEMANTICS.get(fill_rgb.upper())
     if semantics:
         return semantics[0], semantics[1], None
-    return 'unknown', 'blue', fill_rgb.upper()
+    return None, None, fill_rgb.upper()
 
 
 def parse_course_cell(cell_value):
@@ -891,9 +1073,20 @@ def import_schedule_from_excel(file_path, original_filename=None):
                 fill_rgb = _extract_fill_rgb(cell)
                 delivery_mode, color_tag, unknown_color = _resolve_color_semantics(fill_rgb)
                 if unknown_color:
+                    if unknown_color == 'NO_FILL':
+                        warnings.append(
+                            f'{sheet_name}!{cell.coordinate} 缺少线上/线下颜色标记，已跳过导入'
+                        )
+                    else:
+                        warnings.append(
+                            f'{sheet_name}!{cell.coordinate} 颜色 {unknown_color} 不再受支持，已跳过导入'
+                        )
+                    continue
+                if not delivery_mode or not color_tag:
                     warnings.append(
-                        f'{sheet_name}!{cell.coordinate} 颜色 {unknown_color} 未识别，已按 unknown 导入'
+                        f'{sheet_name}!{cell.coordinate} 无法识别线上/线下语义，已跳过导入'
                     )
+                    continue
 
                 for course in parsed:
                     teacher_name, alias_hit = normalize_teacher_name(course['teacher'])
@@ -1034,8 +1227,13 @@ def _apply_imported_schedule_payload(schedule, payload, *, import_run_id):
     schedule.teacher_id = payload['teacher_id']
     schedule.course_name = payload['course_name']
     schedule.students = payload.get('students') or ''
-    schedule.color_tag = payload.get('color_tag') or schedule.color_tag or 'blue'
-    schedule.delivery_mode = payload.get('delivery_mode') or schedule.delivery_mode or 'unknown'
+    apply_schedule_delivery_fields(
+        schedule,
+        delivery_mode=payload.get('delivery_mode'),
+        color_tag=payload.get('color_tag'),
+        fallback_delivery_mode=getattr(schedule, 'delivery_mode', DELIVERY_MODE_UNKNOWN),
+        allow_unknown=False,
+    )
     schedule.import_run_id = import_run_id
 
 
@@ -1275,8 +1473,20 @@ def apply_schedule_excel_import(file_storage, *, uploaded_by=None):
                 touched_schedule_ids.add(existing.id)
             else:
                 schedule = CourseSchedule(
-                    **payload,
+                    date=payload['date'],
+                    day_of_week=payload['day_of_week'],
+                    time_start=payload['time_start'],
+                    time_end=payload['time_end'],
+                    teacher=payload['teacher'],
+                    teacher_id=payload.get('teacher_id'),
+                    course_name=payload['course_name'],
+                    students=payload.get('students') or '',
                     import_run_id=run.id,
+                    **build_schedule_delivery_fields(
+                        delivery_mode=payload.get('delivery_mode'),
+                        color_tag=payload.get('color_tag'),
+                        allow_unknown=False,
+                    ),
                 )
                 if teacher_user:
                     schedule.teacher = resolved_teacher_name
@@ -1456,10 +1666,23 @@ def backfill_schedule_semantics():
                 changed = True
                 teacher_ids_linked += 1
 
-        delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
-        if (schedule.delivery_mode or 'unknown') != delivery_mode:
-            schedule.delivery_mode = delivery_mode
-            changed = True
+        fallback_delivery_mode = (
+            schedule.delivery_mode
+            if str(schedule.delivery_mode or '').strip().lower() in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}
+            else delivery_mode_from_color_tag(schedule.color_tag)
+        )
+        semantics = build_schedule_delivery_fields(
+            delivery_mode=schedule.delivery_mode,
+            color_tag=schedule.color_tag,
+            fallback_delivery_mode=fallback_delivery_mode,
+            existing_schedule=schedule,
+            allow_unknown=True,
+        )
+        for field, value in semantics.items():
+            if getattr(schedule, field) != value:
+                setattr(schedule, field, value)
+                changed = True
+        if changed:
             delivery_modes_backfilled += 1
 
         if changed:
@@ -1473,4 +1696,84 @@ def backfill_schedule_semantics():
         'teacher_alias_fixed': teacher_alias_fixed,
         'teacher_ids_linked': teacher_ids_linked,
         'delivery_modes_backfilled': delivery_modes_backfilled,
+    }
+
+
+def backfill_schedule_delivery_sms_state():
+    from extensions import db
+    from modules.auth.models import Enrollment
+    from modules.oa.models import CourseSchedule
+
+    schedules = CourseSchedule.query.order_by(CourseSchedule.id.asc()).all()
+    unsupported = []
+    for schedule in schedules:
+        normalized_color_tag = str(schedule.color_tag or '').strip().lower()
+        if normalized_color_tag and normalized_color_tag not in COLOR_TAG_TO_DELIVERY_MODE:
+            unsupported.append({
+                'schedule_id': schedule.id,
+                'date': schedule.date.isoformat() if schedule.date else None,
+                'time_start': schedule.time_start,
+                'time_end': schedule.time_end,
+                'teacher': schedule.teacher,
+                'color_tag': normalized_color_tag,
+            })
+    if unsupported:
+        raise RuntimeError(
+            '发现历史课次存在非蓝/橙颜色，已停止静默迁移: '
+            + json.dumps(unsupported[:20], ensure_ascii=False)
+        )
+
+    schedule_updates = 0
+    enrollment_updates = 0
+    for schedule in schedules:
+        fallback_delivery_mode = (
+            schedule.delivery_mode
+            if str(schedule.delivery_mode or '').strip().lower() in {DELIVERY_MODE_ONLINE, DELIVERY_MODE_OFFLINE}
+            else delivery_mode_from_color_tag(schedule.color_tag)
+        )
+        fields = build_schedule_delivery_fields(
+            delivery_mode=schedule.delivery_mode,
+            color_tag=schedule.color_tag,
+            fallback_delivery_mode=fallback_delivery_mode,
+            existing_schedule=schedule,
+            allow_unknown=True,
+        )
+        changed = False
+        for field, value in fields.items():
+            if getattr(schedule, field) != value:
+                setattr(schedule, field, value)
+                changed = True
+        if changed:
+            schedule_updates += 1
+
+    enrollments = Enrollment.query.order_by(Enrollment.id.asc()).all()
+    for enrollment in enrollments:
+        current = normalize_delivery_mode(
+            getattr(enrollment, 'delivery_preference', DELIVERY_MODE_UNKNOWN),
+            allow_unknown=True,
+        )
+        if current != DELIVERY_MODE_UNKNOWN:
+            continue
+        linked_modes = {
+            normalize_delivery_mode(schedule.delivery_mode, allow_unknown=True)
+            for schedule in (enrollment.schedules or [])
+            if normalize_delivery_mode(schedule.delivery_mode, allow_unknown=True) in {
+                DELIVERY_MODE_ONLINE,
+                DELIVERY_MODE_OFFLINE,
+            }
+        }
+        next_preference = DELIVERY_MODE_UNKNOWN
+        if len(linked_modes) == 1:
+            next_preference = next(iter(linked_modes))
+        if current != next_preference:
+            enrollment.delivery_preference = next_preference
+            enrollment_updates += 1
+
+    if schedule_updates or enrollment_updates:
+        db.session.commit()
+
+    return {
+        'schedule_updates': schedule_updates,
+        'enrollment_updates': enrollment_updates,
+        'unsupported_colors': unsupported,
     }

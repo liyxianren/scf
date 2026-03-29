@@ -15,8 +15,25 @@
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:12px 14px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;box-sizing:border-box;background:#fff}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ai-input-card{padding:14px 16px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(180deg,#f8fbff,#eef8ff);margin-bottom:16px}
+.ai-input-card .title{font-size:.92rem;font-weight:800;color:#0f172a;margin-bottom:6px}
+.ai-input-card .hint{font-size:.82rem;color:#64748b;line-height:1.7;margin:0 0 10px}
+.ai-input-card .honesty-note{margin-top:8px;font-size:.78rem;color:#475569;background:#fff;border:1px dashed #cbd5e1;border-radius:10px;padding:8px 10px}
+.ai-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.ai-btn{display:inline-flex;align-items:center;gap:6px;border:none;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}
+.ai-btn.primary{background:#0ea5e9;color:#fff}
+.ai-btn.secondary{background:#fff;border:1px solid #cbd5e1;color:#334155}
+.parse-result{display:none;margin-top:12px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid #dbeafe}
+.parse-result.show{display:block}
+.summary-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.summary-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#fff;border:1px solid #cbd5e1;font-size:.8rem;color:#334155;font-weight:700}
 .time-grid-label{margin-bottom:8px;color:#374151;font-size:.88rem;font-weight:700}
 #intakeTimeGrid{background:#f8fafc;border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:20px}
+.manual-fallback{margin-top:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fff}
+.manual-fallback summary{list-style:none;cursor:pointer;padding:14px 16px;font-size:.86rem;font-weight:800;color:#0f172a;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.manual-fallback summary::-webkit-details-marker{display:none}
+.manual-fallback .manual-fallback-body{padding:0 16px 16px}
+.manual-fallback .manual-fallback-hint{font-size:.8rem;color:#64748b;margin:0 0 10px}
 .exclude-section{margin-top:4px}
 .exclude-section .section-hint{font-size:.82rem;color:#6b7280;margin:0 0 10px}
 .exclude-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
@@ -93,6 +110,18 @@
       总课时：{{ enrollment.total_hours }} 小时
     </div>
     {% endif %}
+    {% if enrollment.sessions_per_week %}
+    <div class="course-info" style="margin-top:8px;">
+      <span class="material-icons" style="font-size:1rem;">calendar_view_week</span>
+      默认每周 {{ enrollment.sessions_per_week }} 节
+    </div>
+    {% endif %}
+    {% if enrollment.target_finish_date %}
+    <div class="course-info" style="margin-top:8px;">
+      <span class="material-icons" style="font-size:1rem;">flag</span>
+      目标完成日：{{ enrollment.target_finish_date }}
+    </div>
+    {% endif %}
   </div>
 
   <div class="form-container" id="formContainer">
@@ -110,8 +139,47 @@
         </div>
 
         <div class="form-group">
-          <label class="time-grid-label">意向上课时间 <span class="required">*</span>（点击或滑动选择每周可上课的时段）</label>
-          <div id="intakeTimeGrid"></div>
+          <label>上课方式 <span class="required">*</span></label>
+          <select id="fieldDeliveryPreference" required>
+            <option value="">请选择线上或线下</option>
+            <option value="online" {% if enrollment.delivery_preference == 'online' %}selected{% endif %}>线上课</option>
+            <option value="offline" {% if enrollment.delivery_preference == 'offline' %}selected{% endif %}>线下课</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div class="ai-input-card">
+            <div class="title">直接告诉 AI 你什么时候能上课</div>
+            <p class="hint">优先直接描述你的长期空闲时间和临时限制，例如“周二周四晚上可以，这周五比赛不行”。也可以直接上传课表或聊天截图，系统会先做视觉提取，再请你确认。</p>
+            <textarea id="fieldAvailabilityText" rows="4" placeholder="例如：周二周四晚上 7 点后可以，这周五比赛不行，下周二也可以补课"></textarea>
+            <textarea id="fieldAvailabilityEvidence" rows="3" style="margin-top:10px" placeholder="如果你手上是课表截图或聊天记录，请先把图里的文字粘贴到这里"></textarea>
+            <div style="margin-top:10px">
+              <label style="display:block;font-size:.8rem;font-weight:700;color:#334155;margin-bottom:6px">上传课表 / 聊天截图</label>
+              <input type="file" id="fieldAvailabilityImage" accept="image/*" onchange="handleAvailabilityImageChange(event)" style="display:block;width:100%;font-size:.84rem;color:#475569">
+              <div id="availabilityImageMeta" style="margin-top:8px;font-size:.8rem;color:#475569"></div>
+            </div>
+            <div class="honesty-note">图片会先走豆包视觉提取，提取出的文字再交给排课解析；最终排课决策仍走现有排课引擎。</div>
+            <div class="ai-actions">
+              <button type="button" class="ai-btn primary" onclick="previewAvailabilityInput()">
+                <span class="material-icons" style="font-size:1rem">auto_awesome</span> 解析时间
+              </button>
+              <button type="button" class="ai-btn secondary" onclick="copyParseToGrid()">
+                <span class="material-icons" style="font-size:1rem">edit_calendar</span> 将结果写入手动修改区
+              </button>
+            </div>
+            <div id="availabilityParseResult" class="parse-result"></div>
+          </div>
+          <details class="manual-fallback" id="manualTimeFallback">
+            <summary>
+              <span>手动修改区</span>
+              <span style="font-size:.78rem;color:#64748b;font-weight:700">只有解析不准时再展开</span>
+            </summary>
+            <div class="manual-fallback-body">
+              <p class="manual-fallback-hint">这里不是默认入口。只有当 AI 整理得不准确时，再用时间格做补充或微调。</p>
+              <label class="time-grid-label">结构化兜底时段</label>
+              <div id="intakeTimeGrid"></div>
+            </div>
+          </details>
         </div>
 
         <div class="form-group exclude-section">
@@ -154,7 +222,7 @@
       <h3 style="margin:0 0 12px;font-size:1rem;color:#0369a1;display:flex;align-items:center;gap:6px"><span class="material-icons" style="font-size:1.1rem">account_circle</span> 您的学生账号</h3>
       <p style="margin:0 0 6px;font-size:.88rem;color:#374151"><strong>用户名：</strong><span id="acctUsername"></span></p>
       <p style="margin:0 0 12px;font-size:.88rem;color:#374151"><strong>密码：</strong><span id="acctPassword" style="font-family:monospace;background:#e0f2fe;padding:2px 8px;border-radius:6px"></span></p>
-      <p style="margin:0;font-size:.78rem;color:#dc2626;font-weight:700">请截图保存以上信息，密码仅显示一次！</p>
+      <p style="margin:0;font-size:.78rem;color:#dc2626;font-weight:700">首次登录后请尽快修改密码，后续都可以从学生 OA 继续处理排课。</p>
       <a href="/auth/login" style="display:inline-block;margin-top:14px;padding:10px 20px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;border-radius:10px;text-decoration:none;font-size:.88rem;font-weight:700">前往登录</a>
     </div>
     {% if return_url %}
@@ -171,9 +239,14 @@ const SUBMIT_URL = '{{ submit_url }}';
 const IS_EDIT_MODE = {{ 'true' if is_edit_mode else 'false' }};
 const INITIAL_SLOTS = {{ (enrollment.student_profile.available_slots if enrollment.student_profile and enrollment.student_profile.available_slots else []) | tojson }};
 const INITIAL_EXCLUDED_DATES = {{ (enrollment.student_profile.excluded_dates if enrollment.student_profile and enrollment.student_profile.excluded_dates else []) | tojson }};
+const AVAILABILITY_PARSE_URL = IS_EDIT_MODE
+  ? `/auth/api/enrollments/{{ enrollment.id }}/availability-parse`
+  : `/auth/intake/${TOKEN}/availability-parse`;
 let grid = null;
 let excludedDates = [];
 let excludeCalendarMonth = getMonthStart(new Date());
+let latestAvailabilityPreview = null;
+let availabilityImageEvidence = null;
 
 document.addEventListener('DOMContentLoaded', function(){
   grid = new TimeGrid(document.getElementById('intakeTimeGrid'), {
@@ -186,6 +259,57 @@ document.addEventListener('DOMContentLoaded', function(){
   renderExcludeChips();
   renderExcludeCalendar();
 });
+
+function handleAvailabilityImageChange(event){
+  const file = event && event.target && event.target.files ? event.target.files[0] : null;
+  const meta = document.getElementById('availabilityImageMeta');
+  availabilityImageEvidence = null;
+  if(meta) meta.textContent = '';
+  if(!file){
+    return;
+  }
+  if(!String(file.type || '').startsWith('image/')){
+    if(meta) meta.textContent = '请选择图片文件';
+    event.target.value = '';
+    return;
+  }
+  if(file.size > 5 * 1024 * 1024){
+    if(meta) meta.textContent = '图片请控制在 5MB 以内';
+    event.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(loadEvent){
+    const result = loadEvent && loadEvent.target ? loadEvent.target.result : '';
+    if(typeof result === 'string' && result){
+      availabilityImageEvidence = {
+        type: 'image_data_url',
+        content: result,
+        name: file.name || 'availability-image',
+      };
+      if(meta){
+        meta.textContent = `已选择图片：${file.name}（会先做视觉提取，再进入排课解析）`;
+      }
+    }
+  };
+  reader.onerror = function(){
+    if(meta) meta.textContent = '读取图片失败，请重试';
+    availabilityImageEvidence = null;
+  };
+  reader.readAsDataURL(file);
+}
+
+function buildAvailabilityEvidenceItems(){
+  const items = [];
+  const evidenceText = document.getElementById('fieldAvailabilityEvidence').value.trim();
+  if(evidenceText){
+    items.push({type: 'text_capture', content: evidenceText});
+  }
+  if(availabilityImageEvidence && availabilityImageEvidence.content){
+    items.push(availabilityImageEvidence);
+  }
+  return items;
+}
 
 function getMonthStart(value){
   return new Date(value.getFullYear(), value.getMonth(), 1);
@@ -295,6 +419,92 @@ function buildExcludeMonthHtml(monthDate){
   `;
 }
 
+function renderAvailabilityPreview(preview){
+  const box = document.getElementById('availabilityParseResult');
+  if(!box) return;
+  if(!preview){
+    box.classList.remove('show');
+    box.innerHTML = '';
+    return;
+  }
+  const confidence = Number(preview.confidence || 0);
+  const confidenceText = confidence >= 0.85 ? '高' : confidence >= 0.7 ? '中' : '低';
+  box.classList.add('show');
+  box.innerHTML = `
+    <div style="font-size:.88rem;font-weight:700;color:#0f172a">解析结果</div>
+    <div style="margin-top:6px;font-size:.84rem;color:#475569;line-height:1.7">${escapeHtml(preview.summary || '暂未解析出稳定时段')}</div>
+    <div class="summary-chip-row">
+      <span class="summary-chip">置信度：${confidenceText} (${confidence.toFixed(2)})</span>
+      <span class="summary-chip">${preview.needs_review ? '建议先补一句确认说明' : '可以直接提交'}</span>
+      <span class="summary-chip">可上课时段 ${((preview.weekly_slots || []).length || 0)} 个</span>
+    </div>
+    ${(preview.source_evidence || []).length ? `<div style="margin-top:10px;font-size:.8rem;color:#64748b">识别依据：${escapeHtml((preview.source_evidence || []).join('；'))}</div>` : ''}
+    ${(preview.temporary_constraints || []).length ? `<div style="margin-top:8px;font-size:.8rem;color:#92400e">临时限制：${escapeHtml((preview.temporary_constraints || []).join('；'))}</div>` : ''}
+  `;
+}
+
+function copyParseToGrid(){
+  if(!latestAvailabilityPreview){
+    alert('请先解析时间');
+    return;
+  }
+  const fallback = document.getElementById('manualTimeFallback');
+  if(fallback) fallback.open = true;
+  if(grid && latestAvailabilityPreview.weekly_slots){
+    grid.setSlots((latestAvailabilityPreview.weekly_slots || []).map(item => ({
+      day: item.day,
+      start: item.start,
+      end: item.end,
+    })), 'available');
+  }
+  excludedDates = [...(latestAvailabilityPreview.excluded_dates || [])];
+  renderExcludeChips();
+  renderExcludeCalendar();
+}
+
+async function previewAvailabilityInput(){
+  const payload = {
+    availability_input_text: document.getElementById('fieldAvailabilityText').value.trim(),
+    availability_evidence_text: document.getElementById('fieldAvailabilityEvidence').value.trim(),
+    availability_evidence_items: buildAvailabilityEvidenceItems(),
+    available_times: grid ? grid.getSlots() : [],
+    excluded_dates: excludedDates,
+  };
+  try{
+    const res = await fetch(AVAILABILITY_PARSE_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if(!json.success){
+      latestAvailabilityPreview = json.data || null;
+      renderAvailabilityPreview(json.data || null);
+      if(json.error){
+        const errEl = document.getElementById('errorMsg');
+        errEl.textContent = json.error;
+        errEl.classList.add('show');
+      }
+      return;
+    }
+    latestAvailabilityPreview = json.data || null;
+    renderAvailabilityPreview(json.data || null);
+    if(latestAvailabilityPreview && latestAvailabilityPreview.weekly_slots && latestAvailabilityPreview.weekly_slots.length && (!grid.getSlots || !(grid.getSlots() || []).length)){
+      copyParseToGrid();
+    }
+  }catch(e){
+    const errEl = document.getElementById('errorMsg');
+    errEl.textContent = '解析失败，请稍后重试';
+    errEl.classList.add('show');
+  }
+}
+
+function escapeHtml(value){
+  const div = document.createElement('div');
+  div.textContent = String(value || '');
+  return div.innerHTML;
+}
+
 async function submitForm(ev){
   ev.preventDefault();
   const btn = document.getElementById('submitBtn');
@@ -311,10 +521,26 @@ async function submitForm(ev){
     return;
   }
 
-  const slots = grid ? grid.getSlots() : [];
-  if(!slots.length){
+  const manualSlots = grid ? grid.getSlots() : [];
+  const resolvedSlots = manualSlots.length
+    ? manualSlots
+    : ((latestAvailabilityPreview && latestAvailabilityPreview.weekly_slots) || []);
+  const resolvedExcludedDates = excludedDates.length
+    ? excludedDates
+    : ((latestAvailabilityPreview && latestAvailabilityPreview.excluded_dates) || []);
+  if(!resolvedSlots.length){
     const errEl = document.getElementById('errorMsg');
-    errEl.textContent = '请选择至少一个意向上课时间';
+    errEl.textContent = '请先告诉我们你的可上课时间，或在手动修改区补充至少一个时段';
+    errEl.classList.add('show');
+    btn.disabled = false;
+    btn.textContent = IS_EDIT_MODE ? '保存修改' : '提交信息';
+    return;
+  }
+
+  const deliveryPreference = document.getElementById('fieldDeliveryPreference').value;
+  if(!deliveryPreference){
+    const errEl = document.getElementById('errorMsg');
+    errEl.textContent = '请选择线上或线下上课方式';
     errEl.classList.add('show');
     btn.disabled = false;
     btn.textContent = IS_EDIT_MODE ? '保存修改' : '提交信息';
@@ -324,8 +550,17 @@ async function submitForm(ev){
   const data = {
     name: document.getElementById('fieldName').value.trim(),
     phone: phone,
-    available_times: slots,
-    excluded_dates: excludedDates,
+    delivery_preference: deliveryPreference,
+    availability_input_text: document.getElementById('fieldAvailabilityText').value.trim(),
+    availability_evidence_text: document.getElementById('fieldAvailabilityEvidence').value.trim(),
+    availability_evidence_items: buildAvailabilityEvidenceItems(),
+    confirmed_parse_result: latestAvailabilityPreview,
+    manual_adjustments: {
+      weekly_slots: manualSlots,
+      excluded_dates: excludedDates,
+    },
+    available_times: manualSlots,
+    excluded_dates: resolvedExcludedDates,
     notes: document.getElementById('fieldNotes').value.trim()
   };
 

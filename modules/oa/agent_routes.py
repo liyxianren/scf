@@ -113,33 +113,63 @@ def schedule_agent_confirm():
 # ------------------------------------------------------------------
 
 def _confirm_create(data):
-    from modules.oa.services import delivery_mode_from_color_tag
+    from modules.auth.services import sync_enrollment_status, sync_schedule_student_snapshot
+    from modules.auth.workflow_services import ensure_schedule_feedback_todo
+    from modules.oa import schedule_actions
+    from modules.oa.services import build_schedule_delivery_fields
 
     schedules = data.get('schedules', [])
     if not schedules:
         return jsonify({'success': False, 'error': '没有要创建的课程'}), 400
 
     created = 0
+    errors = []
     for s in schedules:
         try:
             from datetime import date as date_type
             d = date_type.fromisoformat(s['date'])
+            teacher_user, error = schedule_actions.resolve_teacher_or_error(s.get('teacher', ''))
+            if error:
+                errors.append({'date': s.get('date'), 'error': error})
+                continue
+            conflict_error = schedule_actions.validate_schedule_conflicts_or_error(
+                course_date=d,
+                time_start=s['time_start'],
+                time_end=s['time_end'],
+                teacher_id=teacher_user.id,
+                enrollment_id=s.get('enrollment_id'),
+            )
+            if conflict_error:
+                errors.append({'date': s.get('date'), 'error': conflict_error})
+                continue
             course = CourseSchedule(
                 date=d,
                 day_of_week=d.weekday(),
                 time_start=s['time_start'],
                 time_end=s['time_end'],
-                teacher=s.get('teacher', ''),
+                teacher=teacher_user.display_name,
+                teacher_id=teacher_user.id,
                 course_name=s.get('course_name', ''),
+                enrollment_id=s.get('enrollment_id'),
                 students=s.get('students', ''),
                 location=s.get('location', ''),
                 notes=s.get('notes', ''),
-                color_tag=s.get('color_tag', 'blue'),
-                delivery_mode=delivery_mode_from_color_tag(s.get('color_tag', 'blue')),
+                **build_schedule_delivery_fields(
+                    delivery_mode=s.get('delivery_mode'),
+                    color_tag=s.get('color_tag'),
+                    fallback_delivery_mode='online',
+                    allow_unknown=False,
+                ),
             )
             db.session.add(course)
+            db.session.flush()
+            sync_schedule_student_snapshot(course, enrollment=course.enrollment, preserve_history=False)
+            ensure_schedule_feedback_todo(course, created_by=getattr(current_user, 'id', None))
+            if course.enrollment:
+                sync_enrollment_status(course.enrollment)
             created += 1
-        except Exception:
+        except Exception as exc:
+            errors.append({'date': s.get('date'), 'error': str(exc)})
             continue
 
     db.session.commit()
@@ -147,6 +177,7 @@ def _confirm_create(data):
         'success': True,
         'message': f'已成功创建 {created} 节课程',
         'affected_count': created,
+        'errors': errors,
     })
 
 
@@ -179,40 +210,49 @@ def _confirm_delete(data):
 
 
 def _confirm_update(data):
+    from modules.oa import schedule_actions
+
     updates = data.get('updates', [])
     if not updates:
         return jsonify({'success': False, 'error': '没有要修改的课程'}), 400
 
     updated = 0
+    errors = []
     for upd in updates:
         course = CourseSchedule.query.get(upd.get('schedule_id'))
         if not course:
             continue
 
-        field_map = {
-            'new_date': 'date',
-            'new_time_start': 'time_start',
-            'new_time_end': 'time_end',
-            'new_teacher': 'teacher',
-            'new_course_name': 'course_name',
-            'new_students': 'students',
-            'new_location': 'location',
+        payload = {
+            'date': upd.get('new_date'),
+            'time_start': upd.get('new_time_start'),
+            'time_end': upd.get('new_time_end'),
+            'teacher': upd.get('new_teacher'),
+            'course_name': upd.get('new_course_name'),
+            'students': upd.get('new_students'),
+            'location': upd.get('new_location'),
+            'delivery_mode': upd.get('new_delivery_mode') or upd.get('delivery_mode'),
+            'color_tag': upd.get('new_color_tag'),
         }
-        for src, dst in field_map.items():
-            if src in upd and upd[src] is not None:
-                val = upd[src]
-                if dst == 'date':
-                    from datetime import date as date_type
-                    val = date_type.fromisoformat(val)
-                    course.day_of_week = val.weekday()
-                setattr(course, dst, val)
+        payload = {key: value for key, value in payload.items() if value is not None}
+        result = schedule_actions.apply_schedule_update(
+            course,
+            payload,
+            allow_admin_override=True,
+        )
+        if not result.get('success'):
+            errors.append({
+                'id': course.id,
+                'error': result.get('error') or '修改失败',
+            })
+            continue
         updated += 1
 
-    db.session.commit()
     return jsonify({
         'success': True,
         'message': f'已成功修改 {updated} 节课程',
         'affected_count': updated,
+        'errors': errors,
     })
 
 

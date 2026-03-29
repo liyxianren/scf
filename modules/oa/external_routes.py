@@ -20,14 +20,18 @@ from modules.auth.services import (
     reject_enrollment_schedule,
     save_student_profile_record,
     schedule_requires_course_feedback,
+    sync_enrollment_status,
+    sync_schedule_student_snapshot,
     student_confirm_schedule,
     submit_enrollment_intake,
 )
 from modules.oa import oa_bp
+from modules.oa import schedule_actions
 from modules.oa.external_api import external_api_required, external_error, external_success
-from modules.oa.models import CourseSchedule, OATodo
+from modules.oa.models import CourseFeedback, CourseSchedule, OATodo, ScheduleMeetingMaterial
 from modules.oa.services import (
     apply_schedule_excel_import,
+    build_schedule_delivery_fields,
     delivery_mode_from_color_tag,
     resolve_schedule_teacher_reference,
 )
@@ -44,6 +48,18 @@ def _filter_visible_todos(todos, *, reconcile_feedback_visibility=False):
     visible = []
     changed = False
     for todo in todos:
+        if todo.is_workflow:
+            from modules.auth.workflow_services import reconcile_stale_workflow_todo, workflow_todo_stale_reason
+
+            if reconcile_stale_workflow_todo(todo):
+                changed = True
+            if workflow_todo_stale_reason(todo):
+                continue
+            if todo.is_completed or todo.workflow_status in {
+                OATodo.WORKFLOW_STATUS_COMPLETED,
+                OATodo.WORKFLOW_STATUS_CANCELLED,
+            }:
+                continue
         if (
             todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
             and not schedule_requires_course_feedback(getattr(todo, 'schedule', None))
@@ -234,6 +250,8 @@ def external_get_schedule(schedule_id):
 @oa_bp.route('/api/external/schedules', methods=['POST'])
 @external_api_required
 def external_create_schedule():
+    from modules.auth.workflow_services import ensure_schedule_feedback_todo
+
     data, error = _get_json_payload()
     if error:
         return error
@@ -250,6 +268,38 @@ def external_create_schedule():
     if error:
         return error
 
+    enrollment = None
+    if data.get('enrollment_id'):
+        enrollment = db.session.get(Enrollment, data.get('enrollment_id'))
+        if not enrollment:
+            return external_error('报名记录不存在', status=404)
+        if teacher_user and enrollment.teacher_id != teacher_user.id:
+            return external_error('所选教师与报名绑定教师不一致')
+
+    try:
+        delivery_fields = build_schedule_delivery_fields(
+            delivery_mode=data.get('delivery_mode'),
+            color_tag=data.get('color_tag'),
+            fallback_delivery_mode=(
+                enrollment.delivery_preference
+                if enrollment and getattr(enrollment, 'delivery_preference', None) not in {None, '', 'unknown'}
+                else 'online'
+            ),
+            allow_unknown=False,
+        )
+    except ValueError as exc:
+        return external_error(str(exc))
+
+    conflict_error = schedule_actions.validate_schedule_conflicts_or_error(
+        course_date=course_date,
+        time_start=data['time_start'],
+        time_end=data['time_end'],
+        teacher_id=teacher_user.id if teacher_user else None,
+        enrollment_id=enrollment.id if enrollment else None,
+    )
+    if conflict_error:
+        return external_error(conflict_error)
+
     schedule = CourseSchedule(
         date=course_date,
         day_of_week=course_date.weekday(),
@@ -262,10 +312,14 @@ def external_create_schedule():
         students=data.get('students', ''),
         location=data.get('location', ''),
         notes=data.get('notes', ''),
-        color_tag=data.get('color_tag', 'blue'),
-        delivery_mode=delivery_mode_from_color_tag(data.get('color_tag', 'blue')),
+        **delivery_fields,
     )
+    sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
     db.session.add(schedule)
+    db.session.flush()
+    ensure_schedule_feedback_todo(schedule, created_by=None)
+    if enrollment:
+        sync_enrollment_status(enrollment)
     db.session.commit()
     return external_success(schedule.to_dict(), status=201)
 
@@ -292,16 +346,15 @@ def external_update_schedule(schedule_id):
         teacher_user, teacher_name, error = _resolve_teacher_from_payload(data)
         if error:
             return error
-        schedule.teacher = teacher_name
-        schedule.teacher_id = teacher_user.id if teacher_user else None
+        data['teacher'] = teacher_name
 
-    for field in ['time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag', 'enrollment_id']:
-        if field in data:
-            setattr(schedule, field, data[field])
-    if 'color_tag' in data:
-        schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
-
-    db.session.commit()
+    result = schedule_actions.apply_schedule_update(
+        schedule,
+        data,
+        allow_admin_override=True,
+    )
+    if not result.get('success'):
+        return external_error(result.get('error') or '更新失败', status=result.get('status_code', 400))
     return external_success(schedule.to_dict())
 
 
@@ -314,6 +367,8 @@ def external_delete_schedule(schedule_id):
 
     OATodo.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
     LeaveRequest.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
+    CourseFeedback.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
+    ScheduleMeetingMaterial.query.filter_by(schedule_id=schedule_id).delete(synchronize_session=False)
     db.session.delete(schedule)
     db.session.commit()
     return external_success({'id': schedule_id}, message='课程已删除')

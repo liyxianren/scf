@@ -5,13 +5,18 @@ import re
 import secrets
 import unicodedata
 from datetime import datetime, date, timedelta, time, timezone
-from itertools import product
+from itertools import combinations, product
 from math import ceil
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_
 
 from extensions import db
+from modules.auth.availability_ai_services import (
+    build_availability_intake_summary,
+    parse_availability_intake,
+    resolve_availability_evidence_items,
+)
 
 
 FEEDBACK_PREFIX = "[排课反馈]"
@@ -20,6 +25,23 @@ BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 UTC = timezone.utc
 LEGACY_ENROLLMENT_NOTE_PATTERN = re.compile(r'(?<!\d)报名#\s*(\d+)(?!\d)')
 IMPORTED_SCHEDULE_FEEDBACK_START_DATE = date(2026, 4, 1)
+DELIVERY_URGENCY_LABELS = {
+    'normal': '常规',
+    'rush': '冲刺',
+}
+TEACHER_WORK_MODE_PART_TIME = 'part_time'
+TEACHER_WORK_MODE_FULL_TIME = 'full_time'
+TEACHER_WORK_MODE_LABELS = {
+    TEACHER_WORK_MODE_PART_TIME: '兼职老师',
+    TEACHER_WORK_MODE_FULL_TIME: '全职老师',
+}
+DEFAULT_FULL_TIME_WORKING_TEMPLATE = [
+    {'day': 2, 'start': '10:00', 'end': '18:00'},
+    {'day': 3, 'start': '10:00', 'end': '18:00'},
+    {'day': 4, 'start': '10:00', 'end': '18:00'},
+    {'day': 5, 'start': '10:00', 'end': '18:00'},
+    {'day': 6, 'start': '10:00', 'end': '18:00'},
+]
 
 
 def get_business_now():
@@ -93,6 +115,215 @@ def _serialize_json_field(value):
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False)
+
+
+def _normalize_teacher_work_mode(value, *, default=TEACHER_WORK_MODE_PART_TIME):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return default
+    alias_map = {
+        'part_time': TEACHER_WORK_MODE_PART_TIME,
+        'part-time': TEACHER_WORK_MODE_PART_TIME,
+        '兼职': TEACHER_WORK_MODE_PART_TIME,
+        'parttime': TEACHER_WORK_MODE_PART_TIME,
+        'full_time': TEACHER_WORK_MODE_FULL_TIME,
+        'full-time': TEACHER_WORK_MODE_FULL_TIME,
+        'fulltime': TEACHER_WORK_MODE_FULL_TIME,
+        '全职': TEACHER_WORK_MODE_FULL_TIME,
+    }
+    result = alias_map.get(normalized)
+    if not result:
+        raise ValueError('老师工作模式必须是 full_time 或 part_time')
+    return result
+
+
+def teacher_work_mode_label(value):
+    try:
+        normalized = _normalize_teacher_work_mode(value)
+    except ValueError:
+        normalized = TEACHER_WORK_MODE_PART_TIME
+    return TEACHER_WORK_MODE_LABELS.get(normalized, TEACHER_WORK_MODE_LABELS[TEACHER_WORK_MODE_PART_TIME])
+
+
+def _normalize_default_working_template(value):
+    if value in (None, '', []):
+        return [], []
+    normalized, errors = _validate_available_slot_entries(value)
+    return normalized, [
+        str(item).replace('可补课时段', '默认工作时段')
+        for item in (errors or [])
+    ]
+
+
+def get_company_full_time_working_template():
+    return [dict(item) for item in DEFAULT_FULL_TIME_WORKING_TEMPLATE]
+
+
+def _resolve_teacher_user_record(teacher_or_user):
+    from modules.auth.models import User
+
+    if teacher_or_user is None:
+        return None
+    if isinstance(teacher_or_user, User):
+        return teacher_or_user
+    if hasattr(teacher_or_user, 'teacher') and getattr(teacher_or_user, 'teacher', None):
+        return teacher_or_user.teacher
+    if hasattr(teacher_or_user, 'teacher_id') and getattr(teacher_or_user, 'teacher_id', None):
+        return db.session.get(User, teacher_or_user.teacher_id)
+    if hasattr(teacher_or_user, 'id') and hasattr(teacher_or_user, 'role'):
+        return teacher_or_user
+    return db.session.get(User, teacher_or_user)
+
+
+def resolve_teacher_work_mode(teacher_or_user):
+    teacher = _resolve_teacher_user_record(teacher_or_user)
+    if not teacher:
+        return TEACHER_WORK_MODE_PART_TIME
+    return _normalize_teacher_work_mode(
+        getattr(teacher, 'teacher_work_mode', None),
+        default=TEACHER_WORK_MODE_PART_TIME,
+    )
+
+
+def resolve_teacher_default_working_template(teacher_or_user):
+    teacher = _resolve_teacher_user_record(teacher_or_user)
+    mode = resolve_teacher_work_mode(teacher)
+    if mode != TEACHER_WORK_MODE_FULL_TIME:
+        return []
+
+    raw_value = getattr(teacher, 'default_working_template_json', None) if teacher else None
+    template, errors = _normalize_default_working_template(raw_value)
+    if template and not errors:
+        return template
+    return get_company_full_time_working_template()
+
+
+def teacher_availability_ready(teacher_or_user):
+    teacher = _resolve_teacher_user_record(teacher_or_user)
+    if not teacher:
+        return False
+    if resolve_teacher_work_mode(teacher) == TEACHER_WORK_MODE_FULL_TIME:
+        return True
+    return bool(_load_teacher_available_ranges(getattr(teacher, 'id', None)))
+
+
+def teacher_requires_manual_proposal(teacher_or_user):
+    return resolve_teacher_work_mode(teacher_or_user) != TEACHER_WORK_MODE_FULL_TIME
+
+
+def teacher_auto_accept_enabled(teacher_or_user):
+    return resolve_teacher_work_mode(teacher_or_user) == TEACHER_WORK_MODE_FULL_TIME
+
+
+def enrollment_requires_teacher_confirmation(enrollment):
+    if not enrollment:
+        return False
+    if teacher_requires_manual_proposal(getattr(enrollment, 'teacher', None) or enrollment.teacher_id):
+        return True
+    risk_assessment = _enrollment_json_field(getattr(enrollment, 'risk_assessment', None)) or {}
+    return bool(risk_assessment.get('teacher_confirmation_required'))
+
+
+def _teacher_work_context(teacher_or_user):
+    teacher = _resolve_teacher_user_record(teacher_or_user)
+    mode = resolve_teacher_work_mode(teacher)
+    default_working_template = resolve_teacher_default_working_template(teacher)
+    using_company_template = bool(
+        mode == TEACHER_WORK_MODE_FULL_TIME
+        and not getattr(teacher, 'default_working_template_json', None)
+    )
+    return {
+        'teacher_work_mode': mode,
+        'teacher_work_mode_label': teacher_work_mode_label(mode),
+        'default_working_template': default_working_template,
+        'default_working_template_summary': _summarize_available_slots(default_working_template),
+        'using_company_template': using_company_template,
+        'availability_source': (
+            'company_template'
+            if mode == TEACHER_WORK_MODE_FULL_TIME and using_company_template
+            else ('teacher_template' if mode == TEACHER_WORK_MODE_FULL_TIME else 'manual_availability')
+        ),
+        'availability_ready': teacher_availability_ready(teacher),
+        'teacher_auto_accept_enabled': teacher_auto_accept_enabled(teacher),
+        'requires_teacher_proposal': teacher_requires_manual_proposal(teacher),
+    }
+
+
+def _normalize_delivery_preference(value, *, required=False):
+    from modules.oa.services import normalize_delivery_mode
+
+    raw_value = value
+    if raw_value in (None, '') and required:
+        raise ValueError('请先选择线上或线下上课方式')
+    if raw_value in (None, '') and not required:
+        return normalize_delivery_mode(
+            raw_value,
+            allow_unknown=True,
+            default='unknown',
+        )
+    try:
+        return normalize_delivery_mode(
+            raw_value,
+            allow_unknown=False,
+            default='unknown',
+        )
+    except ValueError:
+        if raw_value in (None, ''):
+            raise ValueError('请先选择线上或线下上课方式')
+        raise ValueError('上课方式必须是 online 或 offline')
+
+
+def _normalize_delivery_urgency(value, *, required=False):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        if required:
+            raise ValueError('请先选择交付节奏')
+        return 'normal'
+    alias_map = {
+        'normal': 'normal',
+        'regular': 'normal',
+        '常规': 'normal',
+        'rush': 'rush',
+        'urgent': 'rush',
+        '冲刺': 'rush',
+        '比赛': 'rush',
+    }
+    result = alias_map.get(normalized)
+    if not result:
+        raise ValueError('交付节奏必须是 normal 或 rush')
+    return result
+
+
+def _parse_optional_date(value, *, field_label='日期'):
+    if value in (None, '', 'null'):
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError as exc:
+        raise ValueError(f'{field_label}格式错误，请使用 YYYY-MM-DD') from exc
+
+
+def _parse_positive_int(value, *, default=1, minimum=1):
+    if value in (None, ''):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('每周节次数必须是整数') from exc
+    return max(parsed, minimum)
+
+
+def _enrollment_json_field(value):
+    if value in (None, ''):
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return value
 
 
 def _resolve_teacher_user(teacher_id=None, teacher_name=None):
@@ -258,13 +489,31 @@ def create_enrollment_record(data):
         token_days = 7
 
     token = generate_intake_token()
+    try:
+        delivery_preference = _normalize_delivery_preference(
+            data.get('delivery_preference'),
+            required=False,
+        )
+        delivery_urgency = _normalize_delivery_urgency(data.get('delivery_urgency'))
+        sessions_per_week = _parse_positive_int(data.get('sessions_per_week'), default=1, minimum=1)
+        target_finish_date = _parse_optional_date(
+            data.get('target_finish_date'),
+            field_label='目标完成日',
+        )
+    except ValueError as exc:
+        return None, None, str(exc)
+    if delivery_urgency == 'rush' and not target_finish_date:
+        return None, None, '冲刺交付必须填写目标完成日'
     enrollment = Enrollment(
         student_name=student_name,
         course_name=course_name,
         teacher_id=teacher.id,
+        delivery_preference=delivery_preference,
+        delivery_urgency=delivery_urgency,
+        target_finish_date=target_finish_date,
         total_hours=data.get('total_hours'),
         hours_per_session=data.get('hours_per_session', 2.0),
-        sessions_per_week=data.get('sessions_per_week', 1),
+        sessions_per_week=sessions_per_week,
         notes=data.get('notes'),
         intake_token=token,
         token_expires_at=get_business_now() + timedelta(days=max(token_days, 1)),
@@ -400,6 +649,19 @@ def submit_enrollment_intake(enrollment, data):
         return None, '姓名为必填项'
     if not phone:
         return None, '手机号为必填项'
+    try:
+        delivery_preference = _normalize_delivery_preference(
+            data.get('delivery_preference'),
+            required=True,
+        )
+    except ValueError as exc:
+        return None, str(exc)
+    availability_intake, intake_errors = preview_availability_intake(data)
+    if intake_errors:
+        return None, '；'.join(intake_errors)
+    normalized_data = dict(data)
+    normalized_data['available_slots'] = availability_intake.get('weekly_slots') or []
+    normalized_data['excluded_dates'] = availability_intake.get('excluded_dates') or []
 
     student_user, account_info = _resolve_or_create_student_account(enrollment, student_name, phone)
     profile = student_user.student_profile if student_user and student_user.student_profile else None
@@ -407,14 +669,17 @@ def submit_enrollment_intake(enrollment, data):
         profile = StudentProfile(user_id=student_user.id if student_user else None, name=student_name, phone=phone)
         db.session.add(profile)
 
-    _apply_student_profile_fields(profile, data, preserve_missing=True)
+    _apply_student_profile_fields(profile, normalized_data, preserve_missing=True)
     db.session.flush()
     _sync_student_user(student_user, student_name, phone)
 
     if student_name != enrollment.student_name:
         enrollment.student_name = student_name
     enrollment.student_profile_id = profile.id
+    enrollment.delivery_preference = delivery_preference
     enrollment.status = 'pending_schedule'
+    _set_enrollment_ai_scheduling_state(enrollment, availability_intake=availability_intake)
+    refresh_enrollment_scheduling_ai_state(enrollment)
     db.session.commit()
 
     return {
@@ -440,6 +705,19 @@ def update_enrollment_intake(enrollment, data):
         return None, '姓名为必填项'
     if not phone:
         return None, '手机号为必填项'
+    try:
+        delivery_preference = _normalize_delivery_preference(
+            data.get('delivery_preference'),
+            required=True,
+        )
+    except ValueError as exc:
+        return None, str(exc)
+    availability_intake, intake_errors = preview_availability_intake(data)
+    if intake_errors:
+        return None, '；'.join(intake_errors)
+    normalized_data = dict(data)
+    normalized_data['available_slots'] = availability_intake.get('weekly_slots') or []
+    normalized_data['excluded_dates'] = availability_intake.get('excluded_dates') or []
 
     student_user, account_info = _resolve_or_create_student_account(enrollment, student_name, phone)
     profile = enrollment.student_profile or (student_user.student_profile if student_user else None)
@@ -447,12 +725,13 @@ def update_enrollment_intake(enrollment, data):
         profile = StudentProfile(user_id=student_user.id if student_user else None, name=student_name, phone=phone)
         db.session.add(profile)
 
-    _apply_student_profile_fields(profile, data, preserve_missing=True)
+    _apply_student_profile_fields(profile, normalized_data, preserve_missing=True)
     db.session.flush()
     _sync_student_user(student_user, student_name, phone)
 
     enrollment.student_name = student_name
     enrollment.student_profile_id = profile.id
+    enrollment.delivery_preference = delivery_preference
     previous_confirmed_slot = None
     if enrollment.confirmed_slot:
         try:
@@ -462,6 +741,8 @@ def update_enrollment_intake(enrollment, data):
     enrollment.proposed_slots = None
     enrollment.confirmed_slot = None
     enrollment.status = 'pending_schedule'
+    _set_enrollment_ai_scheduling_state(enrollment, availability_intake=availability_intake)
+    refresh_enrollment_scheduling_ai_state(enrollment)
     refresh_enrollment_replan_workflows(
         enrollment,
         reset_to_teacher_proposal=True,
@@ -894,6 +1175,401 @@ def _build_scheduling_complexity_hint(enrollment):
     return '；'.join(flags[:3])
 
 
+def _availability_input_text(data):
+    return (
+        data.get('availability_input_text')
+        or data.get('availability_text')
+        or data.get('time_preference_text')
+        or ''
+    )
+
+
+def _availability_evidence_items(data):
+    evidence_items = data.get('availability_evidence_items') or []
+    evidence_text = (data.get('availability_evidence_text') or '').strip()
+    if evidence_text and not any(
+        isinstance(item, dict)
+        and str(item.get('type') or '').strip().lower() == 'text_capture'
+        and str(item.get('content') or item.get('text') or '').strip() == evidence_text
+        for item in evidence_items
+    ):
+        evidence_items = [*evidence_items, {'type': 'text_capture', 'content': evidence_text}]
+    return resolve_availability_evidence_items(evidence_items)
+
+
+def _availability_confirmed_parse_result(data):
+    confirmed = data.get('confirmed_parse_result')
+    return confirmed if isinstance(confirmed, dict) else {}
+
+
+def preview_availability_intake(data):
+    confirmed_parse = _availability_confirmed_parse_result(data)
+    manual_adjustments = data.get('manual_adjustments') or {}
+    manual_slot_source = (
+        data.get('available_times')
+        if 'available_times' in data
+        else data.get('available_slots')
+    )
+    if manual_slot_source in (None, '', []) and isinstance(manual_adjustments, dict):
+        manual_slot_source = manual_adjustments.get('weekly_slots')
+    manual_slots, slot_errors = _validate_available_slot_entries(
+        manual_slot_source
+    )
+    manual_excluded_source = data.get('excluded_dates')
+    if manual_excluded_source in (None, '', []) and isinstance(manual_adjustments, dict):
+        manual_excluded_source = manual_adjustments.get('excluded_dates')
+    manual_excluded_dates, excluded_errors = _validate_excluded_dates_entries(manual_excluded_source)
+    errors = slot_errors + excluded_errors
+    parsed = parse_availability_intake(
+        input_text=_availability_input_text(data),
+        evidence_items=_availability_evidence_items(data),
+        manual_slots=manual_slots,
+        manual_excluded_dates=manual_excluded_dates,
+        reference_date=get_business_today(),
+    )
+    confirmed_slots = _normalize_available_slot_entries(confirmed_parse.get('weekly_slots'))
+    confirmed_excluded_dates = _normalize_excluded_dates_entries(confirmed_parse.get('excluded_dates'))
+    resolved_slots = manual_slots or confirmed_slots or parsed.get('weekly_slots') or []
+    resolved_excluded_dates = manual_excluded_dates or confirmed_excluded_dates or parsed.get('excluded_dates') or []
+    if not resolved_slots:
+        errors.append('请先输入可上课时间，或至少确认一个结构化时段')
+
+    intake = {
+        **confirmed_parse,
+        **parsed,
+        'weekly_slots': resolved_slots,
+        'excluded_dates': resolved_excluded_dates,
+        'summary': build_availability_intake_summary({
+            'weekly_slots': resolved_slots,
+            'excluded_dates': resolved_excluded_dates,
+            'temporary_constraints': parsed.get('temporary_constraints') or [],
+        }),
+    }
+    return intake, errors
+
+
+def _set_enrollment_ai_scheduling_state(
+    enrollment,
+    *,
+    availability_intake=None,
+    candidate_slot_pool=None,
+    recommended_bundle=None,
+    risk_assessment=None,
+):
+    if availability_intake is not None:
+        enrollment.availability_intake = _serialize_json_field(availability_intake)
+    if candidate_slot_pool is not None:
+        enrollment.candidate_slot_pool = _serialize_json_field(candidate_slot_pool)
+    if recommended_bundle is not None:
+        enrollment.recommended_bundle = _serialize_json_field(recommended_bundle)
+    if risk_assessment is not None:
+        enrollment.risk_assessment = _serialize_json_field(risk_assessment)
+
+
+def _enrollment_availability_intake_meta(enrollment):
+    intake = _enrollment_json_field(getattr(enrollment, 'availability_intake', None)) or {}
+    if intake:
+        return intake
+    profile = getattr(enrollment, 'student_profile', None)
+    meta = _profile_constraint_meta(profile)
+    return {
+        'weekly_slots': meta.get('available_slots') or [],
+        'excluded_dates': meta.get('excluded_dates') or [],
+        'temporary_constraints': [],
+        'confidence': 1.0 if meta.get('available_slots') else 0.0,
+        'needs_review': False,
+        'summary': build_availability_intake_summary({
+            'weekly_slots': meta.get('available_slots') or [],
+            'excluded_dates': meta.get('excluded_dates') or [],
+            'temporary_constraints': [],
+        }),
+    }
+
+
+def _student_available_slots_for_enrollment(enrollment):
+    intake_meta = _enrollment_availability_intake_meta(enrollment)
+    intake_slots = intake_meta.get('weekly_slots') or []
+    if intake_slots:
+        return [
+            {
+                'day_of_week': item['day'],
+                'time_start': item['start'],
+                'time_end': item['end'],
+            }
+            for item in _normalize_available_slot_entries(intake_slots)
+        ]
+    return _load_student_available_ranges(enrollment.student_profile)
+
+
+def _target_finish_date_summary(target_finish_date):
+    return target_finish_date.isoformat() if target_finish_date else None
+
+
+def _candidate_pool_label(candidate):
+    return f'{_day_name(candidate["day_of_week"])} {candidate["time_start"]}-{candidate["time_end"]}'
+
+
+def _candidate_pool_for_enrollment(enrollment):
+    from modules.oa.models import CourseSchedule
+
+    teacher_context = _teacher_work_context(enrollment.teacher or enrollment.teacher_id)
+    teacher_slots = _load_teacher_available_ranges(enrollment.teacher_id)
+    student_slots = _student_available_slots_for_enrollment(enrollment)
+    if not student_slots:
+        return [], teacher_slots, {
+            **teacher_context,
+            'teacher_availability_ready': bool(teacher_slots),
+        }
+
+    if not teacher_slots:
+        return [], teacher_slots, {
+            **teacher_context,
+            'teacher_availability_ready': False,
+        }
+
+    min_minutes = max(int((enrollment.hours_per_session or 2.0) * 60), 30)
+    query = CourseSchedule.query.filter(
+        CourseSchedule.teacher_id == enrollment.teacher_id,
+        CourseSchedule.is_cancelled == False,
+    )
+    if enrollment.id:
+        query = query.filter(
+            or_(CourseSchedule.enrollment_id.is_(None), CourseSchedule.enrollment_id != enrollment.id)
+        )
+
+    existing_by_day = {}
+    for schedule in query.all():
+        existing_by_day.setdefault(schedule.day_of_week, []).append(schedule)
+
+    candidates = []
+    for teacher_slot in teacher_slots:
+        teacher_day = int(teacher_slot.get('day_of_week', teacher_slot.get('day', -1)))
+        teacher_start = teacher_slot.get('time_start', teacher_slot.get('start', ''))
+        teacher_end = teacher_slot.get('time_end', teacher_slot.get('end', ''))
+        for student_slot in student_slots:
+            if int(student_slot.get('day', student_slot.get('day_of_week', -1))) != teacher_day:
+                continue
+
+            overlap = _compute_overlap(
+                teacher_start,
+                teacher_end,
+                student_slot.get('start', student_slot.get('time_start', '')),
+                student_slot.get('end', student_slot.get('time_end', '')),
+                min_minutes,
+            )
+            if not overlap:
+                continue
+
+            overlap_start = _time_to_minutes(overlap[0])
+            overlap_end = _time_to_minutes(overlap[1])
+            cursor = overlap_start
+            while cursor + min_minutes <= overlap_end:
+                block_start = _minutes_to_time(cursor)
+                block_end = _minutes_to_time(cursor + min_minutes)
+
+                conflicts = []
+                for existing in existing_by_day.get(teacher_day, []):
+                    if _compute_overlap(
+                        block_start,
+                        block_end,
+                        existing.time_start,
+                        existing.time_end,
+                        1,
+                    ):
+                        conflicts.append({
+                            'course_name': existing.course_name,
+                            'time': f'{existing.time_start}-{existing.time_end}',
+                            'students': existing.students,
+                        })
+
+                score = 0
+                if not conflicts:
+                    score += 4
+                if teacher_slot.get('is_preferred'):
+                    score += 1
+                if block_start >= student_slot.get('start', student_slot.get('time_start', '')) and block_end <= student_slot.get('end', student_slot.get('time_end', '')):
+                    score += 2
+
+                candidates.append({
+                    'day_of_week': teacher_slot['day_of_week'],
+                    'time_start': block_start,
+                    'time_end': block_end,
+                    'score': score,
+                    'is_preferred': bool(teacher_slot.get('is_preferred')),
+                    'conflicts': conflicts,
+                    'label': f'{_day_name(teacher_slot["day_of_week"])} {block_start}-{block_end}',
+                })
+                cursor += 60
+
+    deduped = {}
+    for candidate in candidates:
+        key = _slot_signature(candidate)
+        if key not in deduped or candidate.get('score', 0) > deduped[key].get('score', 0):
+            deduped[key] = candidate
+
+    candidate_pool = [
+        {
+            **candidate,
+            'label': _candidate_pool_label(candidate),
+            'within_student_constraints': True,
+        }
+        for candidate in sorted(deduped.values(), key=_candidate_sort_key)
+        if not candidate.get('conflicts')
+    ]
+    return candidate_pool, teacher_slots, {
+        **teacher_context,
+        'teacher_availability_ready': bool(teacher_slots),
+    }
+
+
+def _assess_enrollment_scheduling_risk(enrollment, candidate_pool, recommended_bundle):
+    required_weekly = max(int(enrollment.sessions_per_week or 1), 1)
+    intake_meta = _enrollment_availability_intake_meta(enrollment)
+    teacher_context = _teacher_work_context(enrollment.teacher or enrollment.teacher_id)
+    hard_errors = []
+    warnings = []
+    clarification_reasons = []
+    teacher_confirmation_required = False
+
+    if not _student_available_slots_for_enrollment(enrollment):
+        clarification_reasons.append('学生当前还没有足够明确的可上课时间，需先补充时间偏好')
+
+    teacher_ranges = _load_teacher_available_ranges(enrollment.teacher_id)
+    if not teacher_ranges:
+        if teacher_context['teacher_work_mode'] == TEACHER_WORK_MODE_FULL_TIME:
+            hard_errors.append('全职老师默认工作模板暂不可用，需教务先处理老师排课模板')
+        else:
+            hard_errors.append('兼职老师还没有维护长期 availability，暂不能进入老师协同排课')
+
+    if len(candidate_pool) < required_weekly:
+        if teacher_context['teacher_work_mode'] == TEACHER_WORK_MODE_FULL_TIME and _student_available_slots_for_enrollment(enrollment):
+            teacher_confirmation_required = True
+            warnings.append(
+                f'学生时间无法完全落在全职老师默认工作模板内，如需满足每周 {required_weekly} 节，必须由老师确认模板外时段'
+            )
+        else:
+            hard_errors.append(f'学生当前可排时段不足以支撑每周 {required_weekly} 节，需教务介入补齐时间')
+
+    if recommended_bundle:
+        target_finish_date = getattr(enrollment, 'target_finish_date', None)
+        if target_finish_date and recommended_bundle.get('date_end'):
+            try:
+                bundle_end = date.fromisoformat(recommended_bundle['date_end'])
+            except ValueError:
+                bundle_end = None
+            if bundle_end and bundle_end > target_finish_date:
+                hard_errors.append(
+                    f'按当前推荐方案预计到 {bundle_end.isoformat()} 才能完成，晚于目标完成日 {target_finish_date.isoformat()}'
+                )
+
+    confidence = float(intake_meta.get('confidence') or 0)
+    if confidence and confidence < 0.75:
+        clarification_reasons.append('学生时间解析置信度较低，建议让学生再确认一次结果')
+    elif intake_meta.get('needs_review'):
+        clarification_reasons.append('学生时间输入仍有待确认的细节，建议先让学生补充说明')
+    if candidate_pool and len(candidate_pool) <= required_weekly:
+        warnings.append('当前候选时间刚好满足每周配额，方案弹性较低')
+    elif candidate_pool and len(candidate_pool) <= required_weekly + 1:
+        warnings.append('当前候选时间较少，如后续再冲突可能需要教务介入')
+    if intake_meta.get('temporary_constraints'):
+        warnings.append('学生输入里包含临时限制，建议老师提交前先核对上下文')
+
+    recommended_action = 'direct_to_student'
+    if clarification_reasons:
+        recommended_action = 'needs_student_clarification'
+    elif hard_errors:
+        recommended_action = 'needs_admin_intervention'
+    elif teacher_confirmation_required:
+        recommended_action = 'needs_teacher_confirmation'
+    elif warnings:
+        recommended_action = 'needs_admin_review'
+
+    summary = None
+    if clarification_reasons:
+        summary = clarification_reasons[0]
+    elif hard_errors:
+        summary = hard_errors[0]
+    elif teacher_confirmation_required:
+        summary = warnings[0] if warnings else '当前方案需要老师确认模板外时段'
+    elif warnings:
+        summary = warnings[0]
+    elif recommended_bundle:
+        summary = f'已找到符合每周 {required_weekly} 节的推荐方案，可直接发给学生确认'
+
+    return {
+        'hard_errors': list(dict.fromkeys(hard_errors)),
+        'warnings': list(dict.fromkeys(warnings)),
+        'clarification_reasons': list(dict.fromkeys(clarification_reasons)),
+        'confidence': confidence,
+        'needs_review': bool(intake_meta.get('needs_review')),
+        'teacher_work_mode': teacher_context['teacher_work_mode'],
+        'teacher_work_mode_label': teacher_context['teacher_work_mode_label'],
+        'availability_source': teacher_context['availability_source'],
+        'teacher_confirmation_required': teacher_confirmation_required,
+        'student_clarification_required': bool(clarification_reasons),
+        'coverage_gap': {
+            'weekly_required': required_weekly,
+            'weekly_available': len(candidate_pool),
+            'missing': max(required_weekly - len(candidate_pool), 0),
+        },
+        'recommended_action': recommended_action,
+        'severity': 'hard' if hard_errors else ('warning' if (clarification_reasons or warnings) else 'ok'),
+        'summary': summary,
+    }
+
+
+def refresh_enrollment_scheduling_ai_state(enrollment):
+    if not enrollment:
+        return {'candidate_slot_pool': [], 'recommended_bundle': None, 'risk_assessment': None, 'proposed_plans': []}
+
+    candidate_pool, _, _ = _candidate_pool_for_enrollment(enrollment)
+    required_weekly = max(int(enrollment.sessions_per_week or 1), 1)
+    total_sessions = _get_total_sessions(enrollment)
+    excluded_set = _load_student_excluded_dates(enrollment.student_profile)
+
+    top_candidates = candidate_pool[: min(len(candidate_pool), max(required_weekly + 6, 8))]
+    valid_plans = []
+    for combo in combinations(top_candidates, required_weekly):
+        selected_blocks = sorted(list(combo), key=_slot_sort_key)
+        plan = _build_plan(selected_blocks, total_sessions, excluded_set)
+        normalized_plan = normalize_plan(plan, enrollment)
+        plan_errors, _ = _collect_manual_plan_issues(
+            enrollment,
+            normalized_plan.get('session_dates', []),
+            weekly_slots=normalized_plan.get('weekly_slots') or selected_blocks,
+        )
+        target_finish_date = getattr(enrollment, 'target_finish_date', None)
+        if target_finish_date and normalized_plan.get('date_end'):
+            try:
+                plan_end = date.fromisoformat(normalized_plan['date_end'])
+            except ValueError:
+                plan_end = None
+            if plan_end and plan_end > target_finish_date:
+                plan_errors.append(
+                    f'方案完成时间晚于目标完成日 {target_finish_date.isoformat()}'
+                )
+        if plan_errors:
+            continue
+        valid_plans.append(normalized_plan)
+        if len(valid_plans) >= 3:
+            break
+
+    recommended_bundle = valid_plans[0] if valid_plans else None
+    risk_assessment = _assess_enrollment_scheduling_risk(enrollment, candidate_pool, recommended_bundle)
+    _set_enrollment_ai_scheduling_state(
+        enrollment,
+        candidate_slot_pool=candidate_pool,
+        recommended_bundle=recommended_bundle,
+        risk_assessment=risk_assessment,
+    )
+    return {
+        'candidate_slot_pool': candidate_pool,
+        'recommended_bundle': recommended_bundle,
+        'risk_assessment': risk_assessment,
+        'proposed_plans': valid_plans,
+    }
+
+
 def _build_session_dates(weekly_slots, total_sessions, excluded_set):
     """按周轮转生成具体课次，遇到不可上课日期则跳过并顺延到下周。"""
     if not weekly_slots:
@@ -996,6 +1672,13 @@ def _merge_plan_metadata(raw_plan, plan):
         'is_manual',
         'manual_note',
         'manual_warnings',
+        'note',
+        'warnings',
+        'submitted_by',
+        'submitted_by_name',
+        'submitted_at',
+        'quota_required',
+        'quota_selected',
     }
     for key in preserved_keys:
         if key in raw_plan:
@@ -1167,11 +1850,14 @@ def _slots_overlap(time_start, time_end, other_start, other_end):
 
 def _session_within_ranges(session, ranges):
     for slot in ranges:
-        if slot['day_of_week'] != session['day_of_week']:
+        slot_day = slot.get('day_of_week', slot.get('day'))
+        slot_start = slot.get('time_start', slot.get('start'))
+        slot_end = slot.get('time_end', slot.get('end'))
+        if slot_day != session['day_of_week']:
             continue
         if (
-            session['time_start'] >= slot['time_start']
-            and session['time_end'] <= slot['time_end']
+            session['time_start'] >= slot_start
+            and session['time_end'] <= slot_end
         ):
             return True
     return False
@@ -1206,12 +1892,27 @@ def _load_student_available_ranges(student_profile):
 def _load_teacher_available_ranges(teacher_id):
     from modules.auth.models import TeacherAvailability
 
+    teacher = _resolve_teacher_user_record(teacher_id)
+    if not teacher:
+        return []
+    if resolve_teacher_work_mode(teacher) == TEACHER_WORK_MODE_FULL_TIME:
+        return [
+            {
+                'day_of_week': slot['day'],
+                'time_start': slot['start'],
+                'time_end': slot['end'],
+                'is_preferred': False,
+            }
+            for slot in resolve_teacher_default_working_template(teacher)
+        ]
+
     slots = TeacherAvailability.query.filter_by(user_id=teacher_id).all()
     return [
         {
             'day_of_week': slot.day_of_week,
             'time_start': slot.time_start,
             'time_end': slot.time_end,
+            'is_preferred': bool(slot.is_preferred),
         }
         for slot in slots
     ]
@@ -1338,7 +2039,32 @@ def _build_manual_plan(session_dates):
     return plan
 
 
-def _collect_manual_plan_issues(enrollment, session_dates):
+def _normalize_weekly_slots_for_validation(weekly_slots):
+    normalized = []
+    for slot in weekly_slots or []:
+        if not isinstance(slot, dict):
+            continue
+        try:
+            day_of_week = int(slot.get('day_of_week', slot.get('day')))
+        except (TypeError, ValueError):
+            continue
+        time_start = (slot.get('time_start') or slot.get('start') or '').strip()
+        time_end = (slot.get('time_end') or slot.get('end') or '').strip()
+        if not time_start or not time_end:
+            continue
+        normalized.append({
+            'day_of_week': day_of_week,
+            'time_start': time_start,
+            'time_end': time_end,
+        })
+    deduped = {
+        _slot_signature(slot): slot
+        for slot in normalized
+    }
+    return sorted(deduped.values(), key=_slot_sort_key)
+
+
+def _collect_manual_plan_issues(enrollment, session_dates, weekly_slots=None):
     errors = []
     warnings = []
 
@@ -1349,6 +2075,28 @@ def _collect_manual_plan_issues(enrollment, session_dates):
     if not session_dates:
         errors.append('至少需要保留一节课程')
         return errors, warnings
+
+    plan = _build_manual_plan(session_dates)
+    required_weekly = max(int(getattr(enrollment, 'sessions_per_week', 1) or 1), 1)
+    selected_weekly_slots = (
+        _normalize_weekly_slots_for_validation(weekly_slots)
+        if weekly_slots is not None
+        else (plan.get('weekly_slots') or [])
+    )
+    selected_weekly = len(selected_weekly_slots)
+    if selected_weekly != required_weekly:
+        errors.append(f'每周必须选满 {required_weekly} 节，当前方案只覆盖 {selected_weekly} 节')
+
+    target_finish_date = getattr(enrollment, 'target_finish_date', None)
+    if target_finish_date and plan.get('date_end'):
+        try:
+            plan_end = date.fromisoformat(plan['date_end'])
+        except ValueError:
+            plan_end = None
+        if plan_end and plan_end > target_finish_date:
+            errors.append(
+                f'按当前方案预计到 {plan_end.isoformat()} 才能完成，晚于目标完成日 {target_finish_date.isoformat()}'
+            )
 
     now = get_business_now()
     for session in session_dates:
@@ -1392,21 +2140,28 @@ def _collect_manual_plan_issues(enrollment, session_dates):
         )
     )
 
+    teacher_context = _teacher_work_context(enrollment.teacher or enrollment.teacher_id)
     teacher_ranges = _load_teacher_available_ranges(enrollment.teacher_id)
-    student_ranges = _load_student_available_ranges(enrollment.student_profile)
+    student_ranges = _student_available_slots_for_enrollment(enrollment)
     excluded_dates = _load_student_excluded_dates(enrollment.student_profile)
+    intake_meta = _enrollment_availability_intake_meta(enrollment)
 
     for session in session_dates:
         if teacher_ranges and not _session_within_ranges(session, teacher_ranges):
-            warnings.append(
-                f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出老师原始可用时间'
+            teacher_label = (
+                '全职老师统一工作时段'
+                if teacher_context['teacher_work_mode'] == TEACHER_WORK_MODE_FULL_TIME
+                else '老师原始可用时间'
             )
+            warnings.append(f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出{teacher_label}')
         if student_ranges and not _session_within_ranges(session, student_ranges):
             warnings.append(
                 f'{session["date"]} {session["time_start"]}-{session["time_end"]} 超出学生填写的可上课时间'
             )
         if session['date'] in excluded_dates:
             warnings.append(f'{session["date"]} 命中学生标记的不可上课日期')
+    if float(intake_meta.get('confidence') or 0) and float(intake_meta.get('confidence') or 0) < 0.75:
+        warnings.append('学生时间解析置信度较低，建议让学生确认一次结构化结果')
 
     return list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
 
@@ -1748,6 +2503,7 @@ def _filter_workflow_todos_for_actor(workflow_todos, actor=None):
 
 def build_schedule_payload(schedule, actor=None):
     from modules.auth.workflow_services import get_schedule_workflow_todos
+    from modules.oa.services import delivery_mode_label, meeting_status_label
 
     payload = schedule.to_dict()
     latest_leave = _latest_leave_request(schedule)
@@ -1759,6 +2515,9 @@ def build_schedule_payload(schedule, actor=None):
             feedback = None
         workflow_todos = _filter_workflow_todos_for_actor(workflow_todos, actor)
     payload.update({
+        'delivery_mode_label': delivery_mode_label(payload.get('delivery_mode')),
+        'meeting_status_label': meeting_status_label(payload.get('meeting_status')),
+        'meeting_material': schedule.meeting_material.to_dict() if getattr(schedule, 'meeting_material', None) else None,
         'leave_request': latest_leave.to_dict() if latest_leave else None,
         'leave_status': latest_leave.status if latest_leave else None,
         'feedback': build_feedback_payload(feedback, actor),
@@ -2060,17 +2819,26 @@ def get_enrollment_feedback_meta(enrollment):
 
 def build_enrollment_payload(enrollment, actor=None):
     from modules.auth.workflow_services import get_enrollment_workflow_todos
+    from modules.oa.services import delivery_mode_label
 
     payload = enrollment.to_dict()
     profile_meta = _profile_constraint_meta(enrollment.student_profile)
+    availability_meta = payload.get('availability_intake') or _enrollment_availability_intake_meta(enrollment)
+    recommended_bundle = normalize_plan(payload.get('recommended_bundle'), enrollment)
+    risk_assessment = payload.get('risk_assessment') or {}
+    teacher_context = _teacher_work_context(enrollment.teacher or enrollment.teacher_id)
     payload['proposed_slots'] = [
         normalize_plan(plan, enrollment)
         for plan in payload.get('proposed_slots', [])
     ]
     payload['confirmed_slot'] = normalize_plan(payload.get('confirmed_slot'), enrollment)
+    payload['recommended_bundle'] = recommended_bundle
     payload.update(get_enrollment_feedback_meta(enrollment))
     payload.update(_get_enrollment_delivery_meta(enrollment))
     payload.update({
+        **teacher_context,
+        'delivery_preference_label': delivery_mode_label(payload.get('delivery_preference')),
+        'delivery_urgency_label': DELIVERY_URGENCY_LABELS.get(payload.get('delivery_urgency'), payload.get('delivery_urgency') or '常规'),
         'expected_session_count': _get_total_sessions(enrollment),
         'can_edit': bool(actor and user_can_edit_enrollment_intake(actor, enrollment)),
         'can_confirm': bool(
@@ -2093,6 +2861,11 @@ def build_enrollment_payload(enrollment, actor=None):
         'edit_intake_url': f'/auth/enrollments/{enrollment.id}/intake-edit',
         'student_availability_summary': profile_meta['available_times_summary'],
         'excluded_dates_summary': profile_meta['excluded_dates_summary'],
+        'availability_intake_summary': availability_meta.get('summary'),
+        'availability_confidence': availability_meta.get('confidence'),
+        'availability_needs_review': bool(availability_meta.get('needs_review')),
+        'candidate_slot_pool': payload.get('candidate_slot_pool') or [],
+        'risk_assessment': risk_assessment,
         'scheduling_complexity_hint': _build_scheduling_complexity_hint(enrollment),
     })
     workflow_todos = _filter_workflow_todos_for_actor(
@@ -2136,10 +2909,23 @@ def build_enrollment_payload(enrollment, actor=None):
             is_overdue=False,
         ))
     elif enrollment.status == 'pending_schedule':
+        pending_schedule_label = '安排初始排课'
+        pending_schedule_role = 'admin'
+        pending_schedule_status = 'waiting_admin_schedule'
+        if (risk_assessment.get('recommended_action') or '') == 'needs_student_clarification':
+            pending_schedule_label = '补充可上课时间'
+            pending_schedule_role = 'student'
+            pending_schedule_status = 'waiting_student_clarification'
+        elif (risk_assessment.get('recommended_action') or '') == 'needs_admin_intervention':
+            pending_schedule_label = '补齐排课风险'
+        elif (risk_assessment.get('recommended_action') or '') == 'needs_teacher_confirmation':
+            pending_schedule_label = '联系老师确认模板外时段'
+        elif not payload.get('recommended_bundle'):
+            pending_schedule_label = '补充可上课时间'
         payload.update(build_next_action_meta(
-            role='admin',
-            label='安排初始排课',
-            status='waiting_admin_schedule',
+            role=pending_schedule_role,
+            label=pending_schedule_label,
+            status=pending_schedule_status,
             waiting_since=enrollment.updated_at or enrollment.created_at,
             is_overdue=False,
         ))
@@ -2175,6 +2961,7 @@ def build_enrollment_payload(enrollment, actor=None):
     if not payload.get('context_summary'):
         payload['context_summary'] = payload.get('next_action_label')
     payload['current_stage_label'] = {
+        'waiting_student_clarification': '待学生补充时间',
         'waiting_student_confirm': '待学生确认方案',
         'waiting_admin_schedule': '待教务排课',
         'waiting_teacher_feedback': '待老师提交反馈',
@@ -2182,8 +2969,17 @@ def build_enrollment_payload(enrollment, actor=None):
         'completed': '已完成',
     }.get(payload.get('next_action_status'), payload.get('next_action_label'))
     payload['next_step_hint'] = {
+        'waiting_student_clarification': '请补充或确认可上课时间，系统再继续排课。',
         'waiting_student_confirm': '学生确认后系统会生成正式课表。',
-        'waiting_admin_schedule': '教务排好课后会发送给学生确认。',
+        'waiting_admin_schedule': (
+            '当前方案存在风险，教务需要先补齐时间或调整方案。'
+            if (risk_assessment.get('recommended_action') or '') == 'needs_admin_intervention'
+            else (
+                '当前方案需要老师确认模板外时段，教务需先发起老师协同。'
+                if (risk_assessment.get('recommended_action') or '') == 'needs_teacher_confirmation'
+                else '教务排好课后会发送给学生确认。'
+            )
+        ),
         'waiting_teacher_feedback': '老师提交反馈后，学生和教务都可查看。',
     }.get(payload.get('next_action_status'))
     return payload
@@ -2240,145 +3036,41 @@ def sync_enrollment_status(enrollment):
 
 
 def find_matching_slots(enrollment_id):
-    """自动匹配排课，返回最多 3 个效率优先的 plan。"""
-    from modules.auth.models import Enrollment, TeacherAvailability
-    from modules.oa.models import CourseSchedule
+    """自动匹配排课，按 sessions_per_week 生成推荐方案。"""
+    from modules.auth.models import Enrollment
+    from modules.auth.workflow_services import ensure_enrollment_replan_workflow
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
         return [], '报名记录不存在'
+    if not enrollment.student_profile:
+        return [], '学生尚未提交可上课时间'
 
-    min_minutes = int(enrollment.hours_per_session * 60)
-    total_sessions = _get_total_sessions(enrollment)
-
-    teacher_name = enrollment.teacher.display_name if enrollment.teacher else '该教师'
-    teacher_slots = TeacherAvailability.query.filter_by(user_id=enrollment.teacher_id).all()
-    if not teacher_slots:
-        return [], f'{teacher_name} 尚未设置可用时间，请先在面板中设置'
-
-    student_profile = enrollment.student_profile
-    if not student_profile or not student_profile.available_slots:
-        return [], '学生尚未提交可用时间信息'
-
-    try:
-        student_slots = json.loads(student_profile.available_slots)
-    except (json.JSONDecodeError, TypeError):
-        return [], '学生可用时间数据异常'
-
-    excluded_set = _load_student_excluded_dates(student_profile)
-
-    existing_schedules = CourseSchedule.query.filter(
-        or_(
-            CourseSchedule.teacher_id == enrollment.teacher_id,
-            CourseSchedule.teacher == teacher_name,
-        ),
-        CourseSchedule.is_cancelled == False,
-    ).all()
-    existing_by_day = {}
-    for schedule in existing_schedules:
-        existing_by_day.setdefault(schedule.day_of_week, []).append(schedule)
-
-    candidates = []
-    for teacher_slot in teacher_slots:
-        for student_slot in student_slots:
-            if teacher_slot.day_of_week != student_slot.get('day'):
-                continue
-
-            overlap = _compute_overlap(
-                teacher_slot.time_start,
-                teacher_slot.time_end,
-                student_slot.get('start', ''),
-                student_slot.get('end', ''),
-                min_minutes,
-            )
-            if not overlap:
-                continue
-
-            overlap_start = _time_to_minutes(overlap[0])
-            overlap_end = _time_to_minutes(overlap[1])
-            cursor = overlap_start
-            while cursor + min_minutes <= overlap_end:
-                block_start = _minutes_to_time(cursor)
-                block_end = _minutes_to_time(cursor + min_minutes)
-
-                conflicts = []
-                for existing in existing_by_day.get(teacher_slot.day_of_week, []):
-                    if _compute_overlap(
-                        block_start,
-                        block_end,
-                        existing.time_start,
-                        existing.time_end,
-                        1,
-                    ):
-                        conflicts.append({
-                            'course_name': existing.course_name,
-                            'time': f'{existing.time_start}-{existing.time_end}',
-                            'students': existing.students,
-                        })
-
-                score = 0
-                if not conflicts:
-                    score += 4
-                if teacher_slot.is_preferred:
-                    score += 1
-                if block_start >= student_slot.get('start', '') and block_end <= student_slot.get('end', ''):
-                    score += 2
-
-                candidates.append({
-                    'day_of_week': teacher_slot.day_of_week,
-                    'time_start': block_start,
-                    'time_end': block_end,
-                    'score': score,
-                    'is_preferred': teacher_slot.is_preferred,
-                    'conflicts': conflicts,
-                })
-                cursor += 60
-
-    deduped = {}
-    for candidate in candidates:
-        key = _slot_signature(candidate)
-        if key not in deduped or candidate.get('score', 0) > deduped[key].get('score', 0):
-            deduped[key] = candidate
-
-    grouped_candidates = {}
-    for candidate in deduped.values():
-        grouped_candidates.setdefault(candidate['day_of_week'], []).append(candidate)
-
-    if not grouped_candidates:
-        return [], '老师和学生的可用时间没有重叠，无法自动匹配'
-
-    for day, blocks in grouped_candidates.items():
-        grouped_candidates[day] = sorted(blocks, key=_candidate_sort_key)
-
-    option_lists = []
-    for day in sorted(grouped_candidates.keys()):
-        option_lists.append(grouped_candidates[day][:2])
-
-    plans_by_signature = {}
-    for combo in product(*option_lists):
-        selected_blocks = sorted(list(combo), key=_slot_sort_key)
-        selected_blocks = _extend_single_day_plan(selected_blocks, grouped_candidates, total_sessions)
-        plan = _build_plan(selected_blocks, total_sessions, excluded_set)
-        signature = tuple(_slot_signature(slot) for slot in plan['weekly_slots'])
-        if signature not in plans_by_signature or _plan_sort_key(plan) < _plan_sort_key(plans_by_signature[signature]):
-            plans_by_signature[signature] = plan
-
-    plans = sorted(plans_by_signature.values(), key=_plan_sort_key)
-    valid_plans = []
-    for plan in plans:
-        normalized_plan = normalize_plan(plan, enrollment)
-        plan_errors, _ = _collect_manual_plan_issues(
-            enrollment,
-            normalized_plan.get('session_dates', []),
+    state = refresh_enrollment_scheduling_ai_state(enrollment)
+    risk_assessment = state.get('risk_assessment') or {}
+    hard_errors = risk_assessment.get('hard_errors') or []
+    if hard_errors:
+        return [], hard_errors[0]
+    if (risk_assessment.get('recommended_action') or '') == 'needs_student_clarification':
+        clarification_reasons = risk_assessment.get('clarification_reasons') or []
+        return [], clarification_reasons[0] if clarification_reasons else (
+            risk_assessment.get('summary') or '当前还需要学生补充可上课时间'
         )
-        if not plan_errors:
-            valid_plans.append(plan)
-        if len(valid_plans) >= 3:
-            break
+    if (risk_assessment.get('recommended_action') or '') == 'needs_teacher_confirmation':
+        ensure_enrollment_replan_workflow(
+            enrollment,
+            rejection_text='AI 判断当前需老师确认工作模板外时段，请老师补充可执行方案。',
+            actor_user=None,
+        )
+        db.session.commit()
+        return [], risk_assessment.get('summary') or '当前需老师确认模板外时段，请先发起老师协同'
 
-    if not valid_plans:
-        return plans[:3], None
-    return valid_plans, None
+    proposed_plans = state.get('proposed_plans') or []
+    enrollment.proposed_slots = json.dumps(proposed_plans, ensure_ascii=False) if proposed_plans else None
+    db.session.flush()
+    if not proposed_plans:
+        return [], '当前没有可发送给学生的稳定方案'
+    return proposed_plans, None
 
 
 def propose_enrollment_schedule(enrollment_id, slot_index):
@@ -2531,7 +3223,7 @@ def student_confirm_schedule(enrollment_id):
     """学生确认排课 -> 创建全部具体课次。"""
     from modules.auth.models import Enrollment
     from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
-    from modules.oa.services import delivery_mode_from_color_tag
+    from modules.oa.services import build_schedule_delivery_fields
     from modules.auth.models import LeaveRequest
     from modules.auth.workflow_services import (
         complete_replan_workflows_for_enrollment,
@@ -2578,7 +3270,11 @@ def student_confirm_schedule(enrollment_id):
     if existing_ids:
         return False, '当前报名已存在正式课表，不能重复确认排课方案', 0
 
-    errors, _ = _collect_manual_plan_issues(enrollment, session_dates)
+    errors, _ = _collect_manual_plan_issues(
+        enrollment,
+        session_dates,
+        weekly_slots=plan.get('weekly_slots') if isinstance(plan, dict) else None,
+    )
     if errors:
         message = '；'.join(dict.fromkeys(errors))
         _reopen_replan(message)
@@ -2590,6 +3286,11 @@ def student_confirm_schedule(enrollment_id):
     created_count = 0
     for session in session_dates:
         course_date = date.fromisoformat(session['date'])
+        delivery_fields = build_schedule_delivery_fields(
+            delivery_mode=enrollment.delivery_preference,
+            fallback_delivery_mode=enrollment.delivery_preference,
+            allow_unknown=False,
+        )
         schedule = CourseSchedule(
             date=course_date,
             day_of_week=session['day_of_week'],
@@ -2600,9 +3301,8 @@ def student_confirm_schedule(enrollment_id):
             course_name=enrollment.course_name,
             enrollment_id=enrollment.id,
             students=student_name,
-            color_tag='green',
-            delivery_mode=delivery_mode_from_color_tag('green'),
             notes=f'自动排课 - 报名#{enrollment.id}',
+            **delivery_fields,
         )
         sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
         db.session.add(schedule)
@@ -2717,6 +3417,7 @@ def save_course_feedback(schedule, teacher_id, data, *, submit=False):
         db.session.add(feedback)
 
     feedback.summary = (data.get('summary') or '').strip() or None
+    feedback.student_performance = (data.get('student_performance') or '').strip() or None
     feedback.homework = (data.get('homework') or '').strip() or None
     feedback.next_focus = (data.get('next_focus') or '').strip() or None
 
@@ -2864,8 +3565,8 @@ def delete_student_user_hard(user_id):
 
 def delete_enrollment_hard(enrollment_id):
     """硬删除报名，并联动清理课表、请假、待办和站内消息。"""
-    from modules.auth.models import ChatMessage, Enrollment, LeaveRequest
-    from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
+    from modules.auth.models import ChatMessage, Enrollment, FeedbackShareLink, LeaveRequest
+    from modules.oa.models import CourseFeedback, CourseSchedule, OATodo, ScheduleMeetingMaterial
 
     enrollment = db.session.get(Enrollment, enrollment_id)
     if not enrollment:
@@ -2874,13 +3575,19 @@ def delete_enrollment_hard(enrollment_id):
     linked_schedules = _linked_schedule_query(enrollment.id, include_cancelled=True).all()
     schedule_ids = [schedule.id for schedule in linked_schedules]
 
+    OATodo.query.filter(OATodo.enrollment_id == enrollment.id).delete(synchronize_session=False)
+
     if schedule_ids:
         OATodo.query.filter(OATodo.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
         LeaveRequest.query.filter(LeaveRequest.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
+        ScheduleMeetingMaterial.query.filter(
+            ScheduleMeetingMaterial.schedule_id.in_(schedule_ids)
+        ).delete(synchronize_session=False)
         CourseFeedback.query.filter(CourseFeedback.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
         CourseSchedule.query.filter(CourseSchedule.id.in_(schedule_ids)).delete(synchronize_session=False)
 
     ChatMessage.query.filter(ChatMessage.enrollment_id == enrollment.id).delete(synchronize_session=False)
+    FeedbackShareLink.query.filter(FeedbackShareLink.enrollment_id == enrollment.id).delete(synchronize_session=False)
 
     profile = enrollment.student_profile
     should_delete_profile = False

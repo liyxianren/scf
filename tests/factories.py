@@ -7,6 +7,7 @@ from modules.auth.models import (
     ChatMessage,
     Enrollment,
     ExternalIdentity,
+    FeedbackShareLink,
     IntegrationActionLog,
     LeaveRequest,
     ReminderDelivery,
@@ -16,7 +17,8 @@ from modules.auth.models import (
     User,
 )
 from modules.auth.services import generate_intake_token
-from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
+from modules.oa.models import CourseFeedback, CourseSchedule, OATodo, ScheduleMeetingMaterial
+from modules.oa.services import build_schedule_delivery_fields
 
 
 _sequence = count(1)
@@ -39,6 +41,8 @@ def create_user(
     role='admin',
     password='scf123',
     phone='13000000000',
+    teacher_work_mode='part_time',
+    default_working_template=None,
     is_active=True,
 ):
     username = username or _next_name(role)
@@ -48,6 +52,11 @@ def create_user(
         display_name=display_name,
         role=role,
         phone=phone,
+        teacher_work_mode=teacher_work_mode,
+        default_working_template_json=(
+            json.dumps(default_working_template, ensure_ascii=False)
+            if default_working_template is not None else None
+        ),
         is_active=is_active,
     )
     user.set_password(password)
@@ -106,11 +115,18 @@ def create_enrollment(
     total_hours=20,
     hours_per_session=2.0,
     sessions_per_week=1,
+    delivery_urgency='normal',
+    target_finish_date=None,
     intake_token=None,
     token_expires_at=None,
     proposed_slots=None,
     confirmed_slot=None,
+    availability_intake=None,
+    candidate_slot_pool=None,
+    recommended_bundle=None,
+    risk_assessment=None,
     notes=None,
+    delivery_preference='online',
 ):
     enrollment = Enrollment(
         student_name=student_name,
@@ -119,12 +135,19 @@ def create_enrollment(
         total_hours=total_hours,
         hours_per_session=hours_per_session,
         sessions_per_week=sessions_per_week,
+        delivery_urgency=delivery_urgency,
+        target_finish_date=target_finish_date,
         status=status,
         intake_token=intake_token or generate_intake_token(),
         token_expires_at=token_expires_at or (datetime.utcnow() + timedelta(days=7)),
         student_profile_id=student_profile.id if student_profile else None,
+        delivery_preference=delivery_preference,
         proposed_slots=json.dumps(proposed_slots, ensure_ascii=False) if proposed_slots is not None else None,
         confirmed_slot=json.dumps(confirmed_slot, ensure_ascii=False) if confirmed_slot is not None else None,
+        availability_intake=json.dumps(availability_intake, ensure_ascii=False) if availability_intake is not None else None,
+        candidate_slot_pool=json.dumps(candidate_slot_pool, ensure_ascii=False) if candidate_slot_pool is not None else None,
+        recommended_bundle=json.dumps(recommended_bundle, ensure_ascii=False) if recommended_bundle is not None else None,
+        risk_assessment=json.dumps(risk_assessment, ensure_ascii=False) if risk_assessment is not None else None,
         notes=notes,
     )
     return _persist(enrollment)
@@ -161,8 +184,15 @@ def create_schedule(
     location='线上',
     notes='',
     color_tag='blue',
+    delivery_mode=None,
 ):
     schedule_date = schedule_date or date.today()
+    delivery_fields = build_schedule_delivery_fields(
+        delivery_mode=delivery_mode,
+        color_tag=color_tag,
+        fallback_delivery_mode=delivery_mode,
+        allow_unknown=(delivery_mode is None and color_tag is None),
+    )
     schedule = CourseSchedule(
         date=schedule_date,
         day_of_week=schedule_date.weekday() if day_of_week is None else day_of_week,
@@ -175,7 +205,7 @@ def create_schedule(
         students=students,
         location=location,
         notes=notes,
-        color_tag=color_tag,
+        **delivery_fields,
     )
     return _persist(schedule)
 
@@ -221,8 +251,14 @@ def create_feedback(
     schedule,
     teacher,
     summary='课程总结',
+    student_performance=None,
     homework='课后作业',
     next_focus='下次重点',
+    ai_content_draft=None,
+    ai_draft_status='pending',
+    ai_model_provider=None,
+    ai_generated_at=None,
+    ai_source_type=None,
     status='draft',
     submitted_at=None,
 ):
@@ -230,12 +266,68 @@ def create_feedback(
         schedule_id=schedule.id,
         teacher_id=teacher.id,
         summary=summary,
+        student_performance=student_performance,
         homework=homework,
         next_focus=next_focus,
+        ai_content_draft=ai_content_draft,
+        ai_draft_status=ai_draft_status,
+        ai_model_provider=ai_model_provider,
+        ai_generated_at=ai_generated_at,
+        ai_source_type=ai_source_type,
         status=status,
         submitted_at=submitted_at,
     )
     return _persist(feedback)
+
+
+def create_schedule_meeting_material(
+    *,
+    schedule,
+    meeting_external_id=None,
+    record_id=None,
+    material_status='pending',
+    minutes_status='pending',
+    transcript_status='pending',
+    minutes_text=None,
+    transcript_text=None,
+    raw_payload=None,
+    last_synced_at=None,
+    error_message=None,
+):
+    material = ScheduleMeetingMaterial(
+        schedule_id=schedule.id,
+        meeting_external_id=meeting_external_id or schedule.meeting_external_id,
+        record_id=record_id,
+        material_status=material_status,
+        minutes_status=minutes_status,
+        transcript_status=transcript_status,
+        minutes_text=minutes_text,
+        transcript_text=transcript_text,
+        raw_payload_json=json.dumps(raw_payload, ensure_ascii=False) if raw_payload is not None else None,
+        last_synced_at=last_synced_at,
+        error_message=error_message,
+    )
+    return _persist(material)
+
+
+def create_feedback_share_link(
+    *,
+    enrollment,
+    token=None,
+    expires_at=None,
+    revoked_at=None,
+    created_by=None,
+    last_accessed_at=None,
+):
+    link = FeedbackShareLink(
+        enrollment_id=enrollment.id,
+        token=token or generate_intake_token(),
+        expires_at=expires_at or (datetime.utcnow() + timedelta(days=30)),
+        revoked_at=revoked_at,
+        created_by=created_by.id if hasattr(created_by, 'id') else created_by,
+        last_accessed_at=last_accessed_at,
+    )
+    return _persist(link)
 
 
 def create_leave_request(

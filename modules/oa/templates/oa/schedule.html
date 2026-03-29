@@ -232,7 +232,9 @@
     .course-tooltip .tip-time { color: #6b7280; margin-bottom: 2px; }
     .course-tooltip .tip-teacher { color: #374151; }
     .course-tooltip .tip-students { color: #6b7280; font-size: 0.78rem; margin-top: 2px; }
-    .course-tooltip .tip-location { color: #6b7280; font-size: 0.78rem; }
+    .course-tooltip .tip-location,
+    .course-tooltip .tip-delivery,
+    .course-tooltip .tip-meeting { color: #6b7280; font-size: 0.78rem; }
 
     /* === Ending Soon Highlight (outer breathing glow) === */
     .course-block.ending-soon {
@@ -663,15 +665,13 @@
                     <input type="text" id="courseLocation" placeholder="可选">
                 </div>
                 <div class="form-group">
-                    <label>颜色标签</label>
-                    <div class="color-picker" id="colorPicker">
-                        <span class="color-option blue selected" data-color="blue"></span>
-                        <span class="color-option green" data-color="green"></span>
-                        <span class="color-option purple" data-color="purple"></span>
-                        <span class="color-option orange" data-color="orange"></span>
-                        <span class="color-option red" data-color="red"></span>
-                        <span class="color-option teal" data-color="teal"></span>
-                    </div>
+                    <label>上课方式</label>
+                    <select id="courseDeliveryMode" required onchange="setSelectedDeliveryMode(this.value)">
+                        <option value="">请选择线上或线下</option>
+                        <option value="online">线上课</option>
+                        <option value="offline">线下课</option>
+                    </select>
+                    <div style="margin-top:6px;font-size:0.78rem;color:#6b7280" id="courseDeliveryHint">线上课自动显示蓝色，并预留腾讯会议链接状态；线下课自动显示橙色。</div>
                 </div>
                 <div class="form-group">
                     <label>备注</label>
@@ -696,7 +696,9 @@
     <div class="tip-time"></div>
     <div class="tip-teacher"></div>
     <div class="tip-students"></div>
+    <div class="tip-delivery"></div>
     <div class="tip-location"></div>
+    <div class="tip-meeting"></div>
 </div>
 
 <!-- Quick Note Popup -->
@@ -751,7 +753,7 @@ const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '
 let weekStart = getWeekStart(new Date());
 let editingId = null;
 let scheduleData = [];
-let selectedColor = 'blue';
+let selectedDeliveryMode = '';
 let quickShiftBusy = false;
 window.progressMap = {};
 
@@ -1006,7 +1008,9 @@ function renderWeekView() {
                      data-tip-time="${c.time_start}-${c.time_end}"
                      data-tip-teacher="${escapeHtml(teacherDisplay)}"
                      data-tip-students="${escapeHtml(c.students || '')}"
-                     data-tip-location="${escapeHtml(c.location || '')}">
+                     data-tip-location="${escapeHtml(c.location || '')}"
+                     data-tip-delivery="${escapeHtml(c.delivery_mode_label || (inferDeliveryModeFromColor(c.color_tag) === 'offline' ? '线下' : '线上'))}"
+                     data-tip-meeting="${escapeHtml(c.delivery_mode === 'online' ? (c.meeting_join_url ? '腾讯会议链接已准备' : (c.meeting_status_label || '腾讯会议链接待准备')) : '无需会议链接')}">
                     <div class="cb-name">${escapeHtml(c.course_name)}</div>
                     ${progressHtml}
                     <div class="cb-time">${c.time_start}-${c.time_end}</div>
@@ -1033,11 +1037,15 @@ function bindTooltipEvents(container) {
             const teacher = this.dataset.tipTeacher || '';
             const students = this.dataset.tipStudents || '';
             const location = this.dataset.tipLocation || '';
+            const delivery = this.dataset.tipDelivery || '';
+            const meeting = this.dataset.tipMeeting || '';
             tip.querySelector('.tip-name').textContent = name;
             tip.querySelector('.tip-time').textContent = time;
             tip.querySelector('.tip-teacher').textContent = teacher ? '教师: ' + teacher : '';
             tip.querySelector('.tip-students').textContent = students ? '学生: ' + students : '';
+            tip.querySelector('.tip-delivery').textContent = delivery ? '方式: ' + delivery : '';
             tip.querySelector('.tip-location').textContent = location ? '地点: ' + location : '';
+            tip.querySelector('.tip-meeting').textContent = meeting ? '会议: ' + meeting : '';
             tip.style.display = 'block';
             positionTooltip(e, tip);
         });
@@ -1245,7 +1253,7 @@ function openAddModal(preDate) {
     if (preDate) {
         document.getElementById('courseDate').value = preDate;
     }
-    setSelectedColor('blue');
+    setSelectedDeliveryMode('');
     setQuickShiftVisible(false);
     renderCourseGuardState(null);
     document.getElementById('courseModal').classList.add('active');
@@ -1290,7 +1298,7 @@ function fillCourseForm(schedule) {
     document.getElementById('courseStudents').value = schedule.students || '';
     document.getElementById('courseLocation').value = schedule.location || '';
     document.getElementById('courseNotes').value = schedule.notes || '';
-    setSelectedColor(schedule.color_tag || 'blue');
+    setSelectedDeliveryMode(schedule.delivery_mode || inferDeliveryModeFromColor(schedule.color_tag) || '');
 }
 
 function setQuickShiftVisible(visible) {
@@ -1381,6 +1389,11 @@ function renderCourseGuardState(schedule) {
 
 async function saveCourse(e) {
     e.preventDefault();
+    if (!selectedDeliveryMode) {
+        showToast('请选择线上或线下');
+        document.getElementById('courseDeliveryMode').focus();
+        return;
+    }
     const data = {
         date: document.getElementById('courseDate').value,
         time_start: document.getElementById('courseTimeStart').value,
@@ -1390,7 +1403,7 @@ async function saveCourse(e) {
         students: document.getElementById('courseStudents').value,
         location: document.getElementById('courseLocation').value,
         notes: document.getElementById('courseNotes').value,
-        color_tag: selectedColor
+        delivery_mode: selectedDeliveryMode
     };
 
     const url = editingId ? `/oa/api/schedules/${editingId}` : '/oa/api/schedules';
@@ -1440,18 +1453,29 @@ async function deleteCourse() {
     }
 }
 
-// ===== Color Picker =====
-function setSelectedColor(color) {
-    selectedColor = color;
-    document.querySelectorAll('.color-option').forEach(el => {
-        el.classList.toggle('selected', el.dataset.color === color);
-    });
+// ===== Delivery Mode =====
+function inferDeliveryModeFromColor(color) {
+    if (color === 'orange') return 'offline';
+    if (color === 'blue') return 'online';
+    return '';
 }
 
-document.getElementById('colorPicker').addEventListener('click', function(e) {
-    const opt = e.target.closest('.color-option');
-    if (opt) setSelectedColor(opt.dataset.color);
-});
+function setSelectedDeliveryMode(mode) {
+    selectedDeliveryMode = mode || '';
+    const field = document.getElementById('courseDeliveryMode');
+    const hint = document.getElementById('courseDeliveryHint');
+    if (field && field.value !== selectedDeliveryMode) {
+        field.value = selectedDeliveryMode;
+    }
+    if (!hint) return;
+    if (selectedDeliveryMode === 'online') {
+        hint.textContent = '线上课自动显示蓝色，并预留腾讯会议链接状态。';
+    } else if (selectedDeliveryMode === 'offline') {
+        hint.textContent = '线下课自动显示橙色，不创建腾讯会议链接。';
+    } else {
+        hint.textContent = '线上课自动显示蓝色，并预留腾讯会议链接状态；线下课自动显示橙色。';
+    }
+}
 
 // ===== Toast =====
 function showToast(msg) {
@@ -1649,7 +1673,7 @@ async function saveQuickNote() {
         students:    '',
         location:    '',
         notes:       '临时安排',
-        color_tag:   'orange'
+        delivery_mode: 'offline'
     };
 
     try {
@@ -1686,6 +1710,7 @@ function openFullFormFromQuickNote() {
         document.getElementById('courseTeacher').value = teacher;
     }
     if (content)   document.getElementById('courseName').value      = content;
+    setSelectedDeliveryMode('offline');
 }
 
 // Close popup when clicking outside

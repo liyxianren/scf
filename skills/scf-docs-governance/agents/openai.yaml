@@ -1,7 +1,7 @@
 interface:
   display_name: "SCF Docs Governance"
-  short_description: "Route SCF docs updates, version facts, and handoff changes."
-  default_prompt: "Use $scf-docs-governance to decide which SCF docs and entry files need updating for this change."
+  short_description: "Route SCF docs, entrypoint, and skill-sync updates."
+  default_prompt: "Use $scf-docs-governance to decide which SCF docs, entry files, and repo-local skills need updating for this change."
 
 policy:
   allow_implicit_invocation: true

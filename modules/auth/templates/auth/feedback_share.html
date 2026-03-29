@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}课程反馈报告{% endblock %}
+{% block extra_css %}
+<style>
+.feedback-share-page{max-width:920px;margin:0 auto;padding:32px 20px 48px}
+.feedback-share-card{background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:24px;box-shadow:0 14px 32px rgba(15,23,42,.06)}
+.feedback-share-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:20px}
+.feedback-share-title{margin:0;font-size:1.6rem;color:#0f172a}
+.feedback-share-subtitle{margin:8px 0 0;color:#475569;font-size:.92rem;line-height:1.7}
+.feedback-share-actions{display:flex;gap:10px;flex-wrap:wrap}
+.feedback-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;border:none;background:#0ea5e9;color:#fff;text-decoration:none;font-weight:700}
+.feedback-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+.feedback-meta-item{padding:12px 14px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0}
+.feedback-meta-item .label{font-size:.78rem;color:#64748b;font-weight:700;text-transform:uppercase}
+.feedback-meta-item .value{margin-top:6px;font-size:.96rem;color:#0f172a;font-weight:700}
+.feedback-section{border-top:1px solid #e5e7eb;padding-top:18px;margin-top:18px}
+.feedback-section h2{margin:0 0 8px;font-size:1.06rem;color:#0369a1}
+.feedback-section-meta{font-size:.84rem;color:#64748b;line-height:1.7;margin-bottom:12px}
+.feedback-block{padding:14px 16px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0;margin-bottom:10px}
+.feedback-block .label{font-size:.8rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:6px}
+.feedback-block .value{font-size:.94rem;color:#0f172a;line-height:1.8;white-space:pre-wrap}
+.feedback-empty{padding:20px;border-radius:16px;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;text-align:center}
+@media (max-width:640px){.feedback-share-page{padding:20px 14px 36px}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="feedback-share-page">
+  <div class="feedback-share-card">
+    <div class="feedback-share-head">
+      <div>
+        <h1 class="feedback-share-title">SCF 课程反馈报告</h1>
+        <p class="feedback-share-subtitle">本报告汇总该报名下已提交的历史课程反馈，供家长查看与下载。</p>
+      </div>
+      <div class="feedback-share-actions">
+        <a class="feedback-btn" href="{{ pdf_url }}">下载 PDF</a>
+      </div>
+    </div>
+
+    <div class="feedback-meta">
+      <div class="feedback-meta-item"><div class="label">学生</div><div class="value">{{ report.student_name or '-' }}</div></div>
+      <div class="feedback-meta-item"><div class="label">课程</div><div class="value">{{ report.course_name or '-' }}</div></div>
+      <div class="feedback-meta-item"><div class="label">老师</div><div class="value">{{ report.teacher_name or '-' }}</div></div>
+      <div class="feedback-meta-item"><div class="label">已提交反馈</div><div class="value">{{ report.total_feedback_count or 0 }} 次</div></div>
+    </div>
+
+    {% if report.feedback_items %}
+      {% for item in report.feedback_items %}
+      <div class="feedback-section">
+        <h2>第 {{ loop.index }} 次反馈</h2>
+        <div class="feedback-section-meta">
+          上课时间：{{ item.date or '-' }} {{ item.time_start or '' }}-{{ item.time_end or '' }}<br>
+          授课老师：{{ item.teacher_name or '-' }}<br>
+          提交时间：{{ item.submitted_at or '-' }}
+        </div>
+        {% if item.summary %}
+        <div class="feedback-block">
+          <div class="label">课程内容</div>
+          <div class="value">{{ item.summary }}</div>
+        </div>
+        {% endif %}
+        {% if item.student_performance %}
+        <div class="feedback-block">
+          <div class="label">学生表现</div>
+          <div class="value">{{ item.student_performance }}</div>
+        </div>
+        {% endif %}
+        {% if item.homework %}
+        <div class="feedback-block">
+          <div class="label">课后作业</div>
+          <div class="value">{{ item.homework }}</div>
+        </div>
+        {% endif %}
+        {% if item.next_focus %}
+        <div class="feedback-block">
+          <div class="label">下次重点</div>
+          <div class="value">{{ item.next_focus }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="feedback-empty">当前暂无已提交的课程反馈。</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

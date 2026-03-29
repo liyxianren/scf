@@ -1,3 +1,4 @@
+import json
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 
@@ -11,7 +12,9 @@ from modules.auth.models import Enrollment, LeaveRequest, TeacherAvailability, U
 from modules.auth.services import (
     _actor_can_manage_schedule_feedback,
     _latest_leave_request,
+    _normalize_teacher_work_mode,
     _profile_constraint_meta,
+    _teacher_work_context,
     _schedule_has_started,
     student_schedule_profile_clause,
     _teacher_identity_names,
@@ -24,12 +27,15 @@ from modules.auth.services import (
     delete_student_user_hard,
     get_accessible_enrollment_query,
     get_business_today,
+    reject_enrollment_schedule,
     schedule_requires_course_feedback,
     save_course_feedback,
     seed_staff_accounts,
+    student_confirm_schedule,
+    teacher_availability_ready,
     user_can_access_schedule,
 )
-from modules.oa.models import CourseFeedback, CourseSchedule
+from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
 
 
 def _resolve_date_range(range_param):
@@ -160,6 +166,365 @@ def _student_profile_payload(profile):
         'excluded_dates_summary': meta['excluded_dates_summary'],
     })
     return payload
+
+
+SCHEDULING_CASE_TYPE_DIRECT_PASS = 'direct_pass_case'
+SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION = 'teacher_exception_case'
+SCHEDULING_CASE_TYPE_STUDENT_CLARIFICATION = 'student_clarification_case'
+SCHEDULING_CASE_TYPE_ADMIN_RISK = 'admin_risk_case'
+
+
+def _scheduling_case_id(kind, entity_id):
+    return f'{kind}-{entity_id}'
+
+
+def _scheduling_case_type_from_recommended_action(recommended_action):
+    return {
+        'direct_to_student': SCHEDULING_CASE_TYPE_DIRECT_PASS,
+        'needs_teacher_confirmation': SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION,
+        'needs_student_clarification': SCHEDULING_CASE_TYPE_STUDENT_CLARIFICATION,
+        'needs_admin_intervention': SCHEDULING_CASE_TYPE_ADMIN_RISK,
+        'needs_admin_review': SCHEDULING_CASE_TYPE_ADMIN_RISK,
+    }.get(recommended_action, SCHEDULING_CASE_TYPE_ADMIN_RISK)
+
+
+def _student_action_item_from_clarification_enrollment(item):
+    risk = item.get('risk_assessment') or {}
+    clarification_reasons = risk.get('clarification_reasons') or []
+    return {
+        'title': item.get('course_name') or '补充可上课时间',
+        'status_label': '待补充时间',
+        'next_step': item.get('next_step_hint') or '请补充或确认可上课时间，系统再继续排课。',
+        'primary_action': {'label': '补充可上课时间', 'action': 'clarify'},
+        'secondary_action': None,
+        'detail_preview': (
+            clarification_reasons[0]
+            if clarification_reasons
+            else (risk.get('summary') or item.get('availability_intake_summary') or '请补充你的可上课时间')
+        ),
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'entity_ref': {'kind': 'enrollment', 'id': item.get('id')},
+        'current_plan_summary': item.get('availability_intake_summary'),
+        'session_preview_lines': [],
+        'waiting_since': item.get('waiting_since'),
+        'updated_at': item.get('updated_at'),
+        'priority': item.get('priority'),
+        'edit_url': item.get('edit_intake_url'),
+        'kind': 'student_clarification',
+    }
+
+
+def _student_action_item_from_enrollment(item):
+    return {
+        'title': item.get('course_name') or '待确认课程',
+        'status_label': '待确认课程',
+        'next_step': item.get('next_step_hint') or '确认后系统会生成正式课表',
+        'primary_action': {'label': '确认当前方案', 'action': 'confirm'},
+        'secondary_action': {'label': '有问题', 'action': 'reject', 'requires_message': True},
+        'detail_preview': item.get('current_plan_summary') or '请查看当前推荐方案',
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'entity_ref': {'kind': 'enrollment', 'id': item.get('id')},
+        'current_plan_summary': item.get('current_plan_summary'),
+        'session_preview_lines': item.get('session_preview_lines') or [],
+        'waiting_since': item.get('waiting_since'),
+        'updated_at': item.get('updated_at'),
+        'priority': item.get('priority'),
+        'kind': 'pending_enrollment',
+    }
+
+
+def _student_action_item_from_workflow(item):
+    requires_action = item.get('next_action_role') == 'student'
+    todo_type = item.get('todo_type')
+    status_label = '待确认补课' if todo_type == 'leave_makeup' and requires_action else (
+        '待确认课程' if requires_action else '进行中的安排'
+    )
+    next_step = item.get('next_step_hint') or (
+        '确认后补课时间会正式生效。' if todo_type == 'leave_makeup' and requires_action else '系统正在继续推进该事项。'
+    )
+    action_item = {
+        'title': item.get('title') or item.get('course_name') or item.get('todo_type_label') or '学生事项',
+        'status_label': status_label,
+        'next_step': next_step,
+        'primary_action': {'label': '确认当前方案', 'action': 'confirm'} if requires_action else None,
+        'secondary_action': {'label': '有问题', 'action': 'reject', 'requires_message': True} if requires_action else None,
+        'detail_preview': item.get('current_plan_summary') or item.get('context_summary') or item.get('description'),
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'entity_ref': {'kind': 'workflow_todo', 'id': item.get('id')},
+        'current_plan_summary': item.get('current_plan_summary'),
+        'session_preview_lines': item.get('session_preview_lines') or [],
+        'waiting_since': item.get('waiting_since'),
+        'updated_at': item.get('updated_at'),
+        'priority': item.get('priority'),
+        'kind': 'workflow_todo',
+    }
+    return action_item
+
+
+def _build_student_action_items(*, action_required_workflows, pending_enrollments, tracking_workflows):
+    clarification_items = [
+        _student_action_item_from_clarification_enrollment(item)
+        for item in pending_enrollments
+        if item.get('next_action_status') == 'waiting_student_clarification'
+    ]
+    confirmation_items = [
+        _student_action_item_from_enrollment(item)
+        for item in pending_enrollments
+        if item.get('next_action_status') != 'waiting_student_clarification'
+    ] + [
+        _student_action_item_from_workflow(item)
+        for item in action_required_workflows
+    ]
+    action_items = clarification_items + confirmation_items
+    tracking_items = [
+        _student_action_item_from_workflow(item)
+        for item in tracking_workflows
+    ]
+    return _sort_action_items(action_items), _sort_action_items(tracking_items)
+
+
+def _teacher_action_item_from_workflow(item):
+    risk = item.get('risk_assessment') or {}
+    full_time_exception = (
+        item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        and item.get('teacher_work_mode') == 'full_time'
+        and (
+            risk.get('teacher_confirmation_required')
+            or (risk.get('recommended_action') or '') == 'needs_teacher_confirmation'
+        )
+    )
+    return {
+        'title': item.get('title') or item.get('course_name') or '待处理排课事项',
+        'status_label': '待确认例外时段' if full_time_exception else (item.get('workflow_status_label') or '待我处理'),
+        'next_step': (
+            item.get('next_step_hint')
+            or ('确认模板外时段后系统会继续推进。' if full_time_exception else '提交方案后系统会继续推进。')
+        ),
+        'primary_action': {
+            'label': '确认例外时段' if full_time_exception else '处理安排',
+            'action': 'propose',
+        },
+        'secondary_action': None,
+        'detail_preview': item.get('context_summary') or item.get('current_plan_summary') or item.get('description'),
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'entity_ref': {'kind': 'workflow_todo', 'id': item.get('id')},
+        'quota_required': item.get('quota_required'),
+        'risk_assessment': item.get('risk_assessment') or {},
+        'teacher_work_mode': item.get('teacher_work_mode'),
+        'teacher_work_mode_label': item.get('teacher_work_mode_label'),
+        'kind': 'teacher_exception_workflow' if full_time_exception else 'teacher_workflow',
+    }
+
+
+def _build_admin_scheduling_risk_cases(*, pending_schedule_enrollments, pending_admin_send_workflows):
+    cases = []
+    for item in pending_schedule_enrollments:
+        risk = item.get('risk_assessment') or {}
+        if not (risk.get('hard_errors') or risk.get('warnings')):
+            continue
+        cases.append({
+            'title': f'{item.get("student_name") or "学生"} · {item.get("course_name") or "课程"}',
+            'summary': risk.get('summary') or item.get('scheduling_complexity_hint'),
+            'severity': risk.get('severity') or ('warning' if risk.get('warnings') else 'hard'),
+            'recommended_action': risk.get('recommended_action') or 'needs_admin_intervention',
+            'entity_ref': {'kind': 'enrollment', 'id': item.get('id')},
+            'hard_errors': risk.get('hard_errors') or [],
+            'warnings': risk.get('warnings') or [],
+            'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        })
+    for item in pending_admin_send_workflows:
+        risk = item.get('risk_assessment') or {}
+        if not (risk.get('hard_errors') or risk.get('warnings') or item.get('proposal_warnings')):
+            continue
+        cases.append({
+            'title': item.get('title') or item.get('course_name') or '排课风险',
+            'summary': risk.get('summary') or item.get('proposal_warning_summary') or item.get('context_summary'),
+            'severity': risk.get('severity') or ('warning' if (risk.get('warnings') or item.get('proposal_warnings')) else 'hard'),
+            'recommended_action': risk.get('recommended_action') or 'needs_admin_review',
+            'entity_ref': {'kind': 'workflow_todo', 'id': item.get('id')},
+            'hard_errors': risk.get('hard_errors') or [],
+            'warnings': list(dict.fromkeys((risk.get('warnings') or []) + (item.get('proposal_warnings') or []))),
+            'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        })
+    return _sort_action_items(cases)
+
+
+def _build_admin_case_view(item, entity_ref, *, status_label, next_step, detail_preview=None, action='review'):
+    return {
+        'title': f'{item.get("student_name") or "学生"} · {item.get("course_name") or item.get("title") or "排课事项"}',
+        'status_label': status_label,
+        'next_step': next_step,
+        'primary_action': {'label': '查看并处理', 'action': action},
+        'secondary_action': None,
+        'detail_preview': detail_preview,
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'entity_ref': entity_ref,
+        'priority': item.get('priority'),
+        'kind': 'admin_scheduling_case',
+    }
+
+
+def _build_scheduling_case_from_enrollment(item):
+    risk = item.get('risk_assessment') or {}
+    recommended_action = (
+        risk.get('recommended_action')
+        or ('direct_to_student' if item.get('status') == 'pending_student_confirm' else None)
+    )
+    case_type = _scheduling_case_type_from_recommended_action(recommended_action)
+    status = item.get('next_action_status') or item.get('status')
+    status_label = item.get('current_stage_label') or item.get('next_action_label') or '排课处理中'
+    current_blocker = risk.get('summary') or item.get('scheduling_complexity_hint') or item.get('context_summary')
+    next_actor = item.get('next_action_role') or 'admin'
+    next_step = item.get('next_step_hint') or '系统会继续推进该排课事项。'
+    entity_ref = {'kind': 'enrollment', 'id': item.get('id')}
+
+    if case_type == SCHEDULING_CASE_TYPE_STUDENT_CLARIFICATION:
+        student_view = _student_action_item_from_clarification_enrollment(item)
+    elif item.get('status') == 'pending_student_confirm':
+        student_view = _student_action_item_from_enrollment(item)
+    else:
+        student_view = None
+
+    if case_type == SCHEDULING_CASE_TYPE_STUDENT_CLARIFICATION:
+        admin_status_label = '待学生补充时间'
+    elif case_type == SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION:
+        admin_status_label = '待老师确认例外时段'
+    elif case_type == SCHEDULING_CASE_TYPE_ADMIN_RISK:
+        admin_status_label = '待教务处理风险'
+    elif item.get('status') == 'pending_student_confirm':
+        admin_status_label = '待学生确认'
+    else:
+        admin_status_label = '待教务复核'
+
+    admin_view = _build_admin_case_view(
+        item,
+        entity_ref,
+        status_label=admin_status_label,
+        next_step=next_step,
+        detail_preview=current_blocker,
+        action='review',
+    )
+
+    return {
+        'id': _scheduling_case_id('enrollment', item.get('id')),
+        'case_type': case_type,
+        'status': status,
+        'status_label': status_label,
+        'current_blocker': current_blocker,
+        'next_actor': next_actor,
+        'next_step': next_step,
+        'entity_refs': [entity_ref],
+        'risk_assessment': risk,
+        'recommended_bundle': item.get('recommended_bundle'),
+        'candidate_slot_pool': item.get('candidate_slot_pool') or [],
+        'student_view': student_view,
+        'teacher_view': None,
+        'admin_view': admin_view,
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'waiting_since': item.get('waiting_since'),
+        'updated_at': item.get('updated_at'),
+        'priority': item.get('priority'),
+        'student_name': item.get('student_name'),
+        'course_name': item.get('course_name'),
+        'teacher_name': item.get('teacher_name'),
+        'entity_ref': entity_ref,
+    }
+
+
+def _build_scheduling_case_from_workflow(item):
+    if item.get('todo_type') != OATodo.TODO_TYPE_ENROLLMENT_REPLAN:
+        return None
+
+    risk = item.get('risk_assessment') or {}
+    proposal_warnings = item.get('proposal_warnings') or []
+    if item.get('workflow_status') == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL:
+        case_type = SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION
+    elif item.get('workflow_status') == OATodo.WORKFLOW_STATUS_WAITING_STUDENT_CONFIRM:
+        case_type = SCHEDULING_CASE_TYPE_DIRECT_PASS
+    else:
+        case_type = _scheduling_case_type_from_recommended_action(
+            risk.get('recommended_action') or (
+                'needs_admin_review' if proposal_warnings else 'direct_to_student'
+            )
+        )
+
+    full_time_exception = (
+        case_type == SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION
+        and item.get('teacher_work_mode') == 'full_time'
+    )
+    status_label = (
+        '待老师确认例外时段'
+        if full_time_exception and item.get('workflow_status') == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+        else (item.get('workflow_status_label') or '排课处理中')
+    )
+    current_blocker = (
+        risk.get('summary')
+        or item.get('proposal_warning_summary')
+        or item.get('latest_rejection_text')
+        or item.get('context_summary')
+        or item.get('description')
+    )
+    next_step = item.get('next_step_hint') or '系统会继续推进该排课事项。'
+    entity_refs = [{'kind': 'workflow_todo', 'id': item.get('id')}]
+    if item.get('enrollment_id'):
+        entity_refs.append({'kind': 'enrollment', 'id': item.get('enrollment_id')})
+
+    teacher_view = (
+        _teacher_action_item_from_workflow(item)
+        if item.get('next_action_role') == 'teacher'
+        else None
+    )
+    student_view = (
+        _student_action_item_from_workflow(item)
+        if item.get('next_action_role') == 'student'
+        else None
+    )
+    admin_view = _build_admin_case_view(
+        item,
+        {'kind': 'workflow_todo', 'id': item.get('id')},
+        status_label=(
+            '待老师确认例外时段'
+            if case_type == SCHEDULING_CASE_TYPE_TEACHER_EXCEPTION
+            else ('待教务处理风险' if case_type == SCHEDULING_CASE_TYPE_ADMIN_RISK else '待教务复核')
+        ),
+        next_step=next_step,
+        detail_preview=current_blocker,
+        action='review',
+    )
+
+    return {
+        'id': _scheduling_case_id('workflow', item.get('id')),
+        'case_type': case_type,
+        'status': item.get('workflow_status'),
+        'status_label': status_label,
+        'current_blocker': current_blocker,
+        'next_actor': item.get('next_action_role') or 'admin',
+        'next_step': next_step,
+        'entity_refs': entity_refs,
+        'risk_assessment': risk,
+        'recommended_bundle': item.get('recommended_bundle'),
+        'candidate_slot_pool': item.get('candidate_slot_pool') or [],
+        'student_view': student_view,
+        'teacher_view': teacher_view,
+        'admin_view': admin_view,
+        'due_hint': item.get('waiting_since') or item.get('updated_at'),
+        'waiting_since': item.get('waiting_since'),
+        'updated_at': item.get('updated_at'),
+        'priority': item.get('priority'),
+        'student_name': item.get('student_name'),
+        'course_name': item.get('course_name') or item.get('title'),
+        'teacher_name': item.get('teacher_name'),
+        'entity_ref': {'kind': 'workflow_todo', 'id': item.get('id')},
+    }
+
+
+def _dedupe_scheduling_cases(items):
+    deduped = {}
+    for item in items or []:
+        if not item:
+            continue
+        deduped[item['id']] = item
+    return _sort_action_items(list(deduped.values()))
 
 
 def _rename_slot_validation_errors(errors, label):
@@ -323,8 +688,12 @@ def manage_users():
 @auth_bp.route('/teacher/dashboard')
 @role_required('teacher', 'admin')
 def teacher_dashboard():
-    has_availability = TeacherAvailability.query.filter_by(user_id=current_user.id).count() > 0
-    return render_template('auth/teacher_dashboard.html', has_availability=has_availability)
+    teacher_context = _teacher_work_context(current_user)
+    return render_template(
+        'auth/teacher_dashboard.html',
+        has_availability=teacher_context['availability_ready'],
+        teacher_work_context=teacher_context,
+    )
 
 
 @auth_bp.route('/api/teacher/my-schedule')
@@ -474,11 +843,23 @@ def api_teacher_action_center():
             _teacher_schedule_identity_filter(CourseSchedule, current_user),
         ).order_by(LeaveRequest.created_at.desc()).all()
     ])
+    teacher_context = _teacher_work_context(current_user)
+    teacher_action_items = _sort_action_items([
+        _teacher_action_item_from_workflow(item)
+        for item in proposal_workflows
+    ])
+    scheduling_cases = _dedupe_scheduling_cases(
+        [_build_scheduling_case_from_workflow(item) for item in proposal_workflows]
+        + [_build_scheduling_case_from_workflow(item) for item in tracking_workflows]
+    )
 
     return jsonify({
         'success': True,
         'data': {
-            'availability_ready': TeacherAvailability.query.filter_by(user_id=current_user.id).count() > 0,
+            **teacher_context,
+            'availability_ready': teacher_context['availability_ready'],
+            'teacher_action_items': teacher_action_items,
+            'scheduling_cases': scheduling_cases,
             'proposal_workflows': proposal_workflows,
             'tracking_workflows': tracking_workflows,
             'pending_feedback_schedules': pending_feedback,
@@ -486,6 +867,8 @@ def api_teacher_action_center():
             'upcoming_schedules': upcoming_schedules[:10],
             'students': _teacher_students_summary(current_user),
             'counts': {
+                'teacher_action_items': len(teacher_action_items),
+                'scheduling_cases': len(scheduling_cases),
                 'proposal_workflows': len(proposal_workflows),
                 'tracking_workflows': len(tracking_workflows),
                 'pending_feedback_schedules': len(pending_feedback),
@@ -587,6 +970,9 @@ def api_student_action_center():
             'tracking_workflows': [],
             'pending_workflows': [],
             'pending_enrollments': [],
+            'student_action_items': [],
+            'student_tracking_items': [],
+            'scheduling_cases': [],
             'upcoming_schedules': [],
             'leave_requests': [],
             'counts': {
@@ -595,6 +981,8 @@ def api_student_action_center():
                 'action_required_items': 0,
                 'pending_workflows': 0,
                 'pending_enrollments': 0,
+                'student_action_items': 0,
+                'scheduling_cases': 0,
                 'leave_requests': 0,
                 'upcoming_schedules': 0,
             },
@@ -618,7 +1006,6 @@ def api_student_action_center():
         and item.get('next_action_role') == 'student'
         and item.get('enrollment_id')
     }
-
     enrollments = [
         build_enrollment_payload(enrollment, current_user)
         for enrollment in Enrollment.query.filter(
@@ -627,8 +1014,21 @@ def api_student_action_center():
     ]
     pending_enrollments = _sort_action_items([
         item for item in enrollments
-        if item.get('status') == 'pending_student_confirm' and item.get('id') not in workflow_enrollment_ids
+        if (
+            item.get('status') == 'pending_student_confirm'
+            or item.get('next_action_status') == 'waiting_student_clarification'
+        )
+        and item.get('id') not in workflow_enrollment_ids
     ])
+    student_action_items, student_tracking_items = _build_student_action_items(
+        action_required_workflows=action_required_workflows,
+        pending_enrollments=pending_enrollments,
+        tracking_workflows=tracking_workflows,
+    )
+    scheduling_cases = _dedupe_scheduling_cases(
+        [_build_scheduling_case_from_workflow(item) for item in pending_workflows]
+        + [_build_scheduling_case_from_enrollment(item) for item in pending_enrollments]
+    )
 
     upcoming_schedules = [
         build_schedule_payload(schedule, current_user)
@@ -650,6 +1050,9 @@ def api_student_action_center():
             'tracking_workflows': tracking_workflows,
             'pending_workflows': pending_workflows,
             'pending_enrollments': pending_enrollments,
+            'student_action_items': student_action_items,
+            'student_tracking_items': student_tracking_items,
+            'scheduling_cases': scheduling_cases,
             'upcoming_schedules': upcoming_schedules,
             'leave_requests': leave_requests,
             'counts': {
@@ -658,6 +1061,8 @@ def api_student_action_center():
                 'action_required_items': len(action_required_workflows) + len(pending_enrollments),
                 'pending_workflows': len(pending_workflows),
                 'pending_enrollments': len(pending_enrollments),
+                'student_action_items': len(student_action_items),
+                'scheduling_cases': len(scheduling_cases),
                 'leave_requests': len(leave_requests),
                 'upcoming_schedules': len(upcoming_schedules),
             },
@@ -695,6 +1100,11 @@ def api_admin_action_center():
         item.get('enrollment_id')
         for item in waiting_student_confirm_workflows
         if item.get('todo_type') == 'enrollment_replan' and item.get('enrollment_id')
+    }
+    scheduling_workflow_enrollment_ids = {
+        item.get('enrollment_id')
+        for item in workflow_todos
+        if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN and item.get('enrollment_id')
     }
 
     pending_schedule_enrollments = _sort_action_items([
@@ -738,6 +1148,27 @@ def api_admin_action_center():
         and not (_latest_leave_request(schedule) and _latest_leave_request(schedule).status == 'approved')
     ]))
     leave_cases = _build_leave_case_payloads(current_user)
+    scheduling_risk_cases = _build_admin_scheduling_risk_cases(
+        pending_schedule_enrollments=pending_schedule_enrollments,
+        pending_admin_send_workflows=pending_admin_send,
+    )
+    scheduling_cases = _dedupe_scheduling_cases(
+        [
+            _build_scheduling_case_from_enrollment(item)
+            for item in pending_schedule_enrollments
+            if item.get('id') not in scheduling_workflow_enrollment_ids
+        ]
+        + [
+            _build_scheduling_case_from_workflow(item)
+            for item in workflow_todos
+            if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        ]
+        + [
+            _build_scheduling_case_from_enrollment(item)
+            for item in waiting_student_confirm_enrollments
+            if item.get('id') not in scheduling_workflow_enrollment_ids
+        ]
+    )
 
     return jsonify({
         'success': True,
@@ -750,6 +1181,8 @@ def api_admin_action_center():
             'waiting_student_confirm_items': waiting_student_confirm_items,
             'pending_leave_requests': pending_leave_requests,
             'leave_cases': leave_cases,
+            'scheduling_risk_cases': scheduling_risk_cases,
+            'scheduling_cases': scheduling_cases,
             'pending_feedback_schedules': pending_feedback_schedules,
             'counts': {
                 'pending_schedule_enrollments': len(pending_schedule_enrollments),
@@ -760,10 +1193,207 @@ def api_admin_action_center():
                 'waiting_student_confirm_items': len(waiting_student_confirm_items),
                 'pending_leave_requests': len(pending_leave_requests),
                 'leave_cases': len(leave_cases),
+                'scheduling_risk_cases': len(scheduling_risk_cases),
+                'scheduling_cases': len(scheduling_cases),
                 'pending_feedback_schedules': len(pending_feedback_schedules),
             },
         },
     })
+
+
+def _student_scheduling_cases_for_current_user():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    profile = current_user.student_profile
+    if not profile:
+        return []
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    pending_workflows = _sort_action_items(workflow_todos)
+    workflow_enrollment_ids = {
+        item.get('enrollment_id')
+        for item in pending_workflows
+        if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        and item.get('enrollment_id')
+    }
+    enrollments = [
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in Enrollment.query.filter(
+            Enrollment.student_profile_id == profile.id
+        ).order_by(Enrollment.created_at.desc()).all()
+    ]
+    pending_enrollments = _sort_action_items([
+        item for item in enrollments
+        if (
+            item.get('status') == 'pending_student_confirm'
+            or item.get('next_action_status') == 'waiting_student_clarification'
+        )
+        and item.get('id') not in workflow_enrollment_ids
+    ])
+    return _dedupe_scheduling_cases(
+        [_build_scheduling_case_from_workflow(item) for item in pending_workflows]
+        + [_build_scheduling_case_from_enrollment(item) for item in pending_enrollments]
+    )
+
+
+def _teacher_scheduling_cases_for_current_user():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    relevant = _sort_action_items([
+        item for item in workflow_todos
+        if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        and (
+            item.get('next_action_role') == 'teacher'
+            and _workflow_matches_teacher_actor(item, current_user)
+            or item.get('next_action_role') != 'teacher'
+        )
+    ])
+    return _dedupe_scheduling_cases([
+        _build_scheduling_case_from_workflow(item)
+        for item in relevant
+    ])
+
+
+def _admin_scheduling_cases_for_current_user():
+    from modules.auth.workflow_services import build_workflow_todo_payload, list_workflow_todos_for_user
+
+    workflow_todos = [
+        build_workflow_todo_payload(todo, current_user)
+        for todo in list_workflow_todos_for_user(current_user, status='open')
+    ]
+    scheduling_workflow_enrollment_ids = {
+        item.get('enrollment_id')
+        for item in workflow_todos
+        if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN and item.get('enrollment_id')
+    }
+    pending_schedule_enrollments = _sort_action_items([
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in get_accessible_enrollment_query(current_user).filter(
+            Enrollment.status.in_(['pending_info', 'pending_schedule'])
+        ).order_by(Enrollment.updated_at.desc(), Enrollment.created_at.desc()).all()
+    ])
+    waiting_student_confirm_enrollments = _sort_action_items([
+        build_enrollment_payload(enrollment, current_user)
+        for enrollment in get_accessible_enrollment_query(current_user).filter(
+            Enrollment.status == 'pending_student_confirm'
+        ).order_by(Enrollment.updated_at.desc(), Enrollment.created_at.desc()).all()
+        if enrollment.id not in scheduling_workflow_enrollment_ids
+    ])
+    return _dedupe_scheduling_cases(
+        [
+            _build_scheduling_case_from_enrollment(item)
+            for item in pending_schedule_enrollments
+            if item.get('id') not in scheduling_workflow_enrollment_ids
+        ]
+        + [
+            _build_scheduling_case_from_workflow(item)
+            for item in workflow_todos
+            if item.get('todo_type') == OATodo.TODO_TYPE_ENROLLMENT_REPLAN
+        ]
+        + [
+            _build_scheduling_case_from_enrollment(item)
+            for item in waiting_student_confirm_enrollments
+            if item.get('id') not in scheduling_workflow_enrollment_ids
+        ]
+    )
+
+
+def _current_user_scheduling_cases():
+    if current_user.role == 'student':
+        return _student_scheduling_cases_for_current_user()
+    if current_user.role == 'teacher':
+        return _teacher_scheduling_cases_for_current_user()
+    if current_user.role == 'admin':
+        return _admin_scheduling_cases_for_current_user()
+    return []
+
+
+def _find_current_scheduling_case(case_id):
+    for item in _current_user_scheduling_cases():
+        if item.get('id') == case_id:
+            return item
+    return None
+
+
+@auth_bp.route('/api/scheduling-cases')
+@login_required
+def api_list_scheduling_cases():
+    cases = _current_user_scheduling_cases()
+    return jsonify({
+        'success': True,
+        'data': cases,
+        'total': len(cases),
+    })
+
+
+@auth_bp.route('/api/scheduling-cases/<case_id>')
+@login_required
+def api_get_scheduling_case(case_id):
+    payload = _find_current_scheduling_case(case_id)
+    if not payload:
+        return jsonify({'success': False, 'error': '排课事项不存在或你无权查看'}), 404
+    return jsonify({'success': True, 'data': payload})
+
+
+@auth_bp.route('/api/scheduling-cases/<case_id>/actions/<action>', methods=['POST'])
+@login_required
+def api_execute_scheduling_case_action(case_id, action):
+    from modules.auth.workflow_services import (
+        get_workflow_todo,
+        student_confirm_workflow_todo,
+        student_reject_workflow_todo,
+    )
+
+    case_payload = _find_current_scheduling_case(case_id)
+    if not case_payload:
+        return jsonify({'success': False, 'error': '排课事项不存在或你无权操作'}), 404
+
+    data = request.get_json(silent=True) or {}
+    entity_ref = case_payload.get('entity_ref') or {}
+    kind = entity_ref.get('kind')
+    entity_id = entity_ref.get('id')
+
+    if current_user.role == 'student' and action == 'confirm':
+        if kind == 'workflow_todo':
+            todo = get_workflow_todo(entity_id)
+            if not todo:
+                return jsonify({'success': False, 'error': '当前方案已失效，请查看最新安排'}), 404
+            result = student_confirm_workflow_todo(todo, current_user)
+            status_code = result.pop('status_code', 200)
+            return jsonify(result), status_code
+        if kind == 'enrollment':
+            success, message, created_count = student_confirm_schedule(entity_id)
+            if success:
+                return jsonify({'success': True, 'message': message, 'created_count': created_count})
+            return jsonify({'success': False, 'error': message}), 400
+
+    if current_user.role == 'student' and action == 'reject':
+        message = data.get('message', '')
+        if kind == 'workflow_todo':
+            todo = get_workflow_todo(entity_id)
+            if not todo:
+                return jsonify({'success': False, 'error': '当前方案已失效，请查看最新安排'}), 404
+            result = student_reject_workflow_todo(todo, current_user, message)
+            status_code = result.pop('status_code', 200)
+            return jsonify(result), status_code
+        if kind == 'enrollment':
+            success, error_message = reject_enrollment_schedule(
+                entity_id,
+                message or '学生对排课方案有疑问，请查看。',
+                actor_user_id=current_user.id,
+            )
+            if success:
+                return jsonify({'success': True, 'message': error_message})
+            return jsonify({'success': False, 'error': error_message}), 400
+
+    return jsonify({'success': False, 'error': '当前排课事项暂不支持该动作'}), 400
 
 
 @auth_bp.route('/api/student/my-schedules/by-date')
@@ -807,6 +1437,13 @@ def api_create_user():
     password = data.get('password', '') or 'scf123'
     role = data.get('role', 'teacher')
     phone = data.get('phone', '').strip()
+    try:
+        teacher_work_mode = _normalize_teacher_work_mode(data.get('teacher_work_mode'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    default_working_template, template_errors = _validate_available_slot_entries(data.get('default_working_template'))
+    if template_errors:
+        return jsonify({'success': False, 'error': '；'.join(template_errors), 'errors': template_errors}), 400
 
     if not username or not display_name:
         return jsonify({'success': False, 'error': '用户名和显示名称为必填项'}), 400
@@ -814,7 +1451,18 @@ def api_create_user():
     if User.query.filter_by(username=username).first():
         return jsonify({'success': False, 'error': '用户名已存在'}), 409
 
-    user = User(username=username, display_name=display_name, role=role, phone=phone or None)
+    user = User(
+        username=username,
+        display_name=display_name,
+        role=role,
+        phone=phone or None,
+        teacher_work_mode=teacher_work_mode,
+        default_working_template_json=(
+            json.dumps(default_working_template, ensure_ascii=False)
+            if teacher_work_mode == 'full_time' and default_working_template
+            else None
+        ),
+    )
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -838,6 +1486,20 @@ def api_update_user(user_id):
         user.role = data['role']
     if 'phone' in data:
         user.phone = data['phone']
+    if 'teacher_work_mode' in data:
+        try:
+            user.teacher_work_mode = _normalize_teacher_work_mode(data.get('teacher_work_mode'))
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+    if 'default_working_template' in data:
+        default_working_template, template_errors = _validate_available_slot_entries(data.get('default_working_template'))
+        if template_errors:
+            return jsonify({'success': False, 'error': '；'.join(template_errors), 'errors': template_errors}), 400
+        user.default_working_template_json = (
+            json.dumps(default_working_template, ensure_ascii=False)
+            if user.teacher_work_mode == 'full_time' and default_working_template
+            else None
+        )
     if 'is_active' in data:
         user.is_active = data['is_active']
     if data.get('password'):
@@ -896,6 +1558,7 @@ def api_get_teacher_availability(teacher_id):
     if not _teacher_can_manage_availability(teacher_id):
         return jsonify({'success': False, 'error': '无权访问该教师时间设置'}), 403
 
+    teacher_context = _teacher_work_context(user)
     slots = TeacherAvailability.query.filter_by(user_id=teacher_id).all()
     available = []
     preferred = []
@@ -905,7 +1568,17 @@ def api_get_teacher_availability(teacher_id):
             preferred.append(item)
         else:
             available.append(item)
-    return jsonify({'success': True, 'data': {'available': available, 'preferred': preferred}})
+    if teacher_context['teacher_work_mode'] == 'full_time':
+        available = teacher_context['default_working_template']
+        preferred = []
+    return jsonify({
+        'success': True,
+        'data': {
+            'available': available,
+            'preferred': preferred,
+            **teacher_context,
+        },
+    })
 
 
 @auth_bp.route('/api/teacher/<int:teacher_id>/availability', methods=['POST'])
@@ -921,6 +1594,30 @@ def api_set_teacher_availability(teacher_id):
     if not data:
         return jsonify({'success': False, 'error': '请求数据为空'}), 400
 
+    try:
+        teacher_work_mode = _normalize_teacher_work_mode(data.get('teacher_work_mode'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    if teacher_work_mode == 'full_time':
+        default_working_template, template_errors = _validate_available_slot_entries(data.get('default_working_template'))
+        if template_errors:
+            errors = _rename_slot_validation_errors(template_errors, '默认工作时段')
+            return jsonify({'success': False, 'error': '；'.join(errors), 'errors': errors}), 400
+
+        TeacherAvailability.query.filter_by(user_id=teacher_id).delete()
+        user.teacher_work_mode = teacher_work_mode
+        user.default_working_template_json = (
+            json.dumps(default_working_template, ensure_ascii=False)
+            if default_working_template else None
+        )
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': '已切换为全职老师统一工作模板',
+            'data': _teacher_work_context(user),
+        })
+
     available_slots, available_errors = _validate_available_slot_entries(data.get('available'))
     preferred_slots, preferred_errors = _validate_available_slot_entries(data.get('preferred'))
     errors = (
@@ -931,6 +1628,8 @@ def api_set_teacher_availability(teacher_id):
         return jsonify({'success': False, 'error': '；'.join(errors), 'errors': errors}), 400
 
     TeacherAvailability.query.filter_by(user_id=teacher_id).delete()
+    user.teacher_work_mode = teacher_work_mode
+    user.default_working_template_json = None
 
     for slot_data in available_slots:
         db.session.add(TeacherAvailability(
@@ -950,7 +1649,11 @@ def api_set_teacher_availability(teacher_id):
         ))
 
     db.session.commit()
-    return jsonify({'success': True, 'message': '保存成功'})
+    return jsonify({
+        'success': True,
+        'message': '保存成功',
+        'data': _teacher_work_context(user),
+    })
 
 
 # ========== 课程反馈 API ==========

@@ -1,17 +1,20 @@
+import json
 from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from flask import jsonify, render_template, request
+from flask import current_app, jsonify, render_template, request
 from flask_login import current_user
 
 from extensions import db
 from modules.auth.decorators import role_required
 from modules.auth.models import Enrollment, LeaveRequest, User
 from modules.auth.services import (
+    BUSINESS_TIMEZONE,
     _schedule_effective_student_profile_id,
     build_schedule_payload,
     get_course_feedback_skip_reason,
+    get_business_now,
     get_business_today,
     schedule_has_historical_facts,
     schedule_requires_course_feedback,
@@ -24,6 +27,7 @@ from modules.oa.models import CourseFeedback, CourseSchedule, OATodo
 from modules.oa.reminder_services import record_schedule_action_reminders
 from modules.oa.services import (
     apply_schedule_excel_import,
+    build_schedule_delivery_fields,
     delivery_mode_from_color_tag,
     resolve_schedule_teacher_reference,
     validate_schedule_conflicts,
@@ -45,6 +49,18 @@ def _filter_visible_todos(todos, *, reconcile_feedback_visibility=False):
     visible = []
     changed = False
     for todo in todos:
+        if todo.is_workflow:
+            from modules.auth.workflow_services import reconcile_stale_workflow_todo, workflow_todo_stale_reason
+
+            if reconcile_stale_workflow_todo(todo):
+                changed = True
+            if workflow_todo_stale_reason(todo):
+                continue
+            if todo.is_completed or todo.workflow_status in {
+                OATodo.WORKFLOW_STATUS_COMPLETED,
+                OATodo.WORKFLOW_STATUS_CANCELLED,
+            }:
+                continue
         if (
             todo.todo_type == OATodo.TODO_TYPE_SCHEDULE_FEEDBACK
             and not schedule_requires_course_feedback(getattr(todo, 'schedule', None))
@@ -82,6 +98,19 @@ def _shift_schedule_time_value(time_str, minutes_delta):
     if shifted_minutes < 0 or shifted_minutes > (23 * 60 + 59):
         return None
     return f'{shifted_minutes // 60:02d}:{shifted_minutes % 60:02d}'
+
+
+def _parse_job_now_override(value):
+    normalized = str(value or '').strip()
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(BUSINESS_TIMEZONE).replace(tzinfo=None)
+    return parsed
 
 
 def _resolve_teacher_or_error(teacher_value):
@@ -159,7 +188,7 @@ def _direct_schedule_update_workflow_error(schedule, updates):
         touched_fields & process_locked_fields
         and has_open_process_workflow(schedule_id=schedule.id, enrollment_id=target_enrollment_id)
     ):
-        return '该课程关联未完成的工作流，仅允许修改备注、地点或颜色'
+        return '该课程关联未完成的工作流，仅允许修改备注、地点或上课方式'
 
     relationship_locked_fields = {'enrollment_id'}
     if (
@@ -171,7 +200,7 @@ def _direct_schedule_update_workflow_error(schedule, updates):
 
 
 def _normalize_schedule_compare_value(field, value):
-    if field in {'teacher', 'time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag'}:
+    if field in {'teacher', 'time_start', 'time_end', 'course_name', 'students', 'location', 'notes', 'color_tag', 'delivery_mode'}:
         return str(value or '').strip()
     return value
 
@@ -189,9 +218,9 @@ def _historical_schedule_mutation_error(schedule, *, proposed_values=None, delet
     }
     if not changed_fields:
         return None
-    if changed_fields.issubset({'notes', 'location', 'color_tag'}):
+    if changed_fields.issubset({'notes', 'location', 'color_tag', 'delivery_mode'}):
         return None
-    return '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+    return '该课程已产生交付事实，仅允许修改备注、地点或上课方式'
 
 
 def _build_schedule_update_context(schedule, data, *, allow_admin_override=False):
@@ -242,7 +271,36 @@ def _build_schedule_update_context(schedule, data, *, allow_admin_override=False
         )
     next_location = data.get('location', schedule.location)
     next_notes = data.get('notes', schedule.notes)
-    next_color_tag = data.get('color_tag', schedule.color_tag)
+    current_delivery_mode = (schedule.delivery_mode or '').strip().lower()
+    fallback_delivery_mode = (
+        current_delivery_mode
+        if current_delivery_mode in {'online', 'offline'}
+        else delivery_mode_from_color_tag(schedule.color_tag)
+    )
+    if 'delivery_mode' in data or 'color_tag' in data:
+        try:
+            delivery_fields = build_schedule_delivery_fields(
+                delivery_mode=data.get('delivery_mode'),
+                color_tag=data.get('color_tag'),
+                fallback_delivery_mode=fallback_delivery_mode,
+                existing_schedule=schedule,
+                allow_unknown=False,
+            )
+        except ValueError as exc:
+            return None, (str(exc), 400)
+    else:
+        delivery_fields = {
+            'delivery_mode': schedule.delivery_mode,
+            'color_tag': schedule.color_tag,
+            'meeting_provider': schedule.meeting_provider,
+            'meeting_status': schedule.meeting_status,
+            'meeting_join_url': schedule.meeting_join_url,
+            'meeting_external_id': schedule.meeting_external_id,
+            'meeting_code': schedule.meeting_code,
+            'meeting_password': schedule.meeting_password,
+            'meeting_created_at': schedule.meeting_created_at,
+            'meeting_ended_at': schedule.meeting_ended_at,
+        }
 
     if not allow_admin_override:
         workflow_error = _direct_schedule_update_workflow_error(schedule, data)
@@ -261,7 +319,8 @@ def _build_schedule_update_context(schedule, data, *, allow_admin_override=False
                 'students': next_students,
                 'location': next_location,
                 'notes': next_notes,
-                'color_tag': next_color_tag,
+                'color_tag': delivery_fields['color_tag'],
+                'delivery_mode': delivery_fields['delivery_mode'],
                 'enrollment_id': next_enrollment_id,
             },
         )
@@ -293,7 +352,7 @@ def _build_schedule_update_context(schedule, data, *, allow_admin_override=False
         'next_students': next_students or '',
         'next_location': next_location,
         'next_notes': next_notes,
-        'next_color_tag': next_color_tag,
+        'delivery_fields': delivery_fields,
         'next_enrollment_id': next_enrollment_id,
     }, None
 
@@ -314,8 +373,8 @@ def _apply_schedule_update_context(schedule, context):
     schedule.students = context['next_students']
     schedule.location = context['next_location']
     schedule.notes = context['next_notes']
-    schedule.color_tag = context['next_color_tag']
-    schedule.delivery_mode = delivery_mode_from_color_tag(schedule.color_tag)
+    for field, value in context['delivery_fields'].items():
+        setattr(schedule, field, value)
     schedule.enrollment_id = context['next_enrollment_id']
     if context.get('preserve_student_snapshot'):
         historical_student_profile_id = context.get('historical_student_profile_id')
@@ -377,9 +436,9 @@ def _guard_generic_todo_mutation(todo):
 def _workflow_todo_target(todo):
     if not todo or not todo.is_workflow:
         return None, None
-    if todo.enrollment_id:
-        return f'/auth/enrollments/{todo.enrollment_id}', '打开报名流程'
-    if todo.schedule_id:
+    if todo.enrollment:
+        return f'/auth/enrollments/{todo.enrollment.id}', '打开报名流程'
+    if todo.schedule or (todo.leave_request and todo.leave_request.schedule):
         return '/oa/schedule', '打开课表查看'
     return None, None
 
@@ -549,6 +608,20 @@ def api_create_schedule():
     if conflict_error:
         return jsonify({'success': False, 'error': conflict_error}), 400
 
+    try:
+        delivery_fields = build_schedule_delivery_fields(
+            delivery_mode=data.get('delivery_mode'),
+            color_tag=data.get('color_tag'),
+            fallback_delivery_mode=(
+                enrollment.delivery_preference
+                if enrollment and getattr(enrollment, 'delivery_preference', None) not in {None, '', 'unknown'}
+                else 'online'
+            ),
+            allow_unknown=False,
+        )
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
     schedule = CourseSchedule(
         date=course_date,
         day_of_week=course_date.weekday(),
@@ -561,8 +634,7 @@ def api_create_schedule():
         students=data.get('students') or (enrollment.student_name if enrollment else ''),
         location=data.get('location', ''),
         notes=data.get('notes', ''),
-        color_tag=data.get('color_tag', 'blue'),
-        delivery_mode=delivery_mode_from_color_tag(data.get('color_tag', 'blue')),
+        **delivery_fields,
     )
     sync_schedule_student_snapshot(schedule, enrollment=enrollment, preserve_history=False)
     db.session.add(schedule)
@@ -661,6 +733,148 @@ def api_delete_schedule(schedule_id):
             'cancel_reason': schedule.cancel_reason,
         },
     })
+
+
+@oa_bp.route('/api/internal/reminders/sms/run', methods=['POST'])
+def api_run_internal_sms_reminders():
+    expected_token = (current_app.config.get('SCF_REMINDER_JOB_TOKEN') or '').strip()
+    provided_token = (request.headers.get('X-Reminder-Job-Token') or '').strip()
+    if not expected_token:
+        return jsonify({'success': False, 'error': '短信提醒任务未配置 token'}), 503
+    if provided_token != expected_token:
+        return jsonify({'success': False, 'error': '无效的提醒任务 token'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    now_override = None
+    if 'now' in payload:
+        now_override = _parse_job_now_override(payload.get('now'))
+        if payload.get('now') and now_override is None:
+            return jsonify({'success': False, 'error': 'now 参数格式错误，请使用 ISO 时间'}), 400
+
+    from modules.oa.sms_reminder_services import run_schedule_sms_reminder_job
+
+    result = run_schedule_sms_reminder_job(
+        now=now_override or get_business_now(),
+        dry_run=bool(payload.get('dry_run')),
+    )
+    return jsonify({'success': True, 'data': result})
+
+
+@oa_bp.route('/api/internal/tencent-meeting/create-due', methods=['POST'])
+def api_run_internal_tencent_meeting_create_due():
+    expected_token = (current_app.config.get('TENCENT_MEETING_JOB_TOKEN') or '').strip()
+    provided_token = (request.headers.get('X-Tencent-Meeting-Job-Token') or '').strip()
+    if not expected_token:
+        return jsonify({'success': False, 'error': '腾讯会议任务未配置 token'}), 503
+    if provided_token != expected_token:
+        return jsonify({'success': False, 'error': '无效的腾讯会议任务 token'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    now_override = None
+    if 'now' in payload:
+        now_override = _parse_job_now_override(payload.get('now'))
+        if payload.get('now') and now_override is None:
+            return jsonify({'success': False, 'error': 'now 参数格式错误，请使用 ISO 时间'}), 400
+
+    from modules.oa.tencent_meeting_services import run_due_meeting_creation_job
+
+    result = run_due_meeting_creation_job(
+        now=now_override or get_business_now(),
+        dry_run=bool(payload.get('dry_run')),
+    )
+    return jsonify({'success': True, 'data': result})
+
+
+@oa_bp.route('/api/internal/tencent-meeting/materials/run', methods=['POST'])
+def api_run_internal_tencent_meeting_materials():
+    expected_token = (current_app.config.get('TENCENT_MEETING_JOB_TOKEN') or '').strip()
+    provided_token = (request.headers.get('X-Tencent-Meeting-Job-Token') or '').strip()
+    if not expected_token:
+        return jsonify({'success': False, 'error': '腾讯会议任务未配置 token'}), 503
+    if provided_token != expected_token:
+        return jsonify({'success': False, 'error': '无效的腾讯会议任务 token'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    now_override = None
+    if 'now' in payload:
+        now_override = _parse_job_now_override(payload.get('now'))
+        if payload.get('now') and now_override is None:
+            return jsonify({'success': False, 'error': 'now 参数格式错误，请使用 ISO 时间'}), 400
+
+    from modules.oa.tencent_meeting_services import run_material_sync_job
+
+    result = run_material_sync_job(
+        now=now_override or get_business_now(),
+        dry_run=bool(payload.get('dry_run')),
+    )
+    return jsonify({'success': True, 'data': result})
+
+
+@oa_bp.route('/api/internal/tencent-meeting/feedback-drafts/run', methods=['POST'])
+def api_run_internal_tencent_meeting_feedback_drafts():
+    expected_token = (current_app.config.get('TENCENT_MEETING_JOB_TOKEN') or '').strip()
+    provided_token = (request.headers.get('X-Tencent-Meeting-Job-Token') or '').strip()
+    if not expected_token:
+        return jsonify({'success': False, 'error': '腾讯会议任务未配置 token'}), 503
+    if provided_token != expected_token:
+        return jsonify({'success': False, 'error': '无效的腾讯会议任务 token'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    now_override = None
+    if 'now' in payload:
+        now_override = _parse_job_now_override(payload.get('now'))
+        if payload.get('now') and now_override is None:
+            return jsonify({'success': False, 'error': 'now 参数格式错误，请使用 ISO 时间'}), 400
+
+    from modules.oa.tencent_meeting_services import run_feedback_draft_job
+
+    result = run_feedback_draft_job(
+        now=now_override or get_business_now(),
+        dry_run=bool(payload.get('dry_run')),
+    )
+    return jsonify({'success': True, 'data': result})
+
+
+@oa_bp.route('/api/integrations/tencent-meeting/webhook', methods=['GET', 'POST'])
+def api_tencent_meeting_webhook():
+    from modules.oa.tencent_meeting_services import (
+        WEBHOOK_SUCCESS_BODY,
+        TencentMeetingError,
+        _decode_webhook_payload,
+        process_tencent_meeting_webhook,
+        validate_tencent_meeting_webhook_signature,
+    )
+
+    timestamp = (request.headers.get('timestamp') or '').strip()
+    nonce = (request.headers.get('nonce') or '').strip()
+    signature = (request.headers.get('signature') or '').strip()
+    if request.method == 'GET':
+        data_value = (request.args.get('check_str') or '').strip()
+    else:
+        body = request.get_json(silent=True) or {}
+        data_value = str(body.get('data') or '').strip()
+
+    if not timestamp or not nonce or not signature or not data_value:
+        return 'invalid webhook request', 400
+    try:
+        if not validate_tencent_meeting_webhook_signature(
+            timestamp=timestamp,
+            nonce=nonce,
+            signature=signature,
+            data_value=data_value,
+        ):
+            return 'invalid signature', 401
+        decoded = _decode_webhook_payload(data_value)
+    except TencentMeetingError as exc:
+        return str(exc), 503 if '未配置' in str(exc) else 400
+
+    if request.method == 'GET':
+        return decoded if isinstance(decoded, str) else json.dumps(decoded, ensure_ascii=False)
+
+    if not isinstance(decoded, dict):
+        return 'invalid webhook payload', 400
+    process_tencent_meeting_webhook(decoded)
+    return WEBHOOK_SUCCESS_BODY
 
 
 @oa_bp.route('/api/schedules/teachers', methods=['GET'])

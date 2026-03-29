@@ -173,7 +173,7 @@ def test_openclaw_schedule_reschedule_preview_and_apply_update_schedule(client, 
                 'time_end': '15:00',
                 'location': 'Room 301',
                 'notes': 'shifted',
-                'color_tag': 'green',
+                'delivery_mode': 'offline',
             },
         ),
         headers=_headers(app),
@@ -199,7 +199,7 @@ def test_openclaw_schedule_reschedule_preview_and_apply_update_schedule(client, 
                 'time_end': '15:00',
                 'location': 'Room 301',
                 'notes': 'shifted',
-                'color_tag': 'green',
+                'delivery_mode': 'offline',
             },
         ),
         headers=_headers(app),
@@ -211,7 +211,8 @@ def test_openclaw_schedule_reschedule_preview_and_apply_update_schedule(client, 
     assert schedule.date.isoformat() == '2026-03-22'
     assert schedule.time_start == '13:00'
     assert schedule.location == 'Room 301'
-    assert schedule.color_tag == 'green'
+    assert schedule.color_tag == 'orange'
+    assert schedule.delivery_mode == 'offline'
     assert todo.schedule_id == schedule.id
     assert todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
     assert enrollment.status == 'confirmed'

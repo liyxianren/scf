@@ -25,6 +25,16 @@ def run_once_migrations():
         _mark_applied('oa_schedule_semantics_v2')
         print('[migration] OA 课表教师归一化与 delivery_mode 回填完成')
 
+    if not _is_applied('oa_schedule_delivery_sms_v3'):
+        _backfill_schedule_delivery_sms_v3()
+        _mark_applied('oa_schedule_delivery_sms_v3')
+        print('[migration] OA 线上线下 / 会议占位 / 报名默认上课方式回填完成')
+
+    if not _is_applied('enrollment_ai_scheduling_v4'):
+        _backfill_enrollment_ai_scheduling_v4()
+        _mark_applied('enrollment_ai_scheduling_v4')
+        print('[migration] Enrollment AI 排课字段补齐完成')
+
 
 # ========== 基础设施 ==========
 
@@ -66,6 +76,37 @@ def _backfill_schedule_semantics():
     from modules.oa.services import backfill_schedule_semantics
 
     backfill_schedule_semantics()
+
+
+def _backfill_schedule_delivery_sms_v3():
+    from modules.oa.services import backfill_schedule_delivery_sms_state
+
+    backfill_schedule_delivery_sms_state()
+
+
+def _table_columns(table_name):
+    inspector = db.inspect(db.engine)
+    return {column['name'] for column in inspector.get_columns(table_name)}
+
+
+def _add_column_if_missing(table_name, column_name, ddl):
+    if column_name in _table_columns(table_name):
+        return
+    db.session.execute(db.text(f'ALTER TABLE {table_name} ADD COLUMN {ddl}'))
+    db.session.commit()
+
+
+def _backfill_enrollment_ai_scheduling_v4():
+    _add_column_if_missing('enrollments', 'delivery_urgency', "delivery_urgency VARCHAR(20) DEFAULT 'normal'")
+    _add_column_if_missing('enrollments', 'target_finish_date', 'target_finish_date DATE')
+    _add_column_if_missing('enrollments', 'availability_intake', 'availability_intake TEXT')
+    _add_column_if_missing('enrollments', 'candidate_slot_pool', 'candidate_slot_pool TEXT')
+    _add_column_if_missing('enrollments', 'recommended_bundle', 'recommended_bundle TEXT')
+    _add_column_if_missing('enrollments', 'risk_assessment', 'risk_assessment TEXT')
+    db.session.execute(
+        db.text("UPDATE enrollments SET delivery_urgency = 'normal' WHERE delivery_urgency IS NULL OR TRIM(delivery_urgency) = ''")
+    )
+    db.session.commit()
 
 
 # ========== 教师姓名修复 ==========

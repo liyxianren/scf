@@ -635,3 +635,128 @@ def test_teacher_action_center_recovers_missing_makeup_workflow(client, login_as
         todo_type=OATodo.TODO_TYPE_LEAVE_MAKEUP,
         leave_request_id=approved_leave.id,
     ).count() == 1
+
+
+@freeze_time('2026-03-21 12:00:00')
+def test_student_scheduling_cases_include_clarification_and_support_confirm_wrapper(client, login_as):
+    teacher = create_user(username='student-case-teacher', display_name='统一案例老师', role='teacher')
+    student = create_user(username='student-case-student', display_name='统一案例学生用户', role='student')
+    profile = create_student_profile(user=student, name='统一案例学生')
+
+    clarification_enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='统一案例学生',
+        course_name='需澄清课程',
+        student_profile=profile,
+        status='pending_schedule',
+        availability_intake={
+            'summary': 'AI 暂时只识别到零散的晚间时间',
+            'confidence': 0.52,
+            'needs_review': True,
+        },
+        risk_assessment={
+            'recommended_action': 'needs_student_clarification',
+            'summary': '学生时间解析置信度较低，建议先让学生补充说明',
+            'clarification_reasons': ['学生时间解析置信度较低，建议先让学生补充说明'],
+            'severity': 'warning',
+            'hard_errors': [],
+            'warnings': [],
+        },
+    )
+    confirm_enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='统一案例学生',
+        course_name='待确认课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        total_hours=2,
+        hours_per_session=2.0,
+        confirmed_slot=_build_manual_plan([
+            {'date': '2026-03-24', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+        ]),
+    )
+
+    login_as(student)
+    center = client.get('/auth/api/student/action-center').get_json()['data']
+    clarification_item = next(
+        item for item in center['student_action_items']
+        if item['entity_ref'] == {'kind': 'enrollment', 'id': clarification_enrollment.id}
+    )
+    assert clarification_item['kind'] == 'student_clarification'
+    assert clarification_item['primary_action'] == {'label': '补充可上课时间', 'action': 'clarify'}
+
+    cases_payload = client.get('/auth/api/scheduling-cases').get_json()
+    assert cases_payload['success'] is True
+    clarification_case = next(
+        item for item in cases_payload['data']
+        if item['id'] == f'enrollment-{clarification_enrollment.id}'
+    )
+    assert clarification_case['case_type'] == 'student_clarification_case'
+    assert clarification_case['next_actor'] == 'student'
+    assert clarification_case['student_view']['kind'] == 'student_clarification'
+
+    confirm_case = next(
+        item for item in cases_payload['data']
+        if item['id'] == f'enrollment-{confirm_enrollment.id}'
+    )
+    detail_payload = client.get(f'/auth/api/scheduling-cases/{confirm_case["id"]}').get_json()['data']
+    assert detail_payload['student_view']['entity_ref'] == {'kind': 'enrollment', 'id': confirm_enrollment.id}
+
+    response = client.post(f'/auth/api/scheduling-cases/{confirm_case["id"]}/actions/confirm')
+    assert response.status_code == 200
+    result = response.get_json()
+    assert result['success'] is True
+    assert result['created_count'] == 1
+
+
+@freeze_time('2026-03-21 12:00:00')
+def test_teacher_and_admin_share_same_exception_scheduling_case(client, login_as):
+    admin = create_user(username='shared-case-admin', display_name='共享案例教务', role='admin')
+    teacher = create_user(
+        username='shared-case-teacher',
+        display_name='共享案例老师',
+        role='teacher',
+        teacher_work_mode='full_time',
+    )
+    student = create_user(username='shared-case-student', display_name='共享案例学生用户', role='student')
+    profile = create_student_profile(user=student, name='共享案例学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='共享案例学生',
+        course_name='共享异常课程',
+        student_profile=profile,
+        status='pending_schedule',
+    )
+    todo = create_todo(
+        title='全职老师例外确认',
+        responsible_person=teacher.display_name,
+        enrollment=enrollment,
+        due_date=date(2026, 3, 22),
+        priority=1,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+        payload={
+            'context': {
+                'teacher_work_mode': 'full_time',
+                'teacher_work_mode_label': '全职老师',
+            },
+            'risk_assessment': {
+                'recommended_action': 'needs_teacher_confirmation',
+                'teacher_confirmation_required': True,
+                'summary': '学生时间需要老师确认模板外时段',
+            },
+        },
+    )
+
+    login_as(teacher)
+    teacher_center = client.get('/auth/api/teacher/action-center').get_json()['data']
+    teacher_case = next(item for item in teacher_center['scheduling_cases'] if item['id'] == f'workflow-{todo.id}')
+    assert teacher_case['case_type'] == 'teacher_exception_case'
+    assert teacher_case['teacher_view']['status_label'] == '待确认例外时段'
+
+    login_as(admin)
+    admin_center = client.get('/auth/api/admin/action-center').get_json()['data']
+    admin_case = next(item for item in admin_center['scheduling_cases'] if item['id'] == f'workflow-{todo.id}')
+    assert admin_case['case_type'] == 'teacher_exception_case'
+    assert admin_case['next_actor'] == 'teacher'
+    assert admin_case['admin_view']['status_label'] == '待老师确认例外时段'

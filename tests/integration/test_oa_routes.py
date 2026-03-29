@@ -144,14 +144,15 @@ def test_admin_cannot_cancel_historical_schedules(client, login_as):
             'teacher': teacher.display_name,
             'notes': '已补充执行备注',
             'location': '线下教室',
-            'color_tag': 'green',
+            'delivery_mode': 'offline',
         },
     )
     payload = response.get_json()
     assert response.status_code == 200
     assert payload['data']['notes'] == '已补充执行备注'
     assert payload['data']['location'] == '线下教室'
-    assert payload['data']['color_tag'] == 'green'
+    assert payload['data']['color_tag'] == 'orange'
+    assert payload['data']['delivery_mode'] == 'offline'
 
     response = client.delete(
         f'/oa/api/schedules/{started_schedule.id}',
@@ -231,7 +232,7 @@ def test_schedule_payload_exposes_admin_guard_reasons(client, login_as):
     assert payload['data']['admin_can_delete'] is False
     assert payload['data']['admin_delete_block_reason'] == '该课程已产生交付事实，不能直接取消课次'
     assert payload['data']['admin_can_reschedule'] is False
-    assert payload['data']['admin_reschedule_block_reason'] == '该课程已产生交付事实，仅允许修改备注、地点或颜色'
+    assert payload['data']['admin_reschedule_block_reason'] == '该课程已产生交付事实，仅允许修改备注、地点或上课方式'
 
 
 def test_oa_workflow_todos_expose_business_target_links(client, login_as):

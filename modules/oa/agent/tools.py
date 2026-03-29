@@ -130,9 +130,9 @@ TOOL_PROPOSE_CREATE = {
                             "course_name": {"type": "string", "description": "课程名称"},
                             "students": {"type": "string", "description": "学生姓名，逗号分隔"},
                             "location": {"type": "string", "description": "上课地点"},
-                            "color_tag": {
+                            "delivery_mode": {
                                 "type": "string",
-                                "description": "颜色标签: blue/green/purple/orange/red/teal",
+                                "description": "上课方式: online=线上, offline=线下",
                             },
                         },
                         "required": ["date", "time_start", "time_end", "teacher", "course_name"],
@@ -193,6 +193,7 @@ TOOL_PROPOSE_UPDATE = {
                             "new_course_name": {"type": "string", "description": "新课程名称"},
                             "new_students": {"type": "string", "description": "新学生列表"},
                             "new_location": {"type": "string", "description": "新地点"},
+                            "new_delivery_mode": {"type": "string", "description": "新上课方式: online=线上, offline=线下"},
                         },
                         "required": ["schedule_id"],
                     },

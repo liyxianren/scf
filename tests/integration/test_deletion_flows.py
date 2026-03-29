@@ -67,10 +67,17 @@ def test_delete_enrollment_cascades_related_records(client, login_as):
         students='级联学生',
         enrollment=enrollment,
         notes=f'自动排课 - 报名#{enrollment.id}',
-        color_tag='green',
+        delivery_mode='online',
     )
     schedule_id = schedule.id
     create_todo(title='跟进课程', responsible_person='级联管理员', schedule=schedule)
+    create_todo(
+        title='排课重排',
+        responsible_person='级联老师, 教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
     create_leave_request(schedule=schedule, student_name='级联学生', enrollment=enrollment)
     create_feedback(schedule=schedule, teacher=teacher, status='submitted')
     create_chat_message(sender=student, receiver=teacher, content='关联消息', enrollment=enrollment)
@@ -86,3 +93,42 @@ def test_delete_enrollment_cascades_related_records(client, login_as):
     assert CourseFeedback.query.count() == 0
     assert OATodo.query.count() == 0
     assert ChatMessage.query.count() == 0
+
+
+def test_stale_replan_workflow_is_hidden_from_auth_and_oa_lists(client, login_as):
+    admin = create_user(username='stale-workflow-admin', display_name='孤儿流程管理员', role='admin')
+    teacher = create_user(username='stale-workflow-teacher', display_name='孤儿流程老师', role='teacher')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='孤儿流程学生',
+        course_name='孤儿流程课程',
+        status='pending_schedule',
+    )
+    workflow_todo = create_todo(
+        title='孤儿排课重排',
+        responsible_person='孤儿流程老师, 教务',
+        enrollment=enrollment,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+        workflow_status=OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL,
+    )
+
+    db.session.delete(enrollment)
+    db.session.commit()
+    db.session.expire_all()
+
+    login_as(admin)
+
+    oa_response = client.get('/oa/api/todos')
+    oa_payload = oa_response.get_json()
+    assert oa_response.status_code == 200
+    assert workflow_todo.id not in {item['id'] for item in oa_payload['data']}
+
+    refreshed_todo = db.session.get(OATodo, workflow_todo.id)
+    assert refreshed_todo.workflow_status == OATodo.WORKFLOW_STATUS_CANCELLED
+    assert refreshed_todo.is_completed is True
+    assert '关联报名已删除' in (refreshed_todo.get_payload_data().get('cancel_reason') or '')
+
+    auth_response = client.get('/auth/api/workflow-todos')
+    auth_payload = auth_response.get_json()
+    assert auth_response.status_code == 200
+    assert workflow_todo.id not in {item['id'] for item in auth_payload['data']}

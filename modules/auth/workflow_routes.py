@@ -60,6 +60,7 @@ def api_teacher_workflow_proposal(todo_id):
         current_user,
         data.get('session_dates') or [],
         note=data.get('note', ''),
+        weekly_slots=data.get('weekly_slots') or [],
     )
     status_code = result.pop('status_code', 200)
     return jsonify(result), status_code
@@ -77,6 +78,7 @@ def api_teacher_workflow_proposal_preview(todo_id):
         todo,
         current_user,
         data.get('session_dates') or [],
+        weekly_slots=data.get('weekly_slots') or [],
     )
     status_code = result.pop('status_code', 200)
     return jsonify(result), status_code

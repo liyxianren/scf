@@ -5,6 +5,7 @@ import pytest
 from freezegun import freeze_time
 
 from extensions import db
+from modules.auth import availability_ai_services
 from modules.auth.models import ChatMessage, Enrollment, LeaveRequest, User
 from modules.auth.services import (
     FEEDBACK_PREFIX,
@@ -13,6 +14,8 @@ from modules.auth.services import (
     backfill_schedule_relationships,
     find_matching_slots,
     propose_enrollment_schedule,
+    reject_enrollment_schedule,
+    refresh_enrollment_scheduling_ai_state,
     student_confirm_schedule,
 )
 from modules.oa.models import CourseSchedule, OATodo
@@ -94,6 +97,7 @@ def _build_workflow_enrollment(client, login_as, logout):
             'course_name': '工作流课程',
             'teacher_id': teacher.id,
             'total_hours': 6,
+            'sessions_per_week': 3,
         },
     )
     payload = response.get_json()
@@ -107,6 +111,7 @@ def _build_workflow_enrollment(client, login_as, logout):
         json={
             'name': intake_name,
             'phone': '13800138000',
+            'delivery_preference': 'online',
             'available_times': _slots_for_days([0, 2, 4]),
             'excluded_dates': ['2026-03-18'],
             'notes': '工作流测试学生',
@@ -159,6 +164,7 @@ def test_enrollment_lifecycle_reject_then_confirm(client, login_as, logout):
             'course_name': 'Python 正课',
             'teacher_id': teacher.id,
             'total_hours': 6,
+            'sessions_per_week': 3,
         },
     )
     payload = response.get_json()
@@ -174,6 +180,7 @@ def test_enrollment_lifecycle_reject_then_confirm(client, login_as, logout):
         json={
             'name': '流程学生',
             'phone': '13800138000',
+            'delivery_preference': 'online',
             'available_times': _slots_for_days([0, 2, 4]),
             'excluded_dates': ['2026-03-18'],
             'notes': '周三第一周不行',
@@ -303,6 +310,7 @@ def test_schedule_matching_creates_multi_session_records(app):
         status='pending_schedule',
         total_hours=20,
         hours_per_session=2.0,
+        sessions_per_week=5,
     )
 
     plans, error = find_matching_slots(enrollment.id)
@@ -312,27 +320,119 @@ def test_schedule_matching_creates_multi_session_records(app):
     first_plan = plans[0]
     assert first_plan['total_sessions'] == 10
     assert first_plan['distinct_days'] == 5
-    assert {slot['day_of_week'] for slot in first_plan['weekly_slots']} == {0, 2, 3, 4, 5}
-    assert all(session['date'] != '2026-03-18' for session in first_plan['session_dates'])
 
-    enrollment.proposed_slots = json.dumps(plans, ensure_ascii=False)
-    response, message, dates = propose_enrollment_schedule(enrollment.id, 0)
-    assert response is True
-    assert dates
-    assert '已通知学生确认' in message
 
-    response, message, created_count = student_confirm_schedule(enrollment.id)
-    assert response is True
-    assert created_count == 10
+def test_full_time_teacher_uses_company_template_for_low_risk_matching(app):
+    teacher = create_user(
+        username='fulltime-smooth-teacher',
+        display_name='全职顺滑老师',
+        role='teacher',
+        teacher_work_mode='full_time',
+    )
+    student = create_user(username='fulltime-smooth-student', display_name='全职顺滑学生', role='student')
+    profile = create_student_profile(
+        user=student,
+        name='全职顺滑学生',
+        available_slots=_slots_for_days([2, 3, 4], start='10:00', end='12:00'),
+    )
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='全职顺滑学生',
+        course_name='全职低风险课',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=8,
+        hours_per_session=2.0,
+        sessions_per_week=2,
+    )
 
-    schedules = CourseSchedule.query.filter_by(enrollment_id=enrollment.id).order_by(
-        CourseSchedule.date,
-        CourseSchedule.time_start,
-    ).all()
-    assert len(schedules) == 10
-    assert {schedule.day_of_week for schedule in schedules} == {0, 2, 3, 4, 5}
-    assert all(schedule.teacher_id == teacher.id for schedule in schedules)
-    assert all(schedule.enrollment_id == enrollment.id for schedule in schedules)
+    state = refresh_enrollment_scheduling_ai_state(enrollment)
+    risk = state['risk_assessment']
+
+    assert risk['teacher_work_mode'] == 'full_time'
+    assert risk['availability_source'] == 'company_template'
+    assert risk['teacher_confirmation_required'] is False
+    assert risk['recommended_action'] in {'direct_to_student', 'needs_admin_review'}
+    assert len(state['candidate_slot_pool']) >= 2
+    assert state['recommended_bundle'] is not None
+
+
+def test_full_time_teacher_outside_template_requires_teacher_confirmation(app):
+    teacher = create_user(
+        username='fulltime-exception-teacher',
+        display_name='全职例外老师',
+        role='teacher',
+        teacher_work_mode='full_time',
+    )
+    student = create_user(username='fulltime-exception-student', display_name='全职例外学生', role='student')
+    profile = create_student_profile(
+        user=student,
+        name='全职例外学生',
+        available_slots=_slots_for_days([0, 1], start='10:00', end='12:00'),
+    )
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='全职例外学生',
+        course_name='模板外协同课',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=8,
+        hours_per_session=2.0,
+        sessions_per_week=2,
+    )
+
+    plans, error = find_matching_slots(enrollment.id)
+
+    assert plans == []
+    assert '必须由老师确认模板外时段' in error
+    todo = OATodo.query.filter_by(
+        enrollment_id=enrollment.id,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+    ).order_by(OATodo.created_at.desc()).first()
+    assert todo is not None
+    assert todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_TEACHER_PROPOSAL
+
+
+def test_full_time_teacher_reject_flow_stays_with_admin_when_template_is_sufficient(app):
+    teacher = create_user(
+        username='fulltime-reject-teacher',
+        display_name='全职复核老师',
+        role='teacher',
+        teacher_work_mode='full_time',
+    )
+    student = create_user(username='fulltime-reject-student', display_name='全职复核学生', role='student')
+    profile = create_student_profile(
+        user=student,
+        name='全职复核学生',
+        available_slots=_slots_for_days([2, 3, 4], start='10:00', end='12:00'),
+    )
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='全职复核学生',
+        course_name='全职复核课',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=8,
+        hours_per_session=2.0,
+        sessions_per_week=2,
+    )
+    state = refresh_enrollment_scheduling_ai_state(enrollment)
+    enrollment.confirmed_slot = json.dumps(state['recommended_bundle'], ensure_ascii=False)
+    enrollment.status = 'pending_student_confirm'
+    db.session.commit()
+
+    success, message = reject_enrollment_schedule(enrollment.id, '周四要临时调一下')
+
+    assert success is True
+    todo = OATodo.query.filter_by(
+        enrollment_id=enrollment.id,
+        todo_type=OATodo.TODO_TYPE_ENROLLMENT_REPLAN,
+    ).order_by(OATodo.created_at.desc()).first()
+    assert todo is not None
+    assert todo.workflow_status == OATodo.WORKFLOW_STATUS_WAITING_ADMIN_REVIEW
+    assert todo.responsible_person == '教务'
+    payload = _as_json(todo.payload)
+    assert payload['current_proposal'] is not None
 
 
 def test_student_can_update_intake_and_force_rematch(client, login_as):
@@ -361,6 +461,7 @@ def test_student_can_update_intake_and_force_rematch(client, login_as):
         json={
             'name': '改档学生',
             'phone': '13800138001',
+            'delivery_preference': 'offline',
             'available_times': _slots_for_days([1, 3, 5]),
             'excluded_dates': ['2026-03-20'],
             'notes': '只想要周二周四周六',
@@ -406,6 +507,7 @@ def test_manual_plan_force_save_and_student_confirmation(client, login_as, logou
         json={
             'name': '手动排课学生',
             'phone': '13800138088',
+            'delivery_preference': 'online',
             'available_times': _slots_for_days([0], start='10:00', end='12:00'),
             'excluded_dates': ['2026-03-24'],
         },
@@ -1711,6 +1813,7 @@ def test_update_intake_reopens_waiting_student_confirm_workflow_with_latest_prof
         json={
             'name': '改档学生',
             'phone': profile.phone,
+            'delivery_preference': 'offline',
             'available_slots': [{'day': 2, 'start': '18:00', 'end': '20:00'}],
             'excluded_dates': ['2026-03-30'],
         },
@@ -1831,3 +1934,257 @@ def test_workflow_schedule_feedback_contract_and_schedule_lock(client, app, logi
         assert response.status_code == 200
         assert payload['success'] is True
         assert db.session.get(OATodo, feedback_todo_id).workflow_status == 'completed'
+
+
+def test_public_intake_availability_parse_returns_structured_slots(client, login_as):
+    admin = create_user(username='parse-admin', display_name='解析教务', role='admin')
+    teacher = create_user(username='parse-teacher', display_name='解析老师', role='teacher')
+
+    login_as(admin)
+    response = client.post(
+        '/auth/api/enrollments',
+        json={
+            'student_name': '解析学生',
+            'course_name': '解析课程',
+            'teacher_id': teacher.id,
+            'total_hours': 2,
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 201
+    token = payload['data']['intake_url'].rsplit('/', 1)[-1]
+
+    response = client.post(
+        f'/auth/intake/{token}/availability-parse',
+        json={'availability_input_text': '周二周四 19:00-21:00 可以；3月18日不行'},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['weekly_slots'] == [
+        {'day': 1, 'start': '19:00', 'end': '21:00'},
+        {'day': 3, 'start': '19:00', 'end': '21:00'},
+    ]
+    assert payload['data']['excluded_dates'] == ['2026-03-18']
+    assert payload['data']['needs_review'] is True
+    assert payload['data']['confidence'] < 0.75
+    assert '周二 19:00-21:00' in payload['data']['summary']
+    assert '禁排日期：2026-03-18' in payload['data']['summary']
+
+
+def test_public_intake_availability_parse_can_extract_text_from_image_evidence(client, login_as):
+    admin = create_user(username='ocr-admin', display_name='识图教务', role='admin')
+    teacher = create_user(username='ocr-teacher', display_name='识图老师', role='teacher')
+
+    login_as(admin)
+    response = client.post(
+        '/auth/api/enrollments',
+        json={
+            'student_name': '识图学生',
+            'course_name': '识图课程',
+            'teacher_id': teacher.id,
+            'total_hours': 2,
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 201
+    token = payload['data']['intake_url'].rsplit('/', 1)[-1]
+
+    client.application.config['DOUBAO_VISION_ENABLED'] = True
+    client.application.config['DOUBAO_VISION_API_KEY'] = 'test-doubao-key'
+    client.application.config['DOUBAO_VISION_MODEL'] = 'doubao-seed-2-0-pro-260215'
+
+    class _FakeVisionResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'output': [
+                    {
+                        'content': [
+                            {'text': '周二周四 19:00-21:00 可以；3月18日不行'},
+                        ]
+                    }
+                ]
+            }
+
+    captured = {}
+    monkeypatch = pytest.MonkeyPatch()
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured['url'] = url
+        captured['headers'] = headers or {}
+        captured['json'] = json or {}
+        captured['timeout'] = timeout
+        return _FakeVisionResponse()
+
+    monkeypatch.setattr(availability_ai_services.requests, 'post', _fake_post)
+    try:
+        response = client.post(
+            f'/auth/intake/{token}/availability-parse',
+            json={
+                'availability_evidence_items': [
+                    {'type': 'image_url', 'content': 'https://example.com/timetable.png'},
+                ],
+            },
+        )
+    finally:
+        monkeypatch.undo()
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert captured['json']['input'][0]['content'][0]['image_url'] == 'https://example.com/timetable.png'
+    assert payload['data']['weekly_slots'] == [
+        {'day': 1, 'start': '19:00', 'end': '21:00'},
+        {'day': 3, 'start': '19:00', 'end': '21:00'},
+    ]
+    assert payload['data']['excluded_dates'] == ['2026-03-18']
+    assert any(item['type'] == 'image_ocr' for item in payload['data']['source_evidence_items'])
+
+
+def test_public_intake_can_submit_confirmed_parse_without_manual_grid(client, login_as):
+    admin = create_user(username='parse-submit-admin', display_name='解析提交教务', role='admin')
+    teacher = create_user(username='parse-submit-teacher', display_name='解析提交老师', role='teacher')
+
+    login_as(admin)
+    response = client.post(
+        '/auth/api/enrollments',
+        json={
+            'student_name': '解析提交学生',
+            'course_name': '解析提交课程',
+            'teacher_id': teacher.id,
+            'total_hours': 4,
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 201
+    enrollment_id = payload['data']['id']
+    token = payload['data']['intake_url'].rsplit('/', 1)[-1]
+
+    preview_response = client.post(
+        f'/auth/intake/{token}/availability-parse',
+        json={'availability_input_text': '周二周四 19:00-21:00 可以；3月18日不行'},
+    )
+    preview_payload = preview_response.get_json()['data']
+
+    response = client.post(
+        f'/auth/intake/{token}',
+        json={
+            'name': '解析提交学生',
+            'phone': '13800000009',
+            'delivery_preference': 'online',
+            'availability_input_text': '周二周四 19:00-21:00 可以；3月18日不行',
+            'confirmed_parse_result': preview_payload,
+            'manual_adjustments': {'weekly_slots': [], 'excluded_dates': []},
+            'available_times': [],
+            'excluded_dates': [],
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+
+    enrollment = db.session.get(Enrollment, enrollment_id)
+    assert enrollment.status == 'pending_schedule'
+    intake = enrollment.to_dict()['availability_intake']
+    assert intake['weekly_slots'] == [
+        {'day': 1, 'start': '19:00', 'end': '21:00'},
+        {'day': 3, 'start': '19:00', 'end': '21:00'},
+    ]
+    assert intake['excluded_dates'] == ['2026-03-18']
+
+
+def test_create_enrollment_requires_target_finish_date_for_rush_delivery(client, login_as):
+    admin = create_user(username='rush-admin', display_name='冲刺教务', role='admin')
+    teacher = create_user(username='rush-teacher', display_name='冲刺老师', role='teacher')
+
+    login_as(admin)
+    response = client.post(
+        '/auth/api/enrollments',
+        json={
+            'student_name': '冲刺学生',
+            'course_name': '竞赛冲刺课',
+            'teacher_id': teacher.id,
+            'total_hours': 6,
+            'delivery_urgency': 'rush',
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload['success'] is False
+    assert payload['error'] == '冲刺交付必须填写目标完成日'
+
+
+def test_student_action_center_unifies_pending_enrollment_and_confirm_action(client, login_as):
+    teacher = create_user(username='unified-action-teacher', display_name='统一动作老师', role='teacher')
+    student = create_user(username='unified-action-student', display_name='统一动作学生用户', role='student')
+    profile = create_student_profile(user=student, name='统一动作学生')
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='统一动作学生',
+        course_name='统一动作课程',
+        student_profile=profile,
+        status='pending_student_confirm',
+        total_hours=2,
+        hours_per_session=2.0,
+        confirmed_slot=_build_manual_plan([
+            {'date': '2026-03-24', 'day_of_week': 1, 'time_start': '10:00', 'time_end': '12:00'},
+        ]),
+    )
+
+    login_as(student)
+    payload = client.get('/auth/api/student/action-center').get_json()['data']
+    assert payload['counts']['student_action_items'] == 1
+    assert payload['student_tracking_items'] == []
+    action_item = payload['student_action_items'][0]
+    assert action_item['entity_ref'] == {'kind': 'enrollment', 'id': enrollment.id}
+    assert action_item['primary_action'] == {'label': '确认当前方案', 'action': 'confirm'}
+    assert action_item['secondary_action']['action'] == 'reject'
+
+    response = client.post(
+        '/auth/api/student-actions/confirm',
+        json={'entity_ref': action_item['entity_ref']},
+    )
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result['success'] is True
+    assert result['created_count'] == 1
+    assert CourseSchedule.query.filter_by(enrollment_id=enrollment.id).count() == 1
+    assert db.session.get(Enrollment, enrollment.id).status in {'confirmed', 'active'}
+
+
+def test_admin_action_center_surfaces_scheduling_risk_cases(client, login_as):
+    admin = create_user(username='risk-case-admin', display_name='风险教务', role='admin')
+    teacher = create_user(username='risk-case-teacher', display_name='风险老师', role='teacher')
+    student = create_user(username='risk-case-student', display_name='风险学生用户', role='student')
+    profile = create_student_profile(
+        user=student,
+        name='风险学生',
+        available_slots=[{'day': 0, 'start': '18:00', 'end': '20:00'}],
+    )
+    enrollment = create_enrollment(
+        teacher=teacher,
+        student_name='风险学生',
+        course_name='风险课程',
+        student_profile=profile,
+        status='pending_schedule',
+        total_hours=4,
+        hours_per_session=2.0,
+        sessions_per_week=2,
+    )
+    create_teacher_availability(user=teacher, day_of_week=0, time_start='18:00', time_end='20:00')
+    refresh_enrollment_scheduling_ai_state(enrollment)
+    db.session.commit()
+
+    login_as(admin)
+    payload = client.get('/auth/api/admin/action-center').get_json()['data']
+    case_item = next(
+        item for item in payload['scheduling_risk_cases']
+        if item['entity_ref'] == {'kind': 'enrollment', 'id': enrollment.id}
+    )
+    assert case_item['severity'] == 'hard'
+    assert case_item['recommended_action'] == 'needs_admin_intervention'
+    assert '不足以支撑每周 2 节' in case_item['summary']
+    assert case_item['hard_errors']

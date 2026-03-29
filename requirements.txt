@@ -12,3 +12,5 @@ pydantic
 requests
 openpyxl>=3.1.0
 flask-login>=0.6.3
+reportlab>=4.2.0
+pycryptodome>=3.20.0

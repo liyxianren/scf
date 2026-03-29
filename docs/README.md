@@ -4,6 +4,7 @@
 
 这是仓库内的主文档入口。
 开始接手项目前，先从这里进入，不要直接扫描整个仓库。
+如果当前工作区是 `scf-main`，开始处理任务时默认先调用一次 `skills/scf-platform-context/SKILL.md` 对应 skill 做项目 grounding，再按任务类型继续。
 
 ## 阅读顺序
 
@@ -16,6 +17,9 @@
 
 - 当前 OA、auth、排课、反馈、chat 或 workflow 相关工作：
   - 先读 `skills/scf-platform-context/SKILL.md`
+- V2 当前主线相关工作（短信提醒、销售前端接入、腾讯会议课后反馈）：
+  - 先读 `skills/scf-platform-context/SKILL.md`
+  - 再读 `docs/versions/V2.md`
 - V2 交付模型规划或实现：
   - 先读 `skills/scf-platform-context/SKILL.md`
   - 再读 `skills/scf-delivery-workflow/SKILL.md`

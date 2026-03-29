@@ -198,6 +198,7 @@ def _extract_reschedule_payload(payload):
         'time_end': payload.get('time_end'),
         'location': payload.get('location'),
         'notes': payload.get('notes'),
+        'delivery_mode': payload.get('delivery_mode'),
         'color_tag': payload.get('color_tag'),
     }, None
 

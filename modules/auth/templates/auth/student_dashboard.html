@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}我的课表 - 学生面板{% endblock %}
+{% block title %}学生任务中心{% endblock %}
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
@@ -105,8 +105,8 @@
 {% block content %}
 <div class="oa-page">
     <div class="page-header">
-        <h1><span class="material-icons">school</span> 我的课表</h1>
-        <p class="subtitle">{{ current_user.display_name }}，欢迎</p>
+        <h1><span class="material-icons">school</span> 学生任务中心</h1>
+        <p class="subtitle">{{ current_user.display_name }}，这里会直接告诉你现在要做什么、下一步是什么。</p>
     </div>
 
     <div class="section" id="profileSection" style="display:none">
@@ -117,14 +117,14 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">menu_book</span> 我的课程</h2>
+        <h2><span class="material-icons">menu_book</span> 你的课程与进度</h2>
         <div class="card" id="enrollmentCard">
             <div class="empty">加载中...</div>
         </div>
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">account_tree</span> 案件跟踪中心</h2>
+        <h2><span class="material-icons">task_alt</span> 现在需要你做什么</h2>
         <div class="card">
             <div id="workflowSummary" class="workflow-summary"></div>
             <div id="workflowList" class="workflow-list">
@@ -175,8 +175,8 @@
             <p class="hint" id="studentActionHint">请填写具体说明。</p>
             <textarea id="studentActionInput" placeholder="请输入内容"></textarea>
             <div id="leavePreferenceSection" style="display:none;margin-top:16px;padding:14px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc">
-                <div style="font-size:.84rem;font-weight:800;color:#0f172a">本次补课临时偏好</div>
-                <p class="hint" style="margin:8px 0 12px">只影响这次补课安排，不会覆盖您的长期上课档案。</p>
+                <div style="font-size:.84rem;font-weight:800;color:#0f172a">本次额外限制（可选）</div>
+                <p class="hint" style="margin:8px 0 12px">默认会继承你的长期可上课时间。只有这次和长期档案不一样时，再补充下面这些信息。</p>
                 <div id="leaveSlotList"></div>
                 <button class="btn-ghost" type="button" onclick="addLeaveSlotRow()" style="margin-top:4px">
                     <span class="material-icons" style="font-size:1rem">add</span> 增加可补课时段
@@ -209,7 +209,8 @@ let workflowTodos = [];
 let workflowTodoMap = {};
 let studentActionCenter = null;
 let studentProfile = null;
-let studentActionState = {mode: '', targetId: null};
+let studentActionState = {mode: '', targetId: null, entityKind: '', taskKey: ''};
+let studentTaskMap = {};
 const DAY_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
 
 document.addEventListener('DOMContentLoaded', async function(){
@@ -270,9 +271,9 @@ async function loadStudentData(){
                     extra = `
                     <div class="confirm-preview">
                         <div class="preview-title">当前有待确认方案</div>
-                        <div class="preview-detail">${escapeHtml(e.current_plan_summary || '请到案件跟踪中心查看完整课次、周历预览和确认按钮。')}</div>
+                        <div class="preview-detail">${escapeHtml(e.current_plan_summary || '请到上方待确认安排里查看完整课次、周历预览和确认按钮。')}</div>
                         ${e.next_step_hint ? `<div class="preview-range">${escapeHtml(e.next_step_hint)}</div>` : ''}
-                        <div style="margin-top:10px"><a class="inline-btn" href="#workflowList">打开案件跟踪</a></div>
+                        <div style="margin-top:10px"><a class="inline-btn" href="#workflowList">打开任务中心</a></div>
                     </div>`;
                 }
                 const editLink = e.can_edit ? `<div style="margin-top:10px"><a href="${e.edit_intake_url}" style="font-size:.82rem;color:#0369a1;font-weight:700;text-decoration:none">修改上课时间与信息</a></div>` : '';
@@ -303,6 +304,9 @@ async function loadStudentData(){
                         <div class="schedule-card">
                             <div class="title">${s.course_name}</div>
                             <div class="detail">${s.date} ${s.time_start}-${s.time_end} · ${s.teacher || s.teacher_name || ''}</div>
+                            ${s.delivery_mode === 'online' ? `<div class="detail" style="margin-top:6px">腾讯会议：${escapeHtml(s.meeting_status_label || s.meeting_status || '待创建')}</div>` : ''}
+                            ${s.meeting_code ? `<div class="detail" style="margin-top:4px">会议号：${escapeHtml(s.meeting_code)}</div>` : ''}
+                            ${s.meeting_join_url ? `<div style="margin-top:8px"><a class="inline-btn" href="${s.meeting_join_url}" target="_blank" rel="noopener noreferrer">打开会议链接</a></div>` : ''}
                             ${feedbackHtml}
                             ${leaveBtn ? `<div style="margin-top:10px">${leaveBtn}</div>` : ''}
                         </div>
@@ -374,6 +378,7 @@ function buildFeedbackPreviewHtml(feedback){
     }
     const blocks = [
         feedback.summary ? `<div><strong>课程总结：</strong>${escapeHtml(feedback.summary)}</div>` : '',
+        feedback.student_performance ? `<div><strong>学生表现：</strong>${escapeHtml(feedback.student_performance)}</div>` : '',
         feedback.homework ? `<div><strong>课后作业：</strong>${escapeHtml(feedback.homework)}</div>` : '',
         feedback.next_focus ? `<div><strong>下次重点：</strong>${escapeHtml(feedback.next_focus)}</div>` : '',
         feedback.submitted_at ? `<div style="margin-top:6px;color:#64748b">提交时间：${escapeHtml(feedback.submitted_at)}</div>` : '',
@@ -569,6 +574,60 @@ function parseExcludedDatesInput(value){
     ));
 }
 
+function buildStudentTaskGroups(center){
+    const cases = (center && center.scheduling_cases) || [];
+    if(cases.length){
+        const actionItems = [];
+        const trackingItems = [];
+        studentTaskMap = {};
+        cases.forEach((caseItem, index) => {
+            const studentView = caseItem.student_view || null;
+            const taskKey = `case-${index}-${caseItem.id}`;
+            const item = {
+                task_key: taskKey,
+                case_id: caseItem.id,
+                case_type: caseItem.case_type,
+                title: firstFilled(studentView && studentView.title, caseItem.course_name, '排课事项'),
+                status_label: firstFilled(studentView && studentView.status_label, caseItem.status_label, '排课处理中'),
+                next_step: firstFilled(studentView && studentView.next_step, caseItem.next_step),
+                detail_preview: firstFilled(studentView && studentView.detail_preview, caseItem.current_blocker),
+                due_hint: firstFilled(studentView && studentView.due_hint, caseItem.due_hint),
+                updated_at: firstFilled(studentView && studentView.updated_at, caseItem.updated_at),
+                entity_ref: (studentView && studentView.entity_ref) || caseItem.entity_ref,
+                primary_action: studentView && studentView.primary_action,
+                secondary_action: studentView && studentView.secondary_action,
+                current_plan_summary: studentView && studentView.current_plan_summary,
+                session_preview_lines: (studentView && studentView.session_preview_lines) || [],
+                edit_url: studentView && studentView.edit_url,
+                kind: (studentView && studentView.kind) || `scheduling_case_${caseItem.case_type}`,
+            };
+            studentTaskMap[taskKey] = item;
+            if(studentView){
+                actionItems.push(item);
+            }else{
+                trackingItems.push(item);
+            }
+        });
+        return {actionItems, trackingItems};
+    }
+
+    studentTaskMap = {};
+    const actionItems = center && center.student_action_items
+        ? center.student_action_items
+        : [
+            ...(((center && center.pending_enrollments) || []).map(item => ({...item, kind: 'pending_enrollment'}))),
+            ...(((center && center.action_required_workflows) || [])),
+        ];
+    const trackingItems = center && center.student_tracking_items
+        ? center.student_tracking_items
+        : (((center && center.tracking_workflows) || []));
+    [...actionItems, ...trackingItems].forEach((item, index) => {
+        item.task_key = item.task_key || `legacy-${index}-${item.kind || item.id}`;
+        studentTaskMap[item.task_key] = item;
+    });
+    return {actionItems, trackingItems};
+}
+
 function validateLeavePreferenceInputs(){
     const errors = [];
     const slots = [];
@@ -608,52 +667,64 @@ function renderWorkflowSummary(groups){
     const actionItems = groups.actionItems || [];
     const trackingItems = groups.trackingItems || [];
     if(!actionItems.length && !trackingItems.length){
-        box.innerHTML = '<span class="workflow-chip">当前没有待我处理事项</span>';
+        box.innerHTML = '<span class="workflow-chip">当前没有需要你响应的排课事项</span>';
         return;
     }
     box.innerHTML = [
-        actionItems.length ? `<span class="workflow-chip">待我处理 ${actionItems.length}</span>` : '',
-        trackingItems.length ? `<span class="workflow-chip">流程跟踪 ${trackingItems.length}</span>` : '',
+        actionItems.length ? `<span class="workflow-chip">现在需要你处理 ${actionItems.length}</span>` : '',
+        trackingItems.length ? `<span class="workflow-chip">进行中的排课 ${trackingItems.length}</span>` : '',
     ].filter(Boolean).join('');
 }
 
 function renderWorkflowCard(item){
-        const payload = item.kind === 'pending_enrollment' ? {} : parseWorkflowPayload(item);
-        const title = item.kind === 'pending_enrollment'
-            ? `${item.course_name || '课程'}`
-            : (item.title || item.name || workflowTypeLabel(item.todo_type));
-        const statusClass = item.kind === 'pending_enrollment'
-            ? 'replan'
-            : item.todo_type === 'leave_makeup'
-                ? 'makeup'
-                : item.workflow_status === 'waiting_admin_review'
-                    ? 'review'
-                    : 'waiting';
-        const contextHtml = buildWorkflowContextHtml(item, payload);
-        const previewHtml = buildWorkflowPlanPreviewHtml(item, payload);
-        return `
-            <div class="workflow-card">
-                <div class="wf-head">
-                    <div>
-                        <div class="wf-title">${escapeHtml(title)}</div>
-                        <div class="wf-subtitle">${escapeHtml(item.kind === 'pending_enrollment' ? '待确认排课' : workflowTypeLabel(item.todo_type))}</div>
-                    </div>
-                    <span class="wf-status ${statusClass}">${escapeHtml(item.kind === 'pending_enrollment' ? '待确认排课' : workflowStatusLabel(item.workflow_status))}</span>
+    const payload = item.case_id ? {} : (item.kind === 'pending_enrollment' ? {} : parseWorkflowPayload(item));
+    const title = item.title || (item.kind === 'pending_enrollment' ? `${item.course_name || '课程'}` : (item.name || workflowTypeLabel(item.todo_type)));
+    let statusClass = 'waiting';
+    if(item.case_type === 'student_clarification_case'){
+        statusClass = 'review';
+    }else if(item.case_type === 'teacher_exception_case'){
+        statusClass = 'waiting';
+    }else if(item.case_type === 'admin_risk_case'){
+        statusClass = 'review';
+    }else if(item.kind === 'pending_enrollment'){
+        statusClass = 'replan';
+    }else if(item.todo_type === 'leave_makeup'){
+        statusClass = 'makeup';
+    }else if(item.workflow_status === 'waiting_admin_review'){
+        statusClass = 'review';
+    }
+    const subtitle = item.status_label || (item.kind === 'pending_enrollment' ? '待确认排课' : workflowTypeLabel(item.todo_type));
+    const entityRef = item.entity_ref || {kind: item.kind === 'pending_enrollment' ? 'enrollment' : 'workflow_todo', id: item.id};
+    const contextHtml = item.detail_preview
+        ? `<div>${escapeHtml(item.detail_preview)}</div>${(item.session_preview_lines || []).map(line => `<div>${escapeHtml(`课次预览：${line}`)}</div>`).join('')}${item.next_step ? `<div>${escapeHtml(`下一步：${item.next_step}`)}</div>` : ''}`
+        : buildWorkflowContextHtml(item, payload);
+    const previewHtml = item.detail_preview ? '' : buildWorkflowPlanPreviewHtml(item, payload);
+    return `
+        <div class="workflow-card">
+            <div class="wf-head">
+                <div>
+                    <div class="wf-title">${escapeHtml(title)}</div>
+                    <div class="wf-subtitle">${escapeHtml(subtitle)}</div>
                 </div>
-                <div class="wf-context">${contextHtml}</div>
-                ${previewHtml}
-                <div class="wf-meta">
-                    ${item.revision !== undefined && item.revision !== null ? `<span>revision ${item.revision}</span>` : ''}
-                    ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
-                    ${item.waiting_since ? `<span>等待开始：${escapeHtml(item.waiting_since)}</span>` : ''}
-                </div>
-                ${(item.kind === 'pending_enrollment' || item.workflow_status === 'waiting_student_confirm') ? `
-                <div class="wf-actions">
-                    <button class="inline-btn" onclick="${item.kind === 'pending_enrollment' ? `confirmSchedule(${item.id})` : `confirmWorkflowTodo(${item.id})`}">确认</button>
-                    <button class="inline-btn" style="background:#fee2e2;color:#991b1b" onclick="${item.kind === 'pending_enrollment' ? `rejectSchedule(${item.id})` : `openStudentActionModal('reject', ${item.id}, '${escapeJs(title)}')`}">有问题</button>
-                </div>` : ''}
+                <span class="wf-status ${statusClass}">${escapeHtml(subtitle)}</span>
             </div>
-        `;
+            <div class="wf-context">${contextHtml}</div>
+            ${previewHtml}
+            <div class="wf-meta">
+                ${item.due_hint ? `<span>${escapeHtml(item.due_hint)}</span>` : ''}
+                ${item.updated_at && !item.due_hint ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
+            </div>
+            ${(item.primary_action || item.secondary_action || item.kind === 'pending_enrollment' || item.workflow_status === 'waiting_student_confirm') ? `
+            <div class="wf-actions">
+                ${item.primary_action || item.kind === 'pending_enrollment' || item.workflow_status === 'waiting_student_confirm'
+                    ? `<button class="inline-btn" onclick="handleStudentTaskPrimary('${escapeJs(item.task_key || '')}', '${escapeJs(entityRef.kind)}', ${Number(entityRef.id) || 0})">${escapeHtml((item.primary_action && item.primary_action.label) || '确认')}</button>`
+                    : ''}
+                ${item.secondary_action || item.kind === 'pending_enrollment' || item.workflow_status === 'waiting_student_confirm'
+                    ? `<button class="inline-btn" style="background:#fee2e2;color:#991b1b" onclick="handleStudentTaskSecondary('${escapeJs(item.task_key || '')}', '${escapeJs(title)}', '${escapeJs(entityRef.kind)}', ${Number(entityRef.id) || 0})">${escapeHtml((item.secondary_action && item.secondary_action.label) || '有问题')}</button>`
+                    : ''}
+            </div>` : ''}
+        </div>
+    `;
 }
 
 function renderWorkflowSection(title, items, emptyText, marginTop = ''){
@@ -674,8 +745,8 @@ function renderWorkflowTodos(groups){
     const trackingItems = groups.trackingItems || [];
     renderWorkflowSummary({actionItems, trackingItems});
     box.innerHTML = `
-        ${renderWorkflowSection('待我处理', actionItems, '当前没有待我处理事项')}
-        ${renderWorkflowSection('流程跟踪', trackingItems, '当前没有进行中的流程', '18px 0 10px')}
+        ${renderWorkflowSection('现在需要你处理', actionItems, '当前没有需要你处理的事项')}
+        ${renderWorkflowSection('进行中的事项', trackingItems, '当前没有进行中的事项', '18px 0 10px')}
     `;
     renderWorkflowPreviewCalendars([...actionItems, ...trackingItems]);
 }
@@ -696,13 +767,7 @@ async function loadStudentActionCenter(){
                 workflowTodoMap[item.enrollment_id] = item;
             }
         });
-        renderWorkflowTodos({
-            actionItems: [
-                ...((studentActionCenter.pending_enrollments || []).map(item => ({...item, kind: 'pending_enrollment'}))),
-                ...(studentActionCenter.action_required_workflows || []),
-            ],
-            trackingItems: studentActionCenter.tracking_workflows || [],
-        });
+        renderWorkflowTodos(buildStudentTaskGroups(studentActionCenter));
         renderLeaveRequests(studentActionCenter.leave_requests || []);
     }catch(e){
         console.error(e);
@@ -786,38 +851,15 @@ function renderRecentFeedback(schedules){
 }
 
 async function confirmSchedule(enrollmentId){
-    const todo = workflowTodoMap[enrollmentId];
-    if(todo){
-        return confirmWorkflowTodo(todo.id);
-    }
-    if(!confirm('确认此排课方案？确认后将生成正式课表。')) return;
-    try{
-        const res = await fetch(`/auth/api/enrollments/${enrollmentId}/student-confirm`,{
-            method:'POST', headers:{'Content-Type':'application/json'}});
-        const json = await res.json();
-        if(json.success){ alert('排课已确认！'); location.reload(); }
-        else alert(json.error||'确认失败');
-    }catch(e){alert('网络错误');}
+    return confirmStudentAction('enrollment', enrollmentId);
 }
 
 async function rejectSchedule(enrollmentId){
-    const todo = workflowTodoMap[enrollmentId];
-    if(todo){
-        openStudentActionModal('reject', todo.id, todo.title || todo.course_name || '待确认方案');
-        return;
-    }
-    openStudentActionModal('reject-legacy', enrollmentId, '排课方案');
+    openStudentActionModal('reject-entity', enrollmentId, '排课方案', 'enrollment');
 }
 
 async function confirmWorkflowTodo(todoId){
-    try{
-        const res = await fetch(`/auth/api/workflow-todos/${todoId}/student-confirm`,{
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({})});
-        const json = await res.json();
-        if(json.success){ alert('方案已确认！'); location.reload(); }
-        else alert(json.error||'确认失败');
-    }catch(e){alert('网络错误');}
+    return confirmStudentAction('workflow_todo', todoId);
 }
 
 async function requestLeave(scheduleId, courseName, date){
@@ -832,14 +874,51 @@ function escapeJs(value){
         .replace(/\r/g, ' ');
 }
 
-function openStudentActionModal(mode, targetId, title){
-    studentActionState = {mode, targetId};
+function handleStudentTaskPrimary(taskKey, fallbackKind = '', fallbackId = 0){
+    const item = studentTaskMap[taskKey];
+    if(!item){
+        if(fallbackKind && fallbackId){
+            confirmStudentAction(fallbackKind, fallbackId);
+        }
+        return;
+    }
+    const primaryAction = (item.primary_action && item.primary_action.action) || 'confirm';
+    if(primaryAction === 'clarify'){
+        const editUrl = item.edit_url || (item.entity_ref && item.entity_ref.kind === 'enrollment'
+            ? `/auth/enrollments/${item.entity_ref.id}/intake-edit`
+            : '');
+        if(editUrl){
+            window.location.href = editUrl;
+            return;
+        }
+        alert('当前缺少可补充时间的入口，请联系教务。');
+        return;
+    }
+    if(item.case_id){
+        confirmSchedulingCase(item.case_id);
+        return;
+    }
+    confirmStudentAction(fallbackKind || (item.entity_ref && item.entity_ref.kind), fallbackId || (item.entity_ref && item.entity_ref.id));
+}
+
+function handleStudentTaskSecondary(taskKey, title, fallbackKind = '', fallbackId = 0){
+    const item = studentTaskMap[taskKey];
+    if(item && item.case_id){
+        openStudentActionModal('reject-case', item.case_id, title || item.title || '排课事项');
+        return;
+    }
+    const entityRef = item && item.entity_ref ? item.entity_ref : {kind: fallbackKind, id: fallbackId};
+    openStudentActionModal('reject-entity', entityRef.id, title || (item && item.title) || '排课事项', entityRef.kind, taskKey);
+}
+
+function openStudentActionModal(mode, targetId, title, entityKind = '', taskKey = ''){
+    studentActionState = {mode, targetId, entityKind, taskKey};
     const leavePreferenceSection = document.getElementById('leavePreferenceSection');
     document.getElementById('studentActionTitle').textContent = mode.startsWith('reject') ? '退回排课 / 补课方案' : '提交请假原因';
     document.getElementById('studentActionSubtitle').textContent = title || '';
     document.getElementById('studentActionHint').textContent = mode.startsWith('reject')
         ? '请描述您对当前方案的疑问、希望调整的时间点，或其他补充说明。'
-        : '请填写请假原因，并补充这次补课的临时时段和禁排日期。';
+        : '请先填写请假原因；如果这次和长期档案不同，再补一句额外限制或微调下面的时段。';
     document.getElementById('studentActionInput').value = '';
     document.getElementById('studentActionSaveBtn').textContent = mode.startsWith('reject') ? '发送退回意见' : '提交请假';
     if(mode === 'leave'){
@@ -859,7 +938,7 @@ function openStudentActionModal(mode, targetId, title){
 function closeStudentActionModal(){
     document.getElementById('studentActionModal').classList.remove('active');
     document.getElementById('leavePreferenceSection').style.display = 'none';
-    studentActionState = {mode: '', targetId: null};
+    studentActionState = {mode: '', targetId: null, entityKind: '', taskKey: ''};
 }
 
 async function submitStudentActionModal(){
@@ -868,12 +947,12 @@ async function submitStudentActionModal(){
         alert('请先填写内容');
         return;
     }
-    if(studentActionState.mode === 'reject'){
-        await rejectWorkflowTodo(studentActionState.targetId, text);
+    if(studentActionState.mode === 'reject-case'){
+        await rejectSchedulingCase(studentActionState.targetId, text);
         return;
     }
-    if(studentActionState.mode === 'reject-legacy'){
-        await rejectLegacySchedule(studentActionState.targetId, text);
+    if(studentActionState.mode === 'reject-entity'){
+        await rejectStudentEntity(studentActionState.entityKind, studentActionState.targetId, text);
         return;
     }
     if(studentActionState.mode === 'leave'){
@@ -881,12 +960,48 @@ async function submitStudentActionModal(){
     }
 }
 
-async function rejectWorkflowTodo(todoId, message){
+async function confirmStudentAction(kind, id){
+    if(!confirm('确认当前方案后，系统会继续生成或锁定正式安排。')) return;
     try{
-        const res = await fetch(`/auth/api/workflow-todos/${todoId}/student-reject`, {
+        const res = await fetch('/auth/api/student-actions/confirm', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({message: message || '学生对排课方案有疑问'})
+            body: JSON.stringify({entity_ref: {kind, id}})
+        });
+        const json = await res.json();
+        if(json.success){
+            alert('方案已确认！');
+            location.reload();
+        } else {
+            alert(json.error || '确认失败');
+        }
+    }catch(e){alert('网络错误');}
+}
+
+async function confirmSchedulingCase(caseId){
+    if(!confirm('确认当前方案后，系统会继续生成或锁定正式安排。')) return;
+    try{
+        const res = await fetch(`/auth/api/scheduling-cases/${caseId}/actions/confirm`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({})
+        });
+        const json = await res.json();
+        if(json.success){
+            alert('方案已确认！');
+            location.reload();
+        } else {
+            alert(json.error || '确认失败');
+        }
+    }catch(e){alert('网络错误');}
+}
+
+async function rejectStudentEntity(kind, id, message){
+    try{
+        const res = await fetch('/auth/api/student-actions/reject', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({entity_ref: {kind, id}, message: message || '学生对排课方案有疑问'})
         });
         const json = await res.json();
         if(json.success){
@@ -899,19 +1014,20 @@ async function rejectWorkflowTodo(todoId, message){
     }catch(e){alert('网络错误');}
 }
 
-async function rejectLegacySchedule(enrollmentId, message){
+async function rejectSchedulingCase(caseId, message){
     try{
-        const res = await fetch(`/auth/api/enrollments/${enrollmentId}/student-reject`,{
-            method:'POST', headers:{'Content-Type':'application/json'},
+        const res = await fetch(`/auth/api/scheduling-cases/${caseId}/actions/reject`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
             body: JSON.stringify({message: message || '学生对排课方案有疑问'})
         });
         const json = await res.json();
         if(json.success){
-            alert('已发送消息给老师，排课已退回待重新安排。');
+            alert('已发送调整意见，系统会按最新信息继续推进。');
             closeStudentActionModal();
             location.reload();
-        }else{
-            alert(json.error || '发送失败');
+        } else {
+            alert(json.error || '提交失败');
         }
     }catch(e){alert('网络错误');}
 }
@@ -934,6 +1050,7 @@ async function submitLeaveReason(scheduleId, reason){
                 reason: reason,
                 makeup_available_slots: makeupAvailableSlots,
                 makeup_excluded_dates: makeupExcludedDates,
+                makeup_preference_text: makeupPreferenceNote,
                 makeup_preference_note: makeupPreferenceNote,
             })
         });

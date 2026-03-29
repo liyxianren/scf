@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}管理面板 - OA系统{% endblock %}
+{% block title %}教务协同台{% endblock %}
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
@@ -55,6 +55,16 @@
 .workflow-item .wf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .workflow-item .wf-actions .inline-btn{padding-inline:12px}
 .inline-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.risk-panel{padding:14px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc}
+.risk-panel.hard{background:#fef2f2;border-color:#fecaca}
+.risk-panel.warning{background:#fffbeb;border-color:#fcd34d}
+.risk-panel .risk-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.risk-panel .risk-title{font-size:.92rem;font-weight:700;color:#111827}
+.risk-panel .risk-summary{font-size:.82rem;color:#475569;margin-top:6px;line-height:1.7}
+.risk-pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:.76rem;font-weight:700;white-space:nowrap}
+.risk-pill.hard{background:#fee2e2;color:#b91c1c}
+.risk-pill.warning{background:#fef3c7;color:#92400e}
+.risk-list{display:flex;flex-direction:column;gap:10px}
 .inline-btn{display:inline-flex;align-items:center;gap:4px;padding:8px 14px;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;text-decoration:none;color:#0369a1;background:#e0f2fe}
 .inline-btn:hover{background:#bae6fd}
 .approve-btn{background:#dcfce7;color:#166534}
@@ -104,8 +114,8 @@
 {% block content %}
 <div class="oa-page">
     <div class="page-header">
-        <h1><span class="material-icons">admin_panel_settings</span> 管理面板</h1>
-        <p class="subtitle">欢迎回来，{{ current_user.display_name }}</p>
+        <h1><span class="material-icons">admin_panel_settings</span> 教务协同台</h1>
+        <p class="subtitle">欢迎回来，{{ current_user.display_name }}。AI 默认推进排课，你主要处理风险、复核和例外协同。</p>
     </div>
 
     {% if not has_availability %}
@@ -172,6 +182,16 @@
     </div>
 
     <div class="section">
+        <h2><span class="material-icons">psychology_alt</span> 排课风险台</h2>
+        <div class="card">
+            <div id="riskSummary" class="workflow-summary"></div>
+            <div class="risk-list" id="schedulingRiskList">
+                <div class="empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
         <h2><span class="material-icons">calendar_view_week</span> 本周全局课表预览</h2>
         <div class="card">
             <div class="summary-list" id="weekScheduleList">
@@ -190,7 +210,7 @@
     </div>
 
     <div class="section" id="workflowSection">
-        <h2><span class="material-icons">account_tree</span> 流程行动台</h2>
+        <h2><span class="material-icons">account_tree</span> 排课协同台</h2>
         <div class="card">
             <div id="workflowSummary" class="workflow-summary"></div>
             <div class="workflow-list" id="workflowList">
@@ -209,7 +229,7 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">school</span> 待排课报名</h2>
+        <h2><span class="material-icons">school</span> 待继续推进报名</h2>
         <div class="card">
             <div class="summary-list" id="pendingEnrollmentList">
                 <div class="empty">加载中...</div>
@@ -332,12 +352,12 @@ function renderWorkflowSummary(groups){
     const adminCount = (groups.pending_admin_send_workflows || []).length;
     const studentCount = (groups.waiting_student_confirm_items || []).length;
     if(!teacherCount && !adminCount && !studentCount){
-        box.innerHTML = '<span class="workflow-chip">当前没有待老师提案、待教务发送或待学生确认的动作</span>';
+        box.innerHTML = '<span class="workflow-chip">当前没有需要继续协同的排课动作</span>';
         return;
     }
     box.innerHTML = [
-        teacherCount ? `<span class="workflow-chip">待老师提案 ${teacherCount}</span>` : '',
-        adminCount ? `<span class="workflow-chip">待教务发送 ${adminCount}</span>` : '',
+        teacherCount ? `<span class="workflow-chip">待老师协同 ${teacherCount}</span>` : '',
+        adminCount ? `<span class="workflow-chip">待教务复核 ${adminCount}</span>` : '',
         studentCount ? `<span class="workflow-chip">待学生确认 ${studentCount}</span>` : '',
     ].filter(Boolean).join('');
 }
@@ -372,7 +392,7 @@ function renderWorkflowTodos(groups){
     const adminItems = groups.pending_admin_send_workflows || [];
     const studentItems = groups.waiting_student_confirm_items || [];
     if(!teacherItems.length && !adminItems.length && !studentItems.length){
-        box.innerHTML = '<div class="empty">当前没有待老师提案、待教务发送或待学生确认的动作</div>';
+        box.innerHTML = '<div class="empty">当前没有需要继续协同的排课动作</div>';
         renderWorkflowSummary(groups);
         return;
     }
@@ -447,8 +467,8 @@ function renderWorkflowTodos(groups){
         </div>
     `;
     box.innerHTML = `
-        ${teacherItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin-bottom:10px">待老师提案</div>${teacherItems.map(item => renderWorkflowItem(item, '待老师提案', item.todo_type === 'leave_makeup' ? 'makeup' : 'replan')).join('')}` : ''}
-        ${adminItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length ? '18px 0 10px' : '0 0 10px'}">待教务发送给学生</div>${adminItems.map(item => renderWorkflowItem(item, '待教务发送', 'review')).join('')}` : ''}
+        ${teacherItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin-bottom:10px">待老师协同</div>${teacherItems.map(item => renderWorkflowItem(item, '待老师协同', item.todo_type === 'leave_makeup' ? 'makeup' : 'replan')).join('')}` : ''}
+        ${adminItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length ? '18px 0 10px' : '0 0 10px'}">待教务复核</div>${adminItems.map(item => renderWorkflowItem(item, '待教务复核', 'review')).join('')}` : ''}
         ${studentItems.length ? `<div style="font-size:.85rem;font-weight:800;color:#0f172a;margin:${teacherItems.length || adminItems.length ? '18px 0 10px' : '0 0 10px'}">待学生确认</div>${studentItems.map(item => item.kind === 'pending_enrollment' ? renderEnrollmentItem(item) : renderWorkflowItem(item, '待学生确认', 'pending')).join('')}` : ''}
     `;
 }
@@ -480,6 +500,88 @@ function renderLeaveRequests(items){
             </div>
         `).join('');
     }catch(e){console.error(e);}
+}
+
+function riskSeverityLabel(severity){
+    return severity === 'hard' ? '高风险' : '提醒项';
+}
+
+function riskActionLabel(action){
+    const map = {
+        needs_admin_intervention: '需要教务兜底',
+        needs_admin_review: '需要教务复核',
+        needs_student_clarification: '先回学生补充信息',
+        needs_teacher_confirmation: '先回老师确认例外时段',
+    };
+    return map[action] || '继续协同';
+}
+
+function adminRiskLink(item){
+    const ref = item && item.entity_ref ? item.entity_ref : {};
+    if(ref.kind === 'enrollment' && ref.id){
+        return `/auth/enrollments/${ref.id}`;
+    }
+    if(ref.kind === 'workflow_todo' && ref.id){
+        const workflow = workflowTodos.find(entry => Number(entry.id) === Number(ref.id));
+        if(workflow && workflow.enrollment_id){
+            return `/auth/enrollments/${workflow.enrollment_id}`;
+        }
+    }
+    return '';
+}
+
+function renderSchedulingRiskSummary(items){
+    const box = document.getElementById('riskSummary');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<span class="workflow-chip">当前没有需要教务接管的排课风险</span>';
+        return;
+    }
+    const hardCount = items.filter(item => item.severity === 'hard').length;
+    const warningCount = items.filter(item => item.severity !== 'hard').length;
+    box.innerHTML = [
+        `<span class="workflow-chip">风险 case ${items.length}</span>`,
+        hardCount ? `<span class="workflow-chip">高风险 ${hardCount}</span>` : '',
+        warningCount ? `<span class="workflow-chip">提醒项 ${warningCount}</span>` : '',
+    ].filter(Boolean).join('');
+}
+
+function renderSchedulingRiskCases(items){
+    const box = document.getElementById('schedulingRiskList');
+    if(!box) return;
+    if(!items.length){
+        box.innerHTML = '<div class="empty">当前没有需要教务接管的排课风险</div>';
+        renderSchedulingRiskSummary([]);
+        return;
+    }
+    renderSchedulingRiskSummary(items);
+    box.innerHTML = items.map(item => {
+        const severity = item.severity === 'hard' ? 'hard' : 'warning';
+        const details = [
+            ...((item.hard_errors || []).slice(0, 3)),
+            ...((item.warnings || []).slice(0, 3)),
+        ];
+        const link = adminRiskLink(item);
+        return `
+            <div class="risk-panel ${severity}">
+                <div class="risk-head">
+                    <div>
+                        <div class="risk-title">${escapeHtml(item.title || '排课风险')}</div>
+                        <div class="risk-summary">${escapeHtml(item.summary || '当前存在需要教务处理的排课风险。')}</div>
+                    </div>
+                    <span class="risk-pill ${severity}">${riskSeverityLabel(item.severity)}</span>
+                </div>
+                <div class="meta" style="margin-top:10px">
+                    <span>建议动作：${escapeHtml(riskActionLabel(item.recommended_action))}</span>
+                    ${item.due_hint ? `<span>等待中：${escapeHtml(item.due_hint)}</span>` : ''}
+                </div>
+                ${details.length ? `<div class="risk-summary" style="margin-top:10px">${escapeHtml(details.join('；'))}</div>` : ''}
+                <div class="inline-actions">
+                    ${link ? `<a class="inline-btn" href="${link}">打开协同详情</a>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 function workflowTypeLabel(type){
@@ -581,12 +683,15 @@ function renderPendingEnrollments(items){
                 <div class="detail">状态：${statusMap[item.status] || item.status} · 老师：${escapeHtml(item.teacher_name || '-')}</div>
                 <div class="meta">
                     <span>总课时：${item.total_hours || 0} 小时</span>
+                    <span>每周：${item.sessions_per_week || 1} 节</span>
+                    ${item.target_finish_date ? `<span>目标完成：${escapeHtml(item.target_finish_date)}</span>` : ''}
                     ${item.student_availability_summary ? `<span>长期可上课：${escapeHtml(item.student_availability_summary)}</span>` : ''}
                     ${item.excluded_dates_summary ? `<span>禁排：${escapeHtml(item.excluded_dates_summary)}</span>` : ''}
                     ${item.latest_feedback_at ? `<span>最近反馈：${item.latest_feedback_at}</span>` : ''}
                     ${workflowTodoMap[item.id] ? `<span>工作流：${escapeHtml(workflowStatusLabel(workflowTodoMap[item.id].workflow_status))}</span>` : ''}
                 </div>
                 ${item.scheduling_complexity_hint ? `<div class="detail" style="margin-top:6px;color:#475569">排课提示：${escapeHtml(item.scheduling_complexity_hint)}</div>` : ''}
+                ${item.risk_assessment && item.risk_assessment.summary ? `<div class="detail" style="margin-top:6px;color:${item.risk_assessment.severity === 'hard' ? '#b91c1c' : '#92400e'}">AI 风险：${escapeHtml(item.risk_assessment.summary)}</div>` : ''}
                 ${item.latest_feedback ? `<div class="feedback">${escapeHtml(item.latest_feedback)}</div>` : ''}
                 <div class="inline-actions">
                     <a class="inline-btn" href="/auth/enrollments/${item.id}">查看详情</a>
@@ -611,6 +716,7 @@ async function loadAdminActionCenter(){
         workflowTodos.forEach(item => {
             if(item.enrollment_id) workflowTodoMap[item.enrollment_id] = item;
         });
+        renderSchedulingRiskCases(adminActionCenter.scheduling_risk_cases || []);
         renderWorkflowTodos(adminActionCenter);
         renderLeaveRequests(adminActionCenter.leave_cases || []);
         renderPendingFeedback(adminActionCenter.pending_feedback_schedules || []);

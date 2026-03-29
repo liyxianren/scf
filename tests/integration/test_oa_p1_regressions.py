@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 from freezegun import freeze_time
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 from openpyxl.utils.datetime import to_excel
 
 from extensions import db
@@ -25,6 +26,8 @@ from tests.factories import (
 
 pytestmark = pytest.mark.integration
 
+ONLINE_IMPORT_FILL = PatternFill(fill_type='solid', fgColor='FFD9E1F4')
+
 
 def _build_import_workbook():
     workbook = Workbook()
@@ -37,6 +40,9 @@ def _build_import_workbook():
     sheet['A3'] = '10:00-12:00 ImportTeacher\nImportCourse AI\nImportStudent'
     sheet['B3'] = '10:00-12:00 ImportTeacher\nUnknownCourse AI\nUnknownStudent'
     sheet['C3'] = '10:00-12:00 ImportTeacher\nConflictImport AI\nOtherStudent'
+    sheet['A3'].fill = ONLINE_IMPORT_FILL
+    sheet['B3'].fill = ONLINE_IMPORT_FILL
+    sheet['C3'].fill = ONLINE_IMPORT_FILL
 
     buffer = io.BytesIO()
     workbook.save(buffer)
@@ -54,6 +60,7 @@ def _build_custom_import_workbook(columns):
         cell = chr(ord('A') + index - 1)
         sheet[f'{cell}2'] = int(to_excel(column_date))
         sheet[f'{cell}3'] = cell_text
+        sheet[f'{cell}3'].fill = ONLINE_IMPORT_FILL
 
     buffer = io.BytesIO()
     workbook.save(buffer)

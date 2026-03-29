@@ -1,6 +1,6 @@
 ---
 name: scf-docs-governance
-description: Maintain SCF's versioned docs, status docs, handoff notes, and AGENTS/CLAUDE entrypoints. Use when updating docs/README.md, docs/versions/*.md, docs/architecture/current-system.md, docs/handoff/current-focus.md, docs/governance/docs-governance.md, or when deciding which documentation must change for a given product, architecture, or handoff update.
+description: Maintain SCF's versioned docs, status docs, handoff notes, AGENTS/CLAUDE entrypoints, and any repo-local skill guidance that must stay aligned with those docs. Use when updating docs/README.md, docs/versions/*.md, docs/architecture/current-system.md, docs/handoff/current-focus.md, docs/governance/docs-governance.md, or when deciding which documentation and repo-local skills must change for a given product, architecture, or handoff update.
 ---
 
 # SCF Docs Governance
@@ -31,12 +31,17 @@ description: Maintain SCF's versioned docs, status docs, handoff notes, and AGEN
 - If reading order, doc tree structure, or entrypoint rules changed:
   - Update `docs/README.md`
   - Update `AGENTS.md` and `CLAUDE.md`
+- If version facts, entrypoint rules, or business framing changed in a way that would stale a repo-local skill:
+  - Update the affected `skills/*/SKILL.md`
+  - Update the affected `skills/*/references/*` files when the detailed framing changed
+  - Update the affected `skills/*/agents/openai.yaml` so the UI metadata still matches
 
 ## Core Rules
 
 - Treat code, tests, and recent commits as the source for `V1` facts.
 - Treat `docs/versions/*.md` as product-plan truth.
 - Keep `AGENTS.md` and `CLAUDE.md` short. They are entrypoint files, not full specifications.
+- Keep repo-local skills aligned with `docs/` when trigger conditions, reading order, or business framing changes.
 - Update `docs/handoff/current-focus.md` before ending a large task or switching the active stream.
 - Use the fixed status states in `docs/versions/V1-status.md`:
   - `Done`

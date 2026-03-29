@@ -1,4 +1,5 @@
 import json
+import json
 from datetime import datetime
 from extensions import db
 
@@ -22,6 +23,14 @@ class CourseSchedule(db.Model):
     notes = db.Column(db.Text)
     color_tag = db.Column(db.String(20), default='blue')
     delivery_mode = db.Column(db.String(20), default='unknown')
+    meeting_provider = db.Column(db.String(50))
+    meeting_status = db.Column(db.String(30), default='not_required')
+    meeting_join_url = db.Column(db.Text)
+    meeting_external_id = db.Column(db.String(255))
+    meeting_code = db.Column(db.String(64))
+    meeting_password = db.Column(db.String(64))
+    meeting_created_at = db.Column(db.DateTime)
+    meeting_ended_at = db.Column(db.DateTime)
     import_run_id = db.Column(db.Integer, db.ForeignKey('schedule_import_runs.id'), nullable=True)
     is_cancelled = db.Column(db.Boolean, default=False, nullable=False)
     cancelled_at = db.Column(db.DateTime)
@@ -33,6 +42,13 @@ class CourseSchedule(db.Model):
     todos = db.relationship('OATodo', backref='schedule', lazy=True)
     feedback = db.relationship(
         'CourseFeedback',
+        backref='schedule',
+        uselist=False,
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    meeting_material = db.relationship(
+        'ScheduleMeetingMaterial',
         backref='schedule',
         uselist=False,
         lazy=True,
@@ -69,6 +85,14 @@ class CourseSchedule(db.Model):
             'notes': self.notes,
             'color_tag': self.color_tag,
             'delivery_mode': self.delivery_mode,
+            'meeting_provider': self.meeting_provider,
+            'meeting_status': self.meeting_status,
+            'meeting_join_url': self.meeting_join_url,
+            'meeting_external_id': self.meeting_external_id,
+            'meeting_code': self.meeting_code,
+            'meeting_password': self.meeting_password,
+            'meeting_created_at': self.meeting_created_at.isoformat() if self.meeting_created_at else None,
+            'meeting_ended_at': self.meeting_ended_at.isoformat() if self.meeting_ended_at else None,
             'import_run_id': self.import_run_id,
             'is_cancelled': self.is_cancelled,
             'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
@@ -134,8 +158,14 @@ class CourseFeedback(db.Model):
     schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=False)
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     summary = db.Column(db.Text)
+    student_performance = db.Column(db.Text)
     homework = db.Column(db.Text)
     next_focus = db.Column(db.Text)
+    ai_content_draft = db.Column(db.Text)
+    ai_draft_status = db.Column(db.String(20), default='pending')
+    ai_model_provider = db.Column(db.String(50))
+    ai_generated_at = db.Column(db.DateTime)
+    ai_source_type = db.Column(db.String(50))
     status = db.Column(db.String(20), default='draft')  # draft / submitted
     submitted_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -150,10 +180,71 @@ class CourseFeedback(db.Model):
             'teacher_id': self.teacher_id,
             'teacher_name': self.teacher.display_name if self.teacher else None,
             'summary': self.summary,
+            'student_performance': self.student_performance,
             'homework': self.homework,
             'next_focus': self.next_focus,
+            'ai_content_draft': self.ai_content_draft,
+            'ai_draft_status': self.ai_draft_status,
+            'ai_model_provider': self.ai_model_provider,
+            'ai_generated_at': self.ai_generated_at.isoformat() if self.ai_generated_at else None,
+            'ai_source_type': self.ai_source_type,
             'status': self.status,
             'submitted_at': self.submitted_at.isoformat() if self.submitted_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ScheduleMeetingMaterial(db.Model):
+    __tablename__ = 'schedule_meeting_materials'
+    __table_args__ = (
+        db.UniqueConstraint('schedule_id', name='uq_schedule_meeting_material_schedule'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('course_schedules.id'), nullable=False)
+    meeting_external_id = db.Column(db.String(255))
+    record_id = db.Column(db.String(255))
+    material_status = db.Column(db.String(30), default='pending', nullable=False)
+    minutes_status = db.Column(db.String(30), default='pending', nullable=False)
+    transcript_status = db.Column(db.String(30), default='pending', nullable=False)
+    minutes_text = db.Column(db.Text)
+    transcript_text = db.Column(db.Text)
+    raw_payload_json = db.Column(db.Text)
+    last_synced_at = db.Column(db.DateTime)
+    error_message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def get_raw_payload_data(self):
+        if not self.raw_payload_json:
+            return {}
+        try:
+            data = json.loads(self.raw_payload_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_raw_payload_data(self, value):
+        if value is None:
+            self.raw_payload_json = None
+            return
+        self.raw_payload_json = json.dumps(value, ensure_ascii=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'schedule_id': self.schedule_id,
+            'meeting_external_id': self.meeting_external_id,
+            'record_id': self.record_id,
+            'material_status': self.material_status,
+            'minutes_status': self.minutes_status,
+            'transcript_status': self.transcript_status,
+            'minutes_text': self.minutes_text,
+            'transcript_text': self.transcript_text,
+            'raw_payload': self.get_raw_payload_data(),
+            'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
+            'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

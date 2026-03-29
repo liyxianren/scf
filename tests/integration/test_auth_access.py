@@ -280,6 +280,7 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
     response = client.post(f'/auth/intake/{token_one}', json={
         'name': '重名学生',
         'phone': '13800000001',
+        'delivery_preference': 'online',
         'available_times': [{'day': 0, 'start': '10:00', 'end': '12:00'}],
     })
     first_account = response.get_json()['account']
@@ -287,6 +288,7 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
     response = client.post(f'/auth/intake/{token_two}', json={
         'name': '重名学生',
         'phone': '13800000002',
+        'delivery_preference': 'offline',
         'available_times': [{'day': 2, 'start': '10:00', 'end': '12:00'}],
     })
     second_account = response.get_json()['account']
@@ -319,7 +321,9 @@ def test_same_name_students_get_unique_accounts_and_renames_do_not_break_scopes(
     assert any(item['course'] == '课程 A' for item in payload['data']['students'])
     response = client.get('/auth/teacher/dashboard')
     html = response.get_data(as_text=True)
-    assert '我提交后的案件' in html
+    assert '教师排课工作台' in html
+    assert 'AI 排课工作台' in html
+    assert '我提交后的排课进度' in html
     assert 'trackingWorkflowList' in html
     assert '/auth/enrollments' in html
     assert '/oa/schedule' not in html
@@ -356,8 +360,9 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     assert '/auth/api/chat/contacts' in html
 
     html = client.get('/auth/student/dashboard').get_data(as_text=True)
-    assert '案件跟踪中心' in html
-    assert '待我处理' in html
+    assert '学生任务中心' in html
+    assert '现在需要你做什么' in html
+    assert '现在需要你处理' in html
     assert 'pending-plan-calendar' in html
     assert 'renderPendingPlanCalendars' in html
     assert '打开报名详情' not in html
@@ -365,6 +370,9 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
 
     login_as(admin)
     html = client.get('/auth/admin/dashboard').get_data(as_text=True)
+    assert '教务协同台' in html
+    assert '排课风险台' in html
+    assert 'schedulingRiskList' in html
     assert 'waiting_student_confirm_items' in html
     html = client.get(f'/auth/enrollments/{enrollment.id}').get_data(as_text=True)
     assert 'manualPlanModal' in html
@@ -421,3 +429,50 @@ def test_teacher_availability_validation_rejects_invalid_slots_and_keeps_existin
     assert slots[0].day_of_week == 1
     assert slots[0].time_start == '10:00'
     assert slots[0].time_end == '12:00'
+
+
+def test_teacher_availability_can_switch_to_full_time_company_template(client, login_as):
+    teacher = create_user(username='fulltime-api-teacher', display_name='全职接口老师', role='teacher')
+
+    login_as(teacher)
+    response = client.post(
+        f'/auth/api/teacher/{teacher.id}/availability',
+        json={'teacher_work_mode': 'full_time'},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['teacher_work_mode'] == 'full_time'
+    assert payload['data']['using_company_template'] is True
+
+    response = client.get(f'/auth/api/teacher/{teacher.id}/availability')
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    assert payload['data']['teacher_work_mode'] == 'full_time'
+    assert len(payload['data']['available']) == 5
+    assert payload['data']['default_working_template_summary']
+
+
+def test_admin_user_api_persists_teacher_work_mode(client, login_as):
+    admin = create_user(username='teacher-mode-admin', display_name='老师模式管理员', role='admin')
+
+    login_as(admin)
+    response = client.post('/auth/api/users', json={
+        'username': 'teacher-mode-user',
+        'display_name': '模式老师',
+        'password': 'scf123',
+        'role': 'teacher',
+        'teacher_work_mode': 'full_time',
+    })
+    payload = response.get_json()
+    assert response.status_code == 201
+    assert payload['data']['teacher_work_mode'] == 'full_time'
+
+    teacher_id = payload['data']['id']
+    response = client.put(f'/auth/api/users/{teacher_id}', json={
+        'teacher_work_mode': 'part_time',
+    })
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['data']['teacher_work_mode'] == 'part_time'

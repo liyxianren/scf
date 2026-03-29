@@ -12,6 +12,7 @@
 
 当当前工作区是 `scf-main` 时，不要把这个仓库当作通用学校系统或通用 SaaS CRM 处理。
 先按 SCF 的内部交付业务去理解问题，再决定实现和文档路径。
+在当前会话第一次处理 `scf-main` 任务时，先调用一次 `scf-platform-context` 作为项目级 grounding skill，再按任务叠加其他 skills。
 
 ## 沟通规则
 
@@ -38,6 +39,9 @@
 
 - 当前 OA、auth、排课、反馈、聊天、intake、权限、workflow 相关问题：
   - 先读 `skills/scf-platform-context/SKILL.md`
+- 当前 V2 主线问题（短信提醒、销售前端接入、腾讯会议课后反馈）：
+  - 先读 `skills/scf-platform-context/SKILL.md`
+  - 再读 `docs/versions/V2.md`
 - `ProjectTrack / SubProject / Milestone / Risk Board / 2+1 / 1+1+1` 这类 V2 交付模型问题：
   - 先读 `skills/scf-platform-context/SKILL.md`
   - 再读 `skills/scf-delivery-workflow/SKILL.md`
@@ -50,7 +54,8 @@
 
 ## Skill 触发规则
 
-- 只要任务涉及 `oa`、`auth`、排课、反馈、chat、workflow 边界、Mini Program、Feishu、OpenClaw、通知架构或内部优先产品判断，优先使用 `scf-platform-context`。
+- 只要当前工作区是 `scf-main`，开始处理该项目任务时默认先调用一次 `scf-platform-context`，用于加载 SCF 的业务 framing、系统边界和当前 V2 主线语境。
+- 只要任务涉及 `oa`、`auth`、排课、反馈、chat、workflow 边界、短信提醒、销售前端接入、腾讯会议课后反馈、Mini Program、WeChat、Feishu、OpenClaw、通知架构或内部优先产品判断，优先使用 `scf-platform-context`。
 - 只要任务进入 V2 的交付对象、里程碑、风险面板、模板化结构设计，使用 `scf-delivery-workflow`。
 - 只要任务涉及 `docs/`、`AGENTS.md`、`CLAUDE.md` 的更新，使用 `scf-docs-governance`。
 - OpenAI API、模型、平台问题才使用 `openai-docs`。

@@ -15,6 +15,8 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 'admin' | 'teacher' | 'student'
     phone = db.Column(db.String(30))
+    teacher_work_mode = db.Column(db.String(20), nullable=False, default='part_time')
+    default_working_template_json = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -42,12 +44,22 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
     def to_dict(self):
+        default_working_template = []
+        if self.default_working_template_json:
+            try:
+                default_working_template = json.loads(self.default_working_template_json)
+            except (json.JSONDecodeError, TypeError):
+                default_working_template = []
         return {
             'id': self.id,
             'username': self.username,
             'display_name': self.display_name,
             'role': self.role,
             'phone': self.phone,
+            'teacher_work_mode': self.teacher_work_mode or 'part_time',
+            'default_working_template': (
+                default_working_template if isinstance(default_working_template, list) else []
+            ),
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
@@ -134,13 +146,20 @@ class Enrollment(db.Model):
     total_hours = db.Column(db.Integer)
     hours_per_session = db.Column(db.Float, default=2.0)
     sessions_per_week = db.Column(db.Integer, default=1)
+    delivery_urgency = db.Column(db.String(20), default='normal')
+    target_finish_date = db.Column(db.Date, nullable=True)
     status = db.Column(db.String(30), default='pending_info')
     # pending_info → pending_schedule → pending_student_confirm → confirmed → active → completed
     intake_token = db.Column(db.String(64), unique=True)
     token_expires_at = db.Column(db.DateTime)
     student_profile_id = db.Column(db.Integer, db.ForeignKey('student_profiles.id'), nullable=True)
+    delivery_preference = db.Column(db.String(20), default='unknown')
     proposed_slots = db.Column(db.Text)   # JSON: 自动匹配结果
     confirmed_slot = db.Column(db.Text)   # JSON: 教务确认的时段
+    availability_intake = db.Column(db.Text)  # JSON: 学生自然语言 / 截图解析后的可上课输入
+    candidate_slot_pool = db.Column(db.Text)  # JSON: AI 生成的可选时间池
+    recommended_bundle = db.Column(db.Text)   # JSON: AI 推荐的完整方案
+    risk_assessment = db.Column(db.Text)      # JSON: 排课风险评估
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -148,6 +167,12 @@ class Enrollment(db.Model):
     teacher = db.relationship('User', foreign_keys=[teacher_id])
     student_profile = db.relationship('StudentProfile', backref='enrollment', foreign_keys=[student_profile_id])
     schedules = db.relationship('CourseSchedule', back_populates='enrollment', lazy=True)
+    feedback_share_links = db.relationship(
+        'FeedbackShareLink',
+        back_populates='enrollment',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
 
     def to_dict(self):
         import json
@@ -163,6 +188,30 @@ class Enrollment(db.Model):
                 confirmed = json.loads(self.confirmed_slot)
             except (json.JSONDecodeError, TypeError):
                 pass
+        availability_intake = None
+        if self.availability_intake:
+            try:
+                availability_intake = json.loads(self.availability_intake)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        candidate_slot_pool = []
+        if self.candidate_slot_pool:
+            try:
+                candidate_slot_pool = json.loads(self.candidate_slot_pool)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        recommended_bundle = None
+        if self.recommended_bundle:
+            try:
+                recommended_bundle = json.loads(self.recommended_bundle)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        risk_assessment = None
+        if self.risk_assessment:
+            try:
+                risk_assessment = json.loads(self.risk_assessment)
+            except (json.JSONDecodeError, TypeError):
+                pass
         return {
             'id': self.id,
             'student_name': self.student_name,
@@ -172,13 +221,20 @@ class Enrollment(db.Model):
             'total_hours': self.total_hours,
             'hours_per_session': self.hours_per_session,
             'sessions_per_week': self.sessions_per_week,
+            'delivery_urgency': self.delivery_urgency,
+            'target_finish_date': self.target_finish_date.isoformat() if self.target_finish_date else None,
             'status': self.status,
             'intake_token': self.intake_token,
             'token_expires_at': self.token_expires_at.isoformat() if self.token_expires_at else None,
             'student_profile_id': self.student_profile_id,
+            'delivery_preference': self.delivery_preference,
             'student_profile': self.student_profile.to_dict() if self.student_profile else None,
             'proposed_slots': proposed,
             'confirmed_slot': confirmed,
+            'availability_intake': availability_intake,
+            'candidate_slot_pool': candidate_slot_pool,
+            'recommended_bundle': recommended_bundle,
+            'risk_assessment': risk_assessment,
             'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -379,6 +435,7 @@ class ReminderEvent(db.Model):
     action_key = db.Column(db.String(120))
     payload_json = db.Column(db.Text)
     status = db.Column(db.String(20), nullable=False, default='pending')
+    due_at = db.Column(db.DateTime)
     source_request_id = db.Column(db.String(120))
     source_action = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -420,6 +477,7 @@ class ReminderEvent(db.Model):
             'action_key': self.action_key,
             'payload': self.get_payload_data(),
             'status': self.status,
+            'due_at': self.due_at.isoformat() if self.due_at else None,
             'source_request_id': self.source_request_id,
             'source_action': self.source_action,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -440,10 +498,31 @@ class ReminderDelivery(db.Model):
     delivery_status = db.Column(db.String(20), nullable=False, default='pending')
     fetched_at = db.Column(db.DateTime)
     acked_at = db.Column(db.DateTime)
+    provider_message_id = db.Column(db.String(255))
+    provider_response_json = db.Column(db.Text)
+    last_attempt_at = db.Column(db.DateTime)
+    delivered_at = db.Column(db.DateTime)
+    failed_at = db.Column(db.DateTime)
+    error_message = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     event = db.relationship('ReminderEvent', foreign_keys=[event_id], back_populates='deliveries')
+
+    def get_provider_response_data(self):
+        if not self.provider_response_json:
+            return {}
+        try:
+            data = json.loads(self.provider_response_json)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_provider_response_data(self, value):
+        if value is None:
+            self.provider_response_json = None
+            return
+        self.provider_response_json = json.dumps(value, ensure_ascii=False)
 
     def to_dict(self):
         return {
@@ -454,6 +533,40 @@ class ReminderDelivery(db.Model):
             'delivery_status': self.delivery_status,
             'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
             'acked_at': self.acked_at.isoformat() if self.acked_at else None,
+            'provider_message_id': self.provider_message_id,
+            'provider_response': self.get_provider_response_data(),
+            'last_attempt_at': self.last_attempt_at.isoformat() if self.last_attempt_at else None,
+            'delivered_at': self.delivered_at.isoformat() if self.delivered_at else None,
+            'failed_at': self.failed_at.isoformat() if self.failed_at else None,
+            'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class FeedbackShareLink(db.Model):
+    __tablename__ = 'feedback_share_links'
+
+    id = db.Column(db.Integer, primary_key=True)
+    enrollment_id = db.Column(db.Integer, db.ForeignKey('enrollments.id'), nullable=False)
+    token = db.Column(db.String(120), unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    revoked_at = db.Column(db.DateTime)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    last_accessed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    enrollment = db.relationship('Enrollment', foreign_keys=[enrollment_id], back_populates='feedback_share_links')
+    creator = db.relationship('User', foreign_keys=[created_by])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'enrollment_id': self.enrollment_id,
+            'token': self.token,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
+            'created_by': self.created_by,
+            'last_accessed_at': self.last_accessed_at.isoformat() if self.last_accessed_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }

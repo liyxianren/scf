@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}教师面板 - OA系统{% endblock %}
+{% block title %}教师排课工作台{% endblock %}
 {% block extra_css %}
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
@@ -50,6 +50,15 @@
 .workflow-card .wf-status.cancelled{background:#e2e8f0;color:#475569}
 .workflow-card .wf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .workflow-card.workflow-focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.12)}
+.workflow-card .ai-brief{margin-top:12px;padding:12px 14px;border:1px solid #dbeafe;border-radius:14px;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%)}
+.workflow-card .ai-brief-title{font-size:.78rem;font-weight:800;color:#1d4ed8;margin-bottom:8px}
+.workflow-card .ai-metrics{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.workflow-card .ai-metric{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:999px;background:#fff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:.76rem;font-weight:700}
+.workflow-card .ai-lines{display:flex;flex-direction:column;gap:6px;font-size:.82rem;color:#334155}
+.workflow-card .ai-lines strong{color:#0f172a}
+.workflow-card .risk-strip{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:.8rem;line-height:1.6}
+.workflow-card .risk-strip.warning{background:#fffbeb;border:1px solid #fcd34d;color:#92400e}
+.workflow-card .risk-strip.hard{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
 .nav-shortcuts{display:flex;gap:12px;flex-wrap:wrap}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;text-decoration:none;box-shadow:0 4px 12px rgba(14,165,233,.15)}
 .nav-btn:hover{opacity:.9}
@@ -78,6 +87,11 @@
 .legend-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
 .swatch-available{background:#bae6fd}
 .swatch-preferred{background:#bbf7d0}
+.mode-panel{margin-bottom:14px;padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:#f8fafc}
+.mode-panel label{display:block;margin-bottom:6px;font-size:.82rem;font-weight:800;color:#374151}
+.mode-panel select{width:100%;padding:11px 13px;border:1px solid #d1d5db;border-radius:12px;font-size:.93rem;box-sizing:border-box;background:#fff}
+.mode-panel select:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 4px rgba(14,165,233,.12)}
+.template-note{display:none;margin-bottom:14px;padding:14px;border-radius:14px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:.84rem;line-height:1.7}
 .pref-toggle{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;cursor:pointer;font-size:.84rem;font-weight:700;color:#374151;user-select:none;margin-bottom:12px}
 .pref-toggle input{width:14px;height:14px;accent-color:#16a34a}
 .force-banner{padding:20px 24px;background:#fef3c7;border:1px solid #fde68a;border-radius:16px;margin-bottom:24px;text-align:center}
@@ -124,8 +138,8 @@
 {% block content %}
 <div class="oa-page">
     <div class="page-header">
-        <h1><span class="material-icons">person</span> 教师面板</h1>
-        <p class="subtitle">{{ current_user.display_name }}，欢迎回来</p>
+        <h1><span class="material-icons">person</span> 教师排课工作台</h1>
+        <p class="subtitle">{{ current_user.display_name }}，AI 会先给出推荐方案、候选池和风险判断，你只需要在约束内确认或调整。</p>
     </div>
 
     {% if not has_availability %}
@@ -145,7 +159,7 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">account_tree</span> 待我提案</h2>
+        <h2><span class="material-icons">smart_toy</span> AI 排课工作台</h2>
         <div class="card">
             <div id="proposalWorkflowSummary" class="workflow-summary"></div>
             <div id="proposalWorkflowList" class="workflow-list">
@@ -155,7 +169,7 @@
     </div>
 
     <div class="section">
-        <h2><span class="material-icons">track_changes</span> 我提交后的案件</h2>
+        <h2><span class="material-icons">track_changes</span> 我提交后的排课进度</h2>
         <div class="card">
             <div id="trackingWorkflowSummary" class="workflow-summary"></div>
             <div id="trackingWorkflowList" class="workflow-list">
@@ -214,16 +228,26 @@
             <button class="close-btn" onclick="closeAvailModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <p class="hint">点击或滑动格子选择您每周可以上课的时间段。切换「偏好时段」模式可标记您更偏好的时间。</p>
-            <label class="pref-toggle">
-                <input type="checkbox" id="prefMode" onchange="togglePrefMode()">
-                偏好时段模式
-            </label>
-            <div class="legend">
-                <span class="legend-item"><span class="legend-swatch swatch-available"></span> 可用时段</span>
-                <span class="legend-item"><span class="legend-swatch swatch-preferred"></span> 偏好时段</span>
+            <div class="mode-panel">
+                <label for="teacherWorkMode">老师工作模式</label>
+                <select id="teacherWorkMode" onchange="handleTeacherWorkModeChange()">
+                    <option value="part_time">兼职老师：我自己维护可上课时间</option>
+                    <option value="full_time">全职老师：按公司统一工作模板自动接单</option>
+                </select>
             </div>
-            <div id="availGridContainer"></div>
+            <div id="fullTimeTemplateNotice" class="template-note"></div>
+            <div id="manualAvailabilityBlock">
+                <p class="hint">点击或滑动格子选择您每周可以上课的时间段。切换「偏好时段」模式可标记您更偏好的时间。</p>
+                <label class="pref-toggle">
+                    <input type="checkbox" id="prefMode" onchange="togglePrefMode()">
+                    偏好时段模式
+                </label>
+                <div class="legend">
+                    <span class="legend-item"><span class="legend-swatch swatch-available"></span> 可用时段</span>
+                    <span class="legend-item"><span class="legend-swatch swatch-preferred"></span> 偏好时段</span>
+                </div>
+                <div id="availGridContainer"></div>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn-save" onclick="saveMyAvailability()"><span class="material-icons" style="font-size:1rem">save</span> 保存</button>
@@ -242,15 +266,23 @@
         </div>
         <div class="modal-body">
             <p class="hint">建议分别填写课程总结、课后作业和下次重点，方便后续跟进与查阅。</p>
+            <div id="feedbackAiDraftBlock" style="display:none;margin-bottom:12px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid #dbeafe">
+                <div style="font-size:.78rem;font-weight:800;color:#0369a1;margin-bottom:6px">AI 课程内容草稿</div>
+                <div id="feedbackAiDraftText" style="font-size:.88rem;color:#334155;line-height:1.7;white-space:pre-wrap"></div>
+            </div>
             <div class="modal-grid">
                 <div>
                     <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">课程总结</div>
-                    <textarea id="feedbackSummaryInput" placeholder="请输入本次课程总结"></textarea>
+                    <textarea id="feedbackSummaryInput" placeholder="请输入本次课程总结，可直接采用或编辑 AI 草稿"></textarea>
                 </div>
                 <div>
-                    <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">课后作业</div>
-                    <textarea id="feedbackHomeworkInput" placeholder="请输入课后作业，可留空"></textarea>
+                    <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">学生表现</div>
+                    <textarea id="feedbackStudentPerformanceInput" placeholder="请输入学生课堂表现，可留空"></textarea>
                 </div>
+            </div>
+            <div style="margin-top:12px">
+                <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">课后作业</div>
+                <textarea id="feedbackHomeworkInput" placeholder="请输入课后作业，可留空"></textarea>
             </div>
             <div style="margin-top:12px">
                 <div style="font-size:.82rem;font-weight:700;color:#374151;margin-bottom:6px">下次课重点</div>
@@ -277,6 +309,7 @@
         <div class="modal-body">
             <p class="hint" id="proposalModalHint">请尽量填写您能稳定执行的时间段，备注里补充学生需要注意的信息。</p>
             <div id="proposalContextSummary" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#f8fafc;color:#475569;font-size:.84rem;line-height:1.7"></div>
+            <div id="proposalAiSummary" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:.84rem;line-height:1.7"></div>
             <div id="proposalWarningBox" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;font-size:.84rem;line-height:1.7"></div>
             <div id="proposalSessionList"></div>
             <div style="margin-top:12px;display:flex;justify-content:flex-start">
@@ -324,11 +357,14 @@
 <script>
 const DAY_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
 const MY_ID = {{ current_user.id }};
+const INITIAL_TEACHER_WORK_CONTEXT = {{ (teacher_work_context or {})|tojson }};
 let progressMap = {};
 let availGrid = null;
 let calendar = null;
 let workflowTodos = [];
 let teacherActionCenter = null;
+let teacherWorkContext = INITIAL_TEACHER_WORK_CONTEXT || {};
+let currentTeacherWorkMode = teacherWorkContext.teacher_work_mode || 'part_time';
 let feedbackDraft = {scheduleId: null, courseName: ''};
 let proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
 let leaveDecisionState = {id: null};
@@ -484,22 +520,28 @@ function renderProposalWorkflowSummary(items){
     const box = document.getElementById('proposalWorkflowSummary');
     if(!box) return;
     if(!items.length){
-        box.innerHTML = '<span class="workflow-chip">暂无待我提案的工作流</span>';
+        box.innerHTML = '<span class="workflow-chip">暂无需要你处理的 AI 排课任务</span>';
         return;
     }
-    const counts = items.reduce((acc, item) => {
-        const key = item.todo_type || 'unknown';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-    }, {});
-    box.innerHTML = Object.entries(counts).map(([type, count]) => `<span class="workflow-chip">${escapeHtml(workflowTypeLabel(type))} ${count}</span>`).join('');
+    const exceptionCount = items.filter(item => {
+        const risk = item.risk_assessment || {};
+        return risk.teacher_confirmation_required || (risk.recommended_action || '') === 'needs_teacher_confirmation';
+    }).length;
+    const makeupCount = items.filter(item => item.todo_type === 'leave_makeup').length;
+    const quotaCount = items.filter(item => Number(item.quota_required || 0) > 0).length;
+    box.innerHTML = [
+        `<span class="workflow-chip">待你处理 ${items.length}</span>`,
+        quotaCount ? `<span class="workflow-chip">有周配额约束 ${quotaCount}</span>` : '',
+        exceptionCount ? `<span class="workflow-chip">例外时段确认 ${exceptionCount}</span>` : '',
+        makeupCount ? `<span class="workflow-chip">补课提案 ${makeupCount}</span>` : '',
+    ].filter(Boolean).join('');
 }
 
 function renderProposalWorkflows(items){
     const box = document.getElementById('proposalWorkflowList');
     if(!box) return;
     if(!items.length){
-        box.innerHTML = '<div class="empty">暂无待我提案的工作流</div>';
+        box.innerHTML = '<div class="empty">当前没有需要你处理的 AI 排课任务</div>';
         renderProposalWorkflowSummary([]);
         return;
     }
@@ -509,6 +551,20 @@ function renderProposalWorkflows(items){
         const title = item.title || item.name || workflowTypeLabel(item.todo_type);
         const enrollmentLink = item.enrollment_id ? `/auth/enrollments/${item.enrollment_id}` : '';
         const sessionPreviewLines = item.session_preview_lines || payload.session_preview_lines || [];
+        const recommendedBundle = item.recommended_bundle || payload.recommended_bundle || null;
+        const candidatePool = item.candidate_slot_pool || payload.candidate_slot_pool || [];
+        const riskAssessment = item.risk_assessment || payload.risk_assessment || {};
+        const quotaRequired = Number(item.quota_required || payload.quota_required || 0);
+        const recommendedLines = recommendedBundle && Array.isArray(recommendedBundle.session_preview_lines)
+            ? recommendedBundle.session_preview_lines
+            : [];
+        const candidateLines = candidatePool.slice(0, 4).map(entry => (
+            entry.label || `${DAY_NAMES[entry.day_of_week] || ''} ${entry.time_start || ''}-${entry.time_end || ''}`
+        ));
+        const riskLines = [
+            ...(riskAssessment.hard_errors || []),
+            ...(riskAssessment.warnings || []),
+        ].slice(0, 3);
         const context = [
             item.context_summary || payload.context_summary || '',
             item.current_plan_summary || payload.current_plan_summary ? `方案概览：${item.current_plan_summary || payload.current_plan_summary}` : '',
@@ -528,6 +584,26 @@ function renderProposalWorkflows(items){
                     <span class="wf-status ${item.todo_type === 'leave_makeup' ? 'makeup' : 'proposal'}">${escapeHtml(workflowStatusLabel(item.workflow_status))}</span>
                 </div>
                 <div class="wf-context">${escapeHtml(context || '暂无上下文')}</div>
+                <div class="ai-brief">
+                    <div class="ai-brief-title">AI 方案建议</div>
+                    <div class="ai-metrics">
+                        ${quotaRequired ? `<span class="ai-metric">每周应选 ${quotaRequired} 节</span>` : ''}
+                        ${riskAssessment.teacher_work_mode_label ? `<span class="ai-metric">${escapeHtml(riskAssessment.teacher_work_mode_label)}</span>` : ''}
+                        ${candidateLines.length ? `<span class="ai-metric">候选池 ${candidateLines.length} 个</span>` : ''}
+                    </div>
+                    <div class="ai-lines">
+                        ${recommendedBundle && recommendedBundle.current_plan_summary ? `<div><strong>推荐方案：</strong>${escapeHtml(recommendedBundle.current_plan_summary)}</div>` : ''}
+                        ${recommendedLines.length ? `<div><strong>推荐课次：</strong>${escapeHtml(recommendedLines.join('；'))}</div>` : ''}
+                        ${candidateLines.length ? `<div><strong>候选池：</strong>${escapeHtml(candidateLines.join('；'))}</div>` : ''}
+                        ${item.next_step_hint ? `<div><strong>下一步：</strong>${escapeHtml(item.next_step_hint)}</div>` : ''}
+                    </div>
+                    ${riskAssessment.summary || riskLines.length ? `
+                        <div class="risk-strip ${riskAssessment.severity === 'hard' ? 'hard' : 'warning'}">
+                            <div><strong>风险判断：</strong>${escapeHtml(riskAssessment.summary || '当前存在需要注意的排课限制')}</div>
+                            ${riskLines.length ? `<div style="margin-top:4px">${escapeHtml(riskLines.join('；'))}</div>` : ''}
+                        </div>
+                    ` : ''}
+                </div>
                 <div class="wf-meta">
                     ${item.revision !== undefined && item.revision !== null ? `<span>revision ${item.revision}</span>` : ''}
                     ${item.updated_at ? `<span>更新：${escapeHtml(item.updated_at)}</span>` : ''}
@@ -535,7 +611,7 @@ function renderProposalWorkflows(items){
                 </div>
                 <div class="wf-actions">
                     <button class="inline-btn" onclick="openProposalModal(${item.id})">
-                        <span class="material-icons">draw</span> 填写建议
+                        <span class="material-icons">draw</span> 打开 AI 工作台
                     </button>
                     ${enrollmentLink ? `<a class="inline-btn" href="${enrollmentLink}">打开报名</a>` : ''}
                 </div>
@@ -573,7 +649,7 @@ function renderTrackingWorkflows(items){
     const box = document.getElementById('trackingWorkflowList');
     if(!box) return;
     if(!items.length){
-        box.innerHTML = '<div class="empty">暂无我提交后仍在推进的案件</div>';
+        box.innerHTML = '<div class="empty">暂无我提交后仍在推进的排课事项</div>';
         renderTrackingWorkflowSummary([]);
         return;
     }
@@ -641,6 +717,9 @@ function renderUpcomingSchedules(items){
         <div class="task-card">
             <div class="task-title">${escapeHtml(item.course_name || '-')}</div>
             <div class="task-detail">${escapeHtml(item.date || '')} ${escapeHtml(item.time_start || '')}-${escapeHtml(item.time_end || '')} · ${escapeHtml(item.students || '未绑定学生')}</div>
+            ${item.delivery_mode === 'online' ? `<div style="margin-top:8px;font-size:.82rem;color:#475569">腾讯会议：${escapeHtml(item.meeting_status_label || item.meeting_status || '待创建')}</div>` : ''}
+            ${item.meeting_code ? `<div style="margin-top:4px;font-size:.82rem;color:#475569">会议号：${escapeHtml(item.meeting_code)}</div>` : ''}
+            ${item.meeting_join_url ? `<div style="margin-top:6px"><a class="inline-btn" href="${item.meeting_join_url}" target="_blank" rel="noopener noreferrer"><span class="material-icons">videocam</span> 打开会议链接</a></div>` : ''}
             ${item.feedback && item.feedback.status === 'submitted' ? `<div style="margin-top:8px;font-size:.82rem;color:#475569">已提交反馈</div>` : ''}
         </div>
     `).join('');
@@ -707,7 +786,10 @@ function resolveProposalSessions(item){
     const payload = parseWorkflowPayload(item);
     const currentProposal = payload.current_proposal && payload.current_proposal.session_dates ? payload.current_proposal.session_dates : [];
     const previousPlan = payload.previous_confirmed_slot && payload.previous_confirmed_slot.session_dates ? payload.previous_confirmed_slot.session_dates : [];
-    const source = currentProposal.length ? currentProposal : previousPlan;
+    const recommendedPlan = item.recommended_bundle && item.recommended_bundle.session_dates ? item.recommended_bundle.session_dates : (
+        payload.recommended_bundle && payload.recommended_bundle.session_dates ? payload.recommended_bundle.session_dates : []
+    );
+    const source = currentProposal.length ? currentProposal : (previousPlan.length ? previousPlan : recommendedPlan);
     if(source.length){
         return source.map(session => ({
             date: session.date || '',
@@ -795,12 +877,26 @@ function openProposalModal(todoId){
     document.getElementById('proposalModalSubtitle').textContent = `${proposalDraft.title} · ${item.todo_type === 'leave_makeup' ? '补课建议只保留 1 节课' : '排课建议会先交给教务微调'}`;
     document.getElementById('proposalModalHint').textContent = item.todo_type === 'leave_makeup'
         ? '默认已按原课次后一周同时间预填，老师只需要改成更合适的补课时间。'
-        : '先看学生的长期可上课时间和禁排日期，再填写您最能稳定执行的日期与时间；教务会在发送给学生前做最终检查和微调。';
+        : '优先从学生可上课时间里选满每周节次。系统会先给出推荐方案和候选池，低风险时会直接发给学生确认。';
     const contextSummary = document.getElementById('proposalContextSummary');
+    const aiSummary = document.getElementById('proposalAiSummary');
     const warningBox = document.getElementById('proposalWarningBox');
     const contextLines = getProposalContextLines(item, payload);
     contextSummary.style.display = contextLines.length ? 'block' : 'none';
     contextSummary.innerHTML = contextLines.map(line => `<div>${escapeHtml(line)}</div>`).join('');
+    const candidatePool = item.candidate_slot_pool || payload.candidate_slot_pool || [];
+    const recommendedBundle = item.recommended_bundle || payload.recommended_bundle || null;
+    const riskAssessment = item.risk_assessment || payload.risk_assessment || {};
+    const quotaRequired = item.quota_required || payload.quota_required || 1;
+    const aiLines = [
+        `每周应选：${quotaRequired} 节`,
+        recommendedBundle && recommendedBundle.current_plan_summary ? `AI 推荐：${recommendedBundle.current_plan_summary}` : '',
+        recommendedBundle && recommendedBundle.session_preview_lines ? `推荐课次：${(recommendedBundle.session_preview_lines || []).join('；')}` : '',
+        candidatePool.length ? `候选池：${candidatePool.slice(0, 6).map(entry => entry.label || `${DAY_NAMES[entry.day_of_week] || ''} ${entry.time_start}-${entry.time_end}`).join('；')}` : '',
+        riskAssessment.summary ? `风险判断：${riskAssessment.summary}` : '',
+    ].filter(Boolean);
+    aiSummary.style.display = aiLines.length ? 'block' : 'none';
+    aiSummary.innerHTML = aiLines.map(line => `<div>${escapeHtml(line)}</div>`).join('');
     const warningItems = Array.isArray(item.proposal_warnings) ? item.proposal_warnings : (Array.isArray(payload.proposal_warnings) ? payload.proposal_warnings : []);
     if(warningItems.length){
         warningBox.style.display = 'block';
@@ -819,6 +915,8 @@ function closeProposalModal(){
     document.getElementById('proposalModal').classList.remove('active');
     document.getElementById('proposalContextSummary').style.display = 'none';
     document.getElementById('proposalContextSummary').textContent = '';
+    document.getElementById('proposalAiSummary').style.display = 'none';
+    document.getElementById('proposalAiSummary').innerHTML = '';
     document.getElementById('proposalWarningBox').style.display = 'none';
     document.getElementById('proposalWarningBox').innerHTML = '';
     proposalDraft = {todoId: null, todoType: '', title: '', note: '', sessions: []};
@@ -838,9 +936,26 @@ function getProposalModalSessions(){
 
 function renderProposalPreviewResult(preview){
     const warningBox = document.getElementById('proposalWarningBox');
+    const aiSummary = document.getElementById('proposalAiSummary');
     if(!warningBox) return;
     const errors = (preview && preview.errors) || [];
     const warnings = (preview && preview.warnings) || [];
+    const quotaRequired = Number((preview && preview.quota_required) || 0);
+    const quotaSelected = Number((preview && preview.quota_selected) || 0);
+    const recommendedBundle = (preview && preview.recommended_bundle) || null;
+    const candidatePool = (preview && preview.candidate_slot_pool) || [];
+    const riskAssessment = (preview && preview.risk_assessment) || {};
+    const aiLines = [
+        quotaRequired ? `每周应选：${quotaRequired} 节` : '',
+        quotaRequired ? `当前覆盖：${quotaSelected} 节` : '',
+        recommendedBundle && recommendedBundle.current_plan_summary ? `系统推荐：${recommendedBundle.current_plan_summary}` : '',
+        candidatePool.length ? `候选池：${candidatePool.slice(0, 6).map(entry => entry.label || `${DAY_NAMES[entry.day_of_week] || ''} ${entry.time_start}-${entry.time_end}`).join('；')}` : '',
+        riskAssessment.summary ? `风险判断：${riskAssessment.summary}` : '',
+    ].filter(Boolean);
+    if(aiSummary){
+        aiSummary.style.display = aiLines.length ? 'block' : 'none';
+        aiSummary.innerHTML = aiLines.map(line => `<div>${escapeHtml(line)}</div>`).join('');
+    }
     if(!errors.length && !warnings.length){
         warningBox.style.display = 'none';
         warningBox.innerHTML = '';
@@ -916,7 +1031,7 @@ async function saveProposalModal(){
                 alert(`建议已提交给教务复核。\n\n提醒：\n- ${warnings.join('\n- ')}`);
             }else{
                 proposalFocusState = {workflowId: null, hint: ''};
-                showToast('建议已提交给教务');
+                showToast((json.message || '').includes('直接发送给学生确认') ? '方案已直接发给学生确认' : '建议已提交给教务');
             }
             closeProposalModal();
             await loadTeacherActionCenter();
@@ -932,17 +1047,25 @@ function openFeedbackModal(scheduleId, courseName){
     feedbackDraft = {scheduleId, courseName: courseName || ''};
     document.getElementById('feedbackModalSubtitle').textContent = courseName ? `课程：${courseName}` : '请补充本次课程的结构化反馈信息';
     document.getElementById('feedbackSummaryInput').value = '';
+    document.getElementById('feedbackStudentPerformanceInput').value = '';
     document.getElementById('feedbackHomeworkInput').value = '';
     document.getElementById('feedbackNextFocusInput').value = '';
+    document.getElementById('feedbackAiDraftText').textContent = '';
+    document.getElementById('feedbackAiDraftBlock').style.display = 'none';
     document.getElementById('feedbackModal').classList.add('active');
     fetch(`/auth/api/schedules/${scheduleId}/feedback`)
         .then(res => res.json())
         .then(json => {
             const feedback = json.success ? json.data : null;
             if(!feedback) return;
-            document.getElementById('feedbackSummaryInput').value = feedback.summary || '';
+            document.getElementById('feedbackSummaryInput').value = feedback.summary || feedback.ai_content_draft || '';
+            document.getElementById('feedbackStudentPerformanceInput').value = feedback.student_performance || '';
             document.getElementById('feedbackHomeworkInput').value = feedback.homework || '';
             document.getElementById('feedbackNextFocusInput').value = feedback.next_focus || '';
+            if(feedback.ai_content_draft){
+                document.getElementById('feedbackAiDraftText').textContent = feedback.ai_content_draft;
+                document.getElementById('feedbackAiDraftBlock').style.display = 'block';
+            }
         })
         .catch(() => {});
 }
@@ -954,6 +1077,7 @@ function closeFeedbackModal(){
 async function saveFeedbackModal(submit = true){
     if(!feedbackDraft.scheduleId) return;
     const summary = document.getElementById('feedbackSummaryInput').value.trim();
+    const studentPerformance = document.getElementById('feedbackStudentPerformanceInput').value.trim();
     const homework = document.getElementById('feedbackHomeworkInput').value.trim();
     const nextFocus = document.getElementById('feedbackNextFocusInput').value.trim();
     if(submit && !summary){
@@ -965,7 +1089,7 @@ async function saveFeedbackModal(submit = true){
         const res = await fetch(`/auth/api/schedules/${feedbackDraft.scheduleId}/${endpoint}`, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({summary, homework, next_focus: nextFocus})
+            body: JSON.stringify({summary, student_performance: studentPerformance, homework, next_focus: nextFocus})
         });
         const json = await res.json();
         if(json.success){
@@ -1057,27 +1181,68 @@ function togglePrefMode(){
     if(availGrid) availGrid.setMode(checked ? 'preferred' : 'available');
 }
 
+function syncAvailabilityModeUi(){
+    const select = document.getElementById('teacherWorkMode');
+    const manualBlock = document.getElementById('manualAvailabilityBlock');
+    const templateNotice = document.getElementById('fullTimeTemplateNotice');
+    if(select) select.value = currentTeacherWorkMode;
+    if(currentTeacherWorkMode === 'full_time'){
+        if(manualBlock) manualBlock.style.display = 'none';
+        if(templateNotice){
+            const summary = teacherWorkContext.default_working_template_summary || '周三至周日 10:00-18:00';
+            const templateSource = teacherWorkContext.using_company_template ? '公司统一模板' : '当前老师自定义模板';
+            templateNotice.style.display = 'block';
+            templateNotice.innerHTML = `
+                <div style="font-weight:800;margin-bottom:6px">当前按全职老师自动接单</div>
+                <div>工作模板：${escapeHtml(summary)}</div>
+                <div style="margin-top:4px">模板来源：${escapeHtml(templateSource)}</div>
+                <div style="margin-top:4px">在模板内且无冲突的方案会直接进入教务复核，不要求老师手工提案。</div>
+            `;
+        }
+    }else{
+        if(manualBlock) manualBlock.style.display = 'block';
+        if(templateNotice){
+            templateNotice.style.display = 'none';
+            templateNotice.innerHTML = '';
+        }
+    }
+}
+
+function handleTeacherWorkModeChange(){
+    const select = document.getElementById('teacherWorkMode');
+    currentTeacherWorkMode = select ? select.value : 'part_time';
+    syncAvailabilityModeUi();
+}
+
 async function loadMyAvailability(){
     try{
         const res = await fetch(`/auth/api/teacher/${MY_ID}/availability`);
         const json = await res.json();
         if(json.success && availGrid){
+            teacherWorkContext = json.data || {};
+            currentTeacherWorkMode = teacherWorkContext.teacher_work_mode || 'part_time';
             availGrid.clear();
             if(json.data.available) availGrid.setSlots(json.data.available, 'available');
             if(json.data.preferred) availGrid.setSlots(json.data.preferred, 'preferred');
+            syncAvailabilityModeUi();
         }
     }catch(e){}
 }
 
 async function saveMyAvailability(){
-    if(!availGrid) return;
+    if(!availGrid && currentTeacherWorkMode !== 'full_time') return;
     const data = {
-        available: availGrid.getSlots('available'),
-        preferred: availGrid.getSlots('preferred')
+        teacher_work_mode: currentTeacherWorkMode
     };
-    if(!data.available.length && !data.preferred.length){
-        showToast('请至少选择一个可用时段');
-        return;
+    if(currentTeacherWorkMode === 'full_time'){
+        data.default_working_template = teacherWorkContext.using_company_template ? [] : (teacherWorkContext.default_working_template || []);
+    }else{
+        data.available = availGrid.getSlots('available');
+        data.preferred = availGrid.getSlots('preferred');
+        if(!data.available.length && !data.preferred.length){
+            showToast('请至少选择一个可用时段');
+            return;
+        }
     }
     try{
         const res = await fetch(`/auth/api/teacher/${MY_ID}/availability`,{
@@ -1085,7 +1250,10 @@ async function saveMyAvailability(){
         });
         const json = await res.json();
         if(json.success){
-            showToast('时间设置已保存');
+            teacherWorkContext = {...teacherWorkContext, ...(json.data || {})};
+            currentTeacherWorkMode = teacherWorkContext.teacher_work_mode || currentTeacherWorkMode;
+            syncAvailabilityModeUi();
+            showToast(currentTeacherWorkMode === 'full_time' ? '已切换为全职老师自动接单模式' : '时间设置已保存');
             closeAvailModal();
             const banner = document.getElementById('forceBanner');
             if(banner) banner.style.display = 'none';

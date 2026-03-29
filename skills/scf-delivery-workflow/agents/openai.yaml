@@ -1,7 +1,7 @@
 interface:
   display_name: "SCF Delivery Workflow"
-  short_description: "Model SCF delivery stages, milestones, templates, and risk boards."
-  default_prompt: "Use $scf-delivery-workflow to plan SCF project-delivery models, milestone templates, and risk-board behavior."
+  short_description: "Model SCF's later-stage V2 delivery objects and risk boards."
+  default_prompt: "Use $scf-delivery-workflow to plan SCF's later-stage V2 ProjectTrack, SubProject, Milestone, and Risk Board models and how they fit with current reminder, sales, and feedback streams."
 
 policy:
   allow_implicit_invocation: true
