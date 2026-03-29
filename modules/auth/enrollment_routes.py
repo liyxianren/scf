@@ -415,13 +415,12 @@ def api_export_schedule(enrollment_id):
 
 def _availability_preview_response(data):
     preview, errors = preview_availability_intake(data)
-    status_code = 200 if not errors else 400
     return jsonify({
         'success': not errors,
         'data': preview,
         'errors': errors,
         'error': '；'.join(errors) if errors else None,
-    }), status_code
+    }), 200
 
 
 @auth_bp.route('/api/enrollments/<int:enrollment_id>/feedback-share-links', methods=['POST'])

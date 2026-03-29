@@ -358,6 +358,8 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     assert 'msg-card' in html
     assert 'white-space:pre-wrap' in html
     assert '/auth/api/chat/contacts' in html
+    assert 'rel="icon"' in html
+    assert 'logo-nav.png' in html
 
     html = client.get('/auth/student/dashboard').get_data(as_text=True)
     assert '学生任务中心' in html
@@ -374,6 +376,8 @@ def test_chat_and_schedule_templates_include_preview_hooks(client, login_as, log
     assert '排课风险台' in html
     assert 'schedulingRiskList' in html
     assert 'waiting_student_confirm_items' in html
+    assert '如果您也承担授课，请先设置可用时间' not in html
+    assert '系统会在自动排课时使用您的时间设置' not in html
     html = client.get(f'/auth/enrollments/{enrollment.id}').get_data(as_text=True)
     assert 'manualPlanModal' in html
     assert '/manual-plan' in html

@@ -2044,6 +2044,40 @@ def test_public_intake_availability_parse_can_extract_text_from_image_evidence(c
     assert any(item['type'] == 'image_ocr' for item in payload['data']['source_evidence_items'])
 
 
+def test_public_intake_availability_parse_returns_inline_error_when_image_needs_ocr_config(client, login_as):
+    admin = create_user(username='ocr-missing-admin', display_name='识图缺配置教务', role='admin')
+    teacher = create_user(username='ocr-missing-teacher', display_name='识图缺配置老师', role='teacher')
+
+    login_as(admin)
+    response = client.post(
+        '/auth/api/enrollments',
+        json={
+            'student_name': '识图缺配置学生',
+            'course_name': '识图缺配置课程',
+            'teacher_id': teacher.id,
+            'total_hours': 2,
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 201
+    token = payload['data']['intake_url'].rsplit('/', 1)[-1]
+
+    response = client.post(
+        f'/auth/intake/{token}/availability-parse',
+        json={
+            'availability_evidence_items': [
+                {'type': 'image_url', 'content': 'https://example.com/timetable.png'},
+            ],
+        },
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload['success'] is False
+    assert payload['data']['weekly_slots'] == []
+    assert '图片还没有识别出可用时间' in payload['error']
+
+
 def test_public_intake_can_submit_confirmed_parse_without_manual_grid(client, login_as):
     admin = create_user(username='parse-submit-admin', display_name='解析提交教务', role='admin')
     teacher = create_user(username='parse-submit-teacher', display_name='解析提交老师', role='teacher')

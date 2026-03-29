@@ -71,9 +71,6 @@
 .approve-btn:hover{background:#bbf7d0}
 .reject-btn{background:#fee2e2;color:#991b1b}
 .reject-btn:hover{background:#fecaca}
-.force-banner{padding:20px 24px;background:#fef3c7;border:1px solid #fde68a;border-radius:16px;margin-bottom:24px;text-align:center}
-.force-banner h3{margin:0 0 6px;font-size:1rem;color:#92400e;display:flex;align-items:center;justify-content:center;gap:6px}
-.force-banner p{margin:0 0 14px;color:#a16207;font-size:.88rem}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;justify-content:center;align-items:center;padding:20px}
 .modal-overlay.active{display:flex}
 .modal-content{width:800px;max-width:100%;max-height:92vh;overflow-y:auto;background:#fff;border-radius:22px;box-shadow:0 26px 80px rgba(15,23,42,.26)}
@@ -117,14 +114,6 @@
         <h1><span class="material-icons">admin_panel_settings</span> 教务协同台</h1>
         <p class="subtitle">欢迎回来，{{ current_user.display_name }}。AI 默认推进排课，你主要处理风险、复核和例外协同。</p>
     </div>
-
-    {% if not has_availability %}
-    <div class="force-banner" id="forceBanner">
-        <h3><span class="material-icons" style="font-size:1.1rem">warning</span> 如果您也承担授课，请先设置可用时间</h3>
-        <p>系统会在自动排课时使用您的时间设置。若您仅负责教务管理，可忽略本提示。</p>
-        <button class="btn-primary" onclick="openAvailModal()"><span class="material-icons" style="font-size:1rem">schedule</span> 设置时间</button>
-    </div>
-    {% endif %}
 
     <div class="stats-row" id="statsRow">
         <div class="stat-card">

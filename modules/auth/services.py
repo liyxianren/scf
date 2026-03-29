@@ -1205,6 +1205,7 @@ def _availability_confirmed_parse_result(data):
 def preview_availability_intake(data):
     confirmed_parse = _availability_confirmed_parse_result(data)
     manual_adjustments = data.get('manual_adjustments') or {}
+    raw_evidence_items = data.get('availability_evidence_items') or []
     manual_slot_source = (
         data.get('available_times')
         if 'available_times' in data
@@ -1220,9 +1221,11 @@ def preview_availability_intake(data):
         manual_excluded_source = manual_adjustments.get('excluded_dates')
     manual_excluded_dates, excluded_errors = _validate_excluded_dates_entries(manual_excluded_source)
     errors = slot_errors + excluded_errors
+    availability_input_text = _availability_input_text(data)
+    resolved_evidence_items = _availability_evidence_items(data)
     parsed = parse_availability_intake(
-        input_text=_availability_input_text(data),
-        evidence_items=_availability_evidence_items(data),
+        input_text=availability_input_text,
+        evidence_items=resolved_evidence_items,
         manual_slots=manual_slots,
         manual_excluded_dates=manual_excluded_dates,
         reference_date=get_business_today(),
@@ -1232,7 +1235,15 @@ def preview_availability_intake(data):
     resolved_slots = manual_slots or confirmed_slots or parsed.get('weekly_slots') or []
     resolved_excluded_dates = manual_excluded_dates or confirmed_excluded_dates or parsed.get('excluded_dates') or []
     if not resolved_slots:
-        errors.append('请先输入可上课时间，或至少确认一个结构化时段')
+        has_image_evidence = any(
+            isinstance(item, dict)
+            and str(item.get('type') or '').strip().lower() in {'image', 'image_url', 'image_data_url', 'image_base64'}
+            for item in raw_evidence_items
+        )
+        if has_image_evidence and not availability_input_text.strip() and not resolved_evidence_items:
+            errors.append('图片还没有识别出可用时间，请补一段文字说明，或检查豆包视觉配置后重试')
+        else:
+            errors.append('请先输入可上课时间，或至少确认一个结构化时段')
 
     intake = {
         **confirmed_parse,
