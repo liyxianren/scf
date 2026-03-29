@@ -25,15 +25,17 @@ def run_once_migrations():
         _mark_applied('oa_schedule_semantics_v2')
         print('[migration] OA 课表教师归一化与 delivery_mode 回填完成')
 
-    if not _is_applied('oa_schedule_delivery_sms_v3'):
-        _backfill_schedule_delivery_sms_v3()
-        _mark_applied('oa_schedule_delivery_sms_v3')
-        print('[migration] OA 线上线下 / 会议占位 / 报名默认上课方式回填完成')
-
+    # v3 回填会通过 Enrollment ORM 读取报名；老库需要先补齐 v4 的 AI 排课字段，
+    # 否则模型查询会因为缺列直接在启动期崩溃。
     if not _is_applied('enrollment_ai_scheduling_v4'):
         _backfill_enrollment_ai_scheduling_v4()
         _mark_applied('enrollment_ai_scheduling_v4')
         print('[migration] Enrollment AI 排课字段补齐完成')
+
+    if not _is_applied('oa_schedule_delivery_sms_v3'):
+        _backfill_schedule_delivery_sms_v3()
+        _mark_applied('oa_schedule_delivery_sms_v3')
+        print('[migration] OA 线上线下 / 会议占位 / 报名默认上课方式回填完成')
 
 
 # ========== 基础设施 ==========
@@ -79,6 +81,9 @@ def _backfill_schedule_semantics():
 
 
 def _backfill_schedule_delivery_sms_v3():
+    # 兜底：即使被单独调用，也先补齐 Enrollment 的 v4 列，避免 ORM 查询旧库时缺列。
+    _backfill_enrollment_ai_scheduling_v4()
+
     from modules.oa.services import backfill_schedule_delivery_sms_state
 
     backfill_schedule_delivery_sms_state()

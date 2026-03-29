@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+import migrations_once
 from extensions import db
 from modules.auth.models import Enrollment, ReminderDelivery
 from modules.oa import sms_reminder_services
@@ -208,6 +209,57 @@ def test_backfill_schedule_delivery_sms_state_tolerates_legacy_special_delivery_
     assert schedule.delivery_mode == 'online'
     assert schedule.color_tag == 'blue'
     assert enrollment.delivery_preference == 'online'
+
+
+def test_run_once_migrations_applies_enrollment_v4_before_schedule_delivery_sms(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(migrations_once, '_ensure_migration_table', lambda: calls.append('ensure'))
+    monkeypatch.setattr(
+        migrations_once,
+        '_is_applied',
+        lambda name: name in {'fix_teacher_names_and_colors_v1', 'oa_workflow_todos_v1', 'oa_schedule_semantics_v2'},
+    )
+    monkeypatch.setattr(
+        migrations_once,
+        '_backfill_enrollment_ai_scheduling_v4',
+        lambda: calls.append('backfill:v4'),
+    )
+    monkeypatch.setattr(
+        migrations_once,
+        '_backfill_schedule_delivery_sms_v3',
+        lambda: calls.append('backfill:v3'),
+    )
+    monkeypatch.setattr(migrations_once, '_mark_applied', lambda name: calls.append(f'mark:{name}'))
+
+    migrations_once.run_once_migrations()
+
+    assert calls == [
+        'ensure',
+        'backfill:v4',
+        'mark:enrollment_ai_scheduling_v4',
+        'backfill:v3',
+        'mark:oa_schedule_delivery_sms_v3',
+    ]
+
+
+def test_schedule_delivery_sms_v3_ensures_enrollment_v4_columns_before_service(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        migrations_once,
+        '_backfill_enrollment_ai_scheduling_v4',
+        lambda: calls.append('backfill:v4'),
+    )
+    monkeypatch.setattr(
+        oa_services,
+        'backfill_schedule_delivery_sms_state',
+        lambda: calls.append('backfill:v3-service'),
+    )
+
+    migrations_once._backfill_schedule_delivery_sms_v3()
+
+    assert calls == ['backfill:v4', 'backfill:v3-service']
 
 
 def test_internal_sms_reminder_job_is_idempotent_and_reconciles(client, app):
