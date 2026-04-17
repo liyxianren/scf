@@ -12,7 +12,6 @@ def create_app(
     migrate_columns=None,
     init_data=None,
     backfill_schedule_links=None,
-    cleanup_expired=None,
     run_once_migrations=None,
 ):
     app = Flask(__name__)
@@ -32,16 +31,12 @@ def create_app(
 
     # 注册蓝图
     from modules.education.routes import lesson_bp, exercise_bp, code_runner_bp
-    from modules.agents import agent_bp
-    from modules.handbook import handbook_bp
     from modules.oa import oa_bp
     from modules.auth import auth_bp
 
     app.register_blueprint(lesson_bp, url_prefix='/api/lessons')
     app.register_blueprint(exercise_bp, url_prefix='/api/exercises')
     app.register_blueprint(code_runner_bp, url_prefix='/api/code')
-    app.register_blueprint(agent_bp, url_prefix='/company')
-    app.register_blueprint(handbook_bp, url_prefix='/company/handbook')
     app.register_blueprint(oa_bp, url_prefix='/oa')
     app.register_blueprint(auth_bp, url_prefix='/auth')
 
@@ -57,9 +52,6 @@ def create_app(
             _init_data()
         if _resolve_startup_flag(app, backfill_schedule_links, 'SCF_AUTO_BACKFILL_SCHEDULE_LINKS'):
             _backfill_schedule_links()
-        if _resolve_startup_flag(app, cleanup_expired, 'SCF_AUTO_CLEANUP_EXPIRED'):
-            _cleanup_expired()
-
         # 一次性数据修复（教师姓名 + 课表颜色）
         if _resolve_startup_flag(app, run_once_migrations, 'SCF_RUN_ONCE_MIGRATIONS'):
             from migrations_once import run_once_migrations as run_one_off_migrations
@@ -135,17 +127,12 @@ def _migrate_add_columns():
 def _init_data():
     """检查并初始化种子数据"""
     from modules.education.models import Lesson
-    from modules.agents.models import Agent
 
     if Lesson.query.count() == 0:
-        from init_db import init_lessons, init_exercises, init_agents
+        from init_db import init_lessons, init_exercises
         init_lessons()
         init_exercises()
-        init_agents()
         print("数据库已自动初始化")
-    elif Agent.query.count() == 0:
-        from init_db import init_agents
-        init_agents()
 
     # 自动初始化用户账号
     from modules.auth.models import User
@@ -156,30 +143,6 @@ def _init_data():
             print(f"已自动创建 {count} 个用户账号")
 
 
-def _cleanup_expired():
-    """清理过期且未收藏的计划书和工程手册"""
-    from modules.agents.models import ProjectPlan
-    from modules.handbook.models import EngineeringHandbook
-
-    expired_plans = ProjectPlan.query.filter(
-        ProjectPlan.expires_at < datetime.utcnow(),
-        ProjectPlan.is_favorited == False
-    ).all()
-    if expired_plans:
-        for plan in expired_plans:
-            db.session.delete(plan)
-        db.session.commit()
-        print(f"已清理 {len(expired_plans)} 个过期计划书")
-
-    expired_handbooks = EngineeringHandbook.query.filter(
-        EngineeringHandbook.expires_at < datetime.utcnow(),
-        EngineeringHandbook.is_favorited == False
-    ).all()
-    if expired_handbooks:
-        for handbook in expired_handbooks:
-            db.session.delete(handbook)
-        db.session.commit()
-        print(f"已清理 {len(expired_handbooks)} 个过期工程手册")
 
 
 def _backfill_schedule_links():
@@ -204,6 +167,16 @@ def _register_page_routes(app):
     def code_lobby():
         """编程学习大厅"""
         return render_template('education/index.html')
+
+    @app.route('/summer')
+    def summer_projects():
+        """暑期项目 - 公开页面"""
+        return render_template('summer/projects.html')
+
+    @app.route('/summer/<slug>')
+    def summer_project_detail(slug):
+        """暑期项目详情 - 公开页面"""
+        return render_template('summer/detail.html', slug=slug)
 
     # ========== Python 页面路由 ==========
     @app.route('/python/lessons')
@@ -267,6 +240,48 @@ def _register_page_routes(app):
     @app.route('/vibe/exercises/<int:exercise_id>')
     def vibe_exercise_detail(exercise_id):
         return render_template('education/exercise_detail.html', exercise_id=exercise_id, language='vibe')
+
+    # ========== AI 办公 页面路由 ==========
+    @app.route('/ai_office/lessons')
+    def ai_office_lessons():
+        return render_template('education/lessons.html', language='ai_office')
+
+    @app.route('/ai_office/lessons/<int:lesson_id>')
+    def ai_office_lesson_detail(lesson_id):
+        return render_template('education/lesson_detail.html', lesson_id=lesson_id, language='ai_office')
+
+    @app.route('/ai_office/playground')
+    def ai_office_playground():
+        return render_template('education/playground.html', language='ai_office')
+
+    @app.route('/ai_office/exercises')
+    def ai_office_exercises():
+        return render_template('education/exercises.html', language='ai_office')
+
+    @app.route('/ai_office/exercises/<int:exercise_id>')
+    def ai_office_exercise_detail(exercise_id):
+        return render_template('education/exercise_detail.html', exercise_id=exercise_id, language='ai_office')
+
+    # ========== AI 办公 · 讲案 页面路由 ==========
+    @app.route('/ai_office_deck/lessons')
+    def ai_office_deck_lessons():
+        return render_template('education/lessons.html', language='ai_office_deck')
+
+    @app.route('/ai_office_deck/lessons/<int:lesson_id>')
+    def ai_office_deck_lesson_detail(lesson_id):
+        return render_template('education/lesson_detail.html', lesson_id=lesson_id, language='ai_office_deck')
+
+    @app.route('/ai_office_deck/playground')
+    def ai_office_deck_playground():
+        return render_template('education/playground.html', language='ai_office_deck')
+
+    @app.route('/ai_office_deck/exercises')
+    def ai_office_deck_exercises():
+        return render_template('education/exercises.html', language='ai_office_deck')
+
+    @app.route('/ai_office_deck/exercises/<int:exercise_id>')
+    def ai_office_deck_exercise_detail(exercise_id):
+        return render_template('education/exercise_detail.html', exercise_id=exercise_id, language='ai_office_deck')
 
     # ========== Vibe API 演示 ==========
     @app.route('/api/vibe/demo', methods=['GET', 'POST'])

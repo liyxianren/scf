@@ -1,59 +1,6 @@
 import json
 from extensions import db
 from modules.education.models import Lesson, Exercise
-from modules.agents.models import Agent
-
-
-def init_agents():
-    """初始化 Agent 数据"""
-    agents_data = [
-        {
-            "name": "智能客服助手",
-            "description": "24/7 在线自动回复客户咨询，支持多语言和上下文理解。",
-            "icon": "chat_bubble",
-            "status": "active"
-        },
-        {
-            "name": "数据分析专家",
-            "description": "自动生成销售报表，分析市场趋势，提供决策支持。",
-            "icon": "analytics",
-            "status": "active"
-        },
-        {
-            "name": "代码审查 Bot",
-            "description": "集成在 CI/CD 流程中，自动检查代码质量和安全漏洞。",
-            "icon": "code",
-            "status": "testing"
-        },
-        {
-            "name": "营销文案生成器",
-            "description": "根据产品特性自动生成社交媒体推广文案。",
-            "icon": "edit_note",
-            "status": "active"
-        },
-        {
-            "name": "Creative Copilot",
-            "description": "基于 AI 的创意生成与优化助手。它可以帮助您分析需求、生成创意方案、评估可行性，并输出完整的项目报告。",
-            "icon": "lightbulb",
-            "status": "active"
-        },
-        {
-            "name": "工程手册 Agent",
-            "description": "面向留学申请的工程手册生成助手，支持多体系版本与结构化输出。",
-            "icon": "menu_book",
-            "status": "active"
-        }
-    ]
-
-    for data in agents_data:
-        if not Agent.query.filter_by(name=data['name']).first():
-            agent = Agent(**data)
-            db.session.add(agent)
-
-    db.session.commit()
-    print(f"已添加 {len(agents_data)} 个演示 Agent")
-
-
 def init_lessons():
     """初始化教案数据"""
     # Python 课程
@@ -252,7 +199,63 @@ def init_lessons():
         }
     ]
 
-    all_lessons = python_lessons + c_lessons + vibe_lessons
+    # AI 办公 课程（内部 AI 培训讲义，后续会整理学生版）
+    ai_office_lessons = [
+        {
+            "chapter_num": 1,
+            "title": "从 LLM 到 Agent：AI 是怎么\"听懂\"并\"动手\"的",
+            "description": "大模型原理白话版；Agent = LLM + Tools + Loop 的最小模型；纯 LLM 和 Agent 能力对比",
+            "content_file": "01_ai_office_llm_agent.md",
+            "order_index": 1,
+            "language": "ai_office"
+        },
+        {
+            "chapter_num": 2,
+            "title": "通用 Agent：Openclaw / Codex / Claude Code 深度解析",
+            "description": "Skills 与子 Agent 机制；Openclaw 5 大层架构（接口/网关/运行器/执行/记忆）；三家通用 Agent 横向对比与选型",
+            "content_file": "02_ai_office_general_agents.md",
+            "order_index": 2,
+            "language": "ai_office"
+        },
+        {
+            "chapter_num": 3,
+            "title": "用 Prompt 指挥 Agent 做 PPT / Word / Excel",
+            "description": "Prompt 5 构件（角色/任务/约束/素材/产出格式）；PPT/Word/Excel 三大模板；分阶段指挥 + 示例驱动 + 自审技巧",
+            "content_file": "03_ai_office_gemini_codex_practice.md",
+            "order_index": 3,
+            "language": "ai_office"
+        }
+    ]
+
+    # AI 办公 · 讲案（讲师现场使用的幻灯片骨架，精简到每章 8-12 张 slide）
+    ai_office_deck_lessons = [
+        {
+            "chapter_num": 1,
+            "title": "【讲案】从 LLM 到 Agent",
+            "description": "幻灯片骨架 · 约 10 张 slide · 覆盖 LLM 原理 / Agent 公式 / 最小伪代码 / 对比 / 误区",
+            "content_file": "01_ai_office_deck_llm_agent.md",
+            "order_index": 1,
+            "language": "ai_office_deck"
+        },
+        {
+            "chapter_num": 2,
+            "title": "【讲案】通用 Agent 与 Openclaw 5 层",
+            "description": "幻灯片骨架 · 约 12 张 slide · 覆盖 Skills / 子 Agent / Openclaw 5 层 / 三家对比",
+            "content_file": "02_ai_office_deck_general_agents.md",
+            "order_index": 2,
+            "language": "ai_office_deck"
+        },
+        {
+            "chapter_num": 3,
+            "title": "【讲案】Prompt 指挥 Agent 做办公产物",
+            "description": "幻灯片骨架 · 约 10 张 slide · 覆盖 5 构件 / 三大模板 / 三个进阶技巧 / 现场 Demo 提示",
+            "content_file": "03_ai_office_deck_prompt.md",
+            "order_index": 3,
+            "language": "ai_office_deck"
+        }
+    ]
+
+    all_lessons = python_lessons + c_lessons + vibe_lessons + ai_office_lessons + ai_office_deck_lessons
 
     for data in all_lessons:
         lesson = Lesson(**data)
@@ -262,6 +265,8 @@ def init_lessons():
     print(f"已添加 {len(python_lessons)} 个Python教案")
     print(f"已添加 {len(c_lessons)} 个C语言教案")
     print(f"已添加 {len(vibe_lessons)} 个Vibe Coding教案")
+    print(f"已添加 {len(ai_office_lessons)} 个AI办公教案")
+    print(f"已添加 {len(ai_office_deck_lessons)} 个AI办公讲案")
 
 
 def init_exercises():

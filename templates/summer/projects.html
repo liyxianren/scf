@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}暑期项目 - SCF{% endblock %}
+{% block extra_css %}
+<style>
+.projects-page{margin:0;padding:0}
+.projects-iframe{width:100%;border:none;min-height:calc(100vh - 100px);display:block}
+</style>
+{% endblock %}
+{% block content %}
+<div class="projects-page">
+  <iframe class="projects-iframe" src="{{ url_for('static', filename='scfwork/index.html') }}"></iframe>
+</div>
+{% endblock %}

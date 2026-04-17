@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" fill="none">
+  <rect width="1200" height="900" rx="48" fill="#F4EDE1"/>
+  <rect x="56" y="56" width="1088" height="788" rx="36" fill="#1F5A4C"/>
+  <rect x="108" y="120" width="420" height="18" rx="9" fill="#D9E8D4" fill-opacity="0.75"/>
+  <rect x="108" y="166" width="710" height="92" rx="22" fill="#FFF9F0"/>
+  <rect x="108" y="290" width="318" height="18" rx="9" fill="#D9E8D4" fill-opacity="0.65"/>
+  <rect x="108" y="330" width="530" height="14" rx="7" fill="#D9E8D4" fill-opacity="0.45"/>
+  <rect x="108" y="360" width="480" height="14" rx="7" fill="#D9E8D4" fill-opacity="0.45"/>
+  <rect x="108" y="390" width="560" height="14" rx="7" fill="#D9E8D4" fill-opacity="0.45"/>
+  <rect x="748" y="166" width="288" height="288" rx="32" fill="#FFF9F0" fill-opacity="0.96"/>
+  <circle cx="892" cy="254" r="74" fill="#EFA63B" fill-opacity="0.18"/>
+  <path d="M861 284h62M892 223v123M852 344h80" stroke="#1F5A4C" stroke-width="18" stroke-linecap="round"/>
+  <rect x="108" y="468" width="928" height="252" rx="32" fill="#FFF9F0" fill-opacity="0.92"/>
+  <rect x="148" y="516" width="180" height="18" rx="9" fill="#1F5A4C" fill-opacity="0.16"/>
+  <rect x="148" y="560" width="848" height="16" rx="8" fill="#1F5A4C" fill-opacity="0.1"/>
+  <rect x="148" y="594" width="804" height="16" rx="8" fill="#1F5A4C" fill-opacity="0.1"/>
+  <rect x="148" y="628" width="620" height="16" rx="8" fill="#1F5A4C" fill-opacity="0.1"/>
+  <text x="108" y="108" fill="#FFF9F0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">Summer Project Studio</text>
+  <text x="134" y="226" fill="#1F5A4C" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="52" font-weight="700">项目资料整理中</text>
+  <text x="134" y="636" fill="#425B54" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="28">页面结构、项目信息与下载入口已就位，详细图文资料将继续补充。</text>
+</svg>

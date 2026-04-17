@@ -1,0 +1,110 @@
+<svg viewBox="0 0 960 540" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <rect width="960" height="540" fill="#f8fafc"/>
+  <text x="480" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Openclaw / Codex / Claude Code 横向对比</text>
+  <text x="480" y="58" text-anchor="middle" font-size="12" fill="#64748b">同属通用 Agent 赛道，但设计取舍和典型场景不同，按需选型</text>
+
+  <!-- Openclaw -->
+  <g>
+    <rect x="40" y="90" width="280" height="420" rx="14" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <rect x="40" y="90" width="280" height="70" rx="14" fill="#2563eb"/>
+    <rect x="40" y="124" width="280" height="36" fill="#2563eb"/>
+    <text x="180" y="124" text-anchor="middle" font-size="17" font-weight="800" fill="white">Openclaw</text>
+    <text x="180" y="148" text-anchor="middle" font-size="11" fill="white" opacity="0.9">工程化可控的通用 Agent 平台</text>
+
+    <text x="60" y="192" font-size="12" font-weight="700" fill="#2563eb">定位</text>
+    <text x="60" y="212" font-size="11" fill="#1e293b">多用户、企业内部的 Agent 基础设施</text>
+
+    <text x="60" y="244" font-size="12" font-weight="700" fill="#2563eb">强项</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="60" y="264">· 5 层清晰边界，可替换</text>
+      <text x="60" y="282">· 会话隔离 + 车道队列</text>
+      <text x="60" y="300">· 混合内存（JSONL+MD+向量）</text>
+      <text x="60" y="318">· 模型解耦（Claude/OpenAI/本地）</text>
+    </g>
+
+    <text x="60" y="352" font-size="12" font-weight="700" fill="#2563eb">典型场景</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="60" y="372">· 企业内部 Agent 中台</text>
+      <text x="60" y="390">· 多任务并发、审计追溯</text>
+      <text x="60" y="408">· 长周期自动化流程</text>
+    </g>
+
+    <text x="60" y="442" font-size="12" font-weight="700" fill="#2563eb">可控性</text>
+    <g>
+      <rect x="60" y="454" width="200" height="10" rx="5" fill="#e2e8f0"/>
+      <rect x="60" y="454" width="190" height="10" rx="5" fill="#2563eb"/>
+      <text x="270" y="462" font-size="10" fill="#2563eb" font-weight="700">高</text>
+    </g>
+    <text x="60" y="490" font-size="10" fill="#64748b">工程化导向，确定性优先</text>
+  </g>
+
+  <!-- Codex -->
+  <g>
+    <rect x="340" y="90" width="280" height="420" rx="14" fill="white" stroke="#10b981" stroke-width="2"/>
+    <rect x="340" y="90" width="280" height="70" rx="14" fill="#10b981"/>
+    <rect x="340" y="124" width="280" height="36" fill="#10b981"/>
+    <text x="480" y="124" text-anchor="middle" font-size="17" font-weight="800" fill="white">Codex</text>
+    <text x="480" y="148" text-anchor="middle" font-size="11" fill="white" opacity="0.9">OpenAI 代码/终端 Agent</text>
+
+    <text x="360" y="192" font-size="12" font-weight="700" fill="#059669">定位</text>
+    <text x="360" y="212" font-size="11" fill="#1e293b">面向开发者的 CLI / IDE Agent</text>
+
+    <text x="360" y="244" font-size="12" font-weight="700" fill="#059669">强项</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="360" y="264">· 深度 OpenAI 生态集成</text>
+      <text x="360" y="282">· 模型能力强（GPT-5 系列）</text>
+      <text x="360" y="300">· 代码理解 / 重构 / 调试</text>
+      <text x="360" y="318">· 插件 / Function Calling 成熟</text>
+    </g>
+
+    <text x="360" y="352" font-size="12" font-weight="700" fill="#059669">典型场景</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="360" y="372">· 代码生成 / 重构</text>
+      <text x="360" y="390">· 终端自动化任务</text>
+      <text x="360" y="408">· 个人开发助手</text>
+    </g>
+
+    <text x="360" y="442" font-size="12" font-weight="700" fill="#059669">可控性</text>
+    <g>
+      <rect x="360" y="454" width="200" height="10" rx="5" fill="#e2e8f0"/>
+      <rect x="360" y="454" width="128" height="10" rx="5" fill="#10b981"/>
+      <text x="570" y="462" font-size="10" fill="#10b981" font-weight="700">中</text>
+    </g>
+    <text x="360" y="490" font-size="10" fill="#64748b">交互体验好，企业治理偏弱</text>
+  </g>
+
+  <!-- Claude Code -->
+  <g>
+    <rect x="640" y="90" width="280" height="420" rx="14" fill="white" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="640" y="90" width="280" height="70" rx="14" fill="#f59e0b"/>
+    <rect x="640" y="124" width="280" height="36" fill="#f59e0b"/>
+    <text x="780" y="124" text-anchor="middle" font-size="17" font-weight="800" fill="white">Claude Code</text>
+    <text x="780" y="148" text-anchor="middle" font-size="11" fill="white" opacity="0.9">Anthropic 终端 + IDE Agent</text>
+
+    <text x="660" y="192" font-size="12" font-weight="700" fill="#b45309">定位</text>
+    <text x="660" y="212" font-size="11" fill="#1e293b">面向研发全流程的交互式 Agent</text>
+
+    <text x="660" y="244" font-size="12" font-weight="700" fill="#b45309">强项</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="660" y="264">· Skills 按触发词动态挂载</text>
+      <text x="660" y="282">· 子 Agent（Explore/Plan 等）</text>
+      <text x="660" y="300">· MCP 生态丰富</text>
+      <text x="660" y="318">· 大上下文（200K / 1M）</text>
+    </g>
+
+    <text x="660" y="352" font-size="12" font-weight="700" fill="#b45309">典型场景</text>
+    <g font-size="11" fill="#1e293b">
+      <text x="660" y="372">· 研发全流程助手</text>
+      <text x="660" y="390">· 文档 / PPT / 数据处理</text>
+      <text x="660" y="408">· 多工具编排的复杂任务</text>
+    </g>
+
+    <text x="660" y="442" font-size="12" font-weight="700" fill="#b45309">可控性</text>
+    <g>
+      <rect x="660" y="454" width="200" height="10" rx="5" fill="#e2e8f0"/>
+      <rect x="660" y="454" width="140" height="10" rx="5" fill="#f59e0b"/>
+      <text x="870" y="462" font-size="10" fill="#f59e0b" font-weight="700">中</text>
+    </g>
+    <text x="660" y="490" font-size="10" fill="#64748b">能力全面，需要自行落工程规范</text>
+  </g>
+</svg>

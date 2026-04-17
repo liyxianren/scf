@@ -1,0 +1,78 @@
+<svg viewBox="0 0 960 480" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <rect width="960" height="480" fill="#f8fafc"/>
+  <text x="480" y="34" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Layer 5 · 混合内存系统：三层分工</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#64748b">不同性质的记忆用不同存储，各取所长，解决长周期任务的"失忆"问题</text>
+
+  <!-- JSONL -->
+  <g>
+    <rect x="50" y="110" width="280" height="310" rx="12" fill="white" stroke="#64748b" stroke-width="2"/>
+    <rect x="50" y="110" width="280" height="54" rx="12" fill="#64748b"/>
+    <rect x="50" y="140" width="280" height="24" fill="#64748b"/>
+    <text x="190" y="138" text-anchor="middle" font-size="15" font-weight="700" fill="white">JSONL 日志</text>
+    <text x="190" y="156" text-anchor="middle" font-size="11" fill="white" opacity="0.9">原始执行记录</text>
+    <g font-size="11" fill="#475569">
+      <text x="70" y="190" font-weight="600" fill="#1e293b">形态</text>
+      <text x="70" y="208">· 每行一条 JSON 事件</text>
+      <text x="70" y="224">· append-only 持久化</text>
+      <text x="70" y="248" font-weight="600" fill="#1e293b">记录内容</text>
+      <text x="70" y="266">· 用户输入 · 模型规划</text>
+      <text x="70" y="282">· 工具调用 · 执行结果</text>
+      <text x="70" y="298">· 异常与 token 统计</text>
+      <text x="70" y="322" font-weight="600" fill="#1e293b">用途</text>
+      <text x="70" y="340">· 审计追溯</text>
+      <text x="70" y="356">· 故障回放</text>
+      <text x="70" y="372">· 后续做摘要/索引的原料</text>
+      <text x="70" y="400" font-size="10" fill="#94a3b8">形象：磁带 / 行车记录仪</text>
+    </g>
+  </g>
+
+  <!-- MEMORY.md -->
+  <g>
+    <rect x="340" y="110" width="280" height="310" rx="12" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <rect x="340" y="110" width="280" height="54" rx="12" fill="#2563eb"/>
+    <rect x="340" y="140" width="280" height="24" fill="#2563eb"/>
+    <text x="480" y="138" text-anchor="middle" font-size="15" font-weight="700" fill="white">MEMORY.md</text>
+    <text x="480" y="156" text-anchor="middle" font-size="11" fill="white" opacity="0.9">核心规则与知识</text>
+    <g font-size="11" fill="#475569">
+      <text x="360" y="190" font-weight="600" fill="#1e293b">形态</text>
+      <text x="360" y="208">· 结构化 Markdown</text>
+      <text x="360" y="224">· 按主题/类型分块</text>
+      <text x="360" y="248" font-weight="600" fill="#1e293b">记录内容</text>
+      <text x="360" y="266">· 用户偏好（总是用 Python）</text>
+      <text x="360" y="282">· 团队规则（禁 force push）</text>
+      <text x="360" y="298">· 领域常识（数据库 schema）</text>
+      <text x="360" y="322" font-weight="600" fill="#1e293b">用途</text>
+      <text x="360" y="340">· 每轮自动注入系统提示</text>
+      <text x="360" y="356">· 跨会话、跨任务持久</text>
+      <text x="360" y="372">· 人类可读可编辑</text>
+      <text x="360" y="400" font-size="10" fill="#94a3b8">形象：员工手册 / 记事本</text>
+    </g>
+  </g>
+
+  <!-- Vector -->
+  <g>
+    <rect x="630" y="110" width="280" height="310" rx="12" fill="white" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="630" y="110" width="280" height="54" rx="12" fill="#f59e0b"/>
+    <rect x="630" y="140" width="280" height="24" fill="#f59e0b"/>
+    <text x="770" y="138" text-anchor="middle" font-size="15" font-weight="700" fill="white">向量 / FTS5 索引</text>
+    <text x="770" y="156" text-anchor="middle" font-size="11" fill="white" opacity="0.9">语义检索</text>
+    <g font-size="11" fill="#475569">
+      <text x="650" y="190" font-weight="600" fill="#1e293b">形态</text>
+      <text x="650" y="208">· 向量嵌入 + 全文索引</text>
+      <text x="650" y="224">· 支持模糊 / 语义查询</text>
+      <text x="650" y="248" font-weight="600" fill="#1e293b">索引来源</text>
+      <text x="650" y="266">· 历史 JSONL 日志</text>
+      <text x="650" y="282">· 用户文档 / 代码</text>
+      <text x="650" y="298">· 内部知识库</text>
+      <text x="650" y="322" font-weight="600" fill="#1e293b">用途</text>
+      <text x="650" y="340">· 按当前任务"按需召回"</text>
+      <text x="650" y="356">· 不走满上下文</text>
+      <text x="650" y="372">· 长周期任务的搜索引擎</text>
+      <text x="650" y="400" font-size="10" fill="#94a3b8">形象：图书馆 + 搜索</text>
+    </g>
+  </g>
+
+  <!-- Footer -->
+  <rect x="50" y="436" width="860" height="32" rx="6" fill="white" stroke="#cbd5e1"/>
+  <text x="480" y="456" text-anchor="middle" font-size="11" fill="#1e293b">日志 = 全量可追溯　·　MEMORY.md = 始终在场的规则　·　向量索引 = 用到再查的长期知识</text>
+</svg>

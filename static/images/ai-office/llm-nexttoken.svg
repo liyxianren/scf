@@ -1,0 +1,69 @@
+<svg viewBox="0 0 960 380" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="arr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="960" height="380" fill="#f8fafc"/>
+  <text x="480" y="34" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">LLM = 下一个 token 的概率预测器</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#64748b">每次只产出一个 token，把它拼回输入再算下一个，直到生成停止符</text>
+
+  <g>
+    <rect x="30" y="120" width="150" height="100" rx="10" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="105" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">输入文本</text>
+    <text x="105" y="180" text-anchor="middle" font-size="14" fill="#475569">"今天天气真"</text>
+    <text x="105" y="205" text-anchor="middle" font-size="11" fill="#94a3b8">user prompt</text>
+  </g>
+  <line x1="185" y1="170" x2="215" y2="170" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <g>
+    <rect x="220" y="120" width="140" height="100" rx="10" fill="white" stroke="#6366f1" stroke-width="2"/>
+    <text x="290" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">分词 Tokenizer</text>
+    <text x="290" y="180" text-anchor="middle" font-size="12" fill="#475569">[今天][天气][真]</text>
+    <text x="290" y="205" text-anchor="middle" font-size="11" fill="#94a3b8">拆成 token id</text>
+  </g>
+  <line x1="365" y1="170" x2="395" y2="170" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <g>
+    <rect x="400" y="105" width="160" height="130" rx="10" fill="white" stroke="#0ea5e9" stroke-width="2"/>
+    <text x="480" y="130" text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">Transformer</text>
+    <text x="480" y="150" text-anchor="middle" font-size="11" fill="#94a3b8">(几十层注意力)</text>
+    <rect x="420" y="160" width="120" height="8" rx="2" fill="#0ea5e9" opacity="0.55"/>
+    <rect x="420" y="173" width="120" height="8" rx="2" fill="#0ea5e9" opacity="0.7"/>
+    <rect x="420" y="186" width="120" height="8" rx="2" fill="#0ea5e9" opacity="0.8"/>
+    <rect x="420" y="199" width="120" height="8" rx="2" fill="#0ea5e9" opacity="0.9"/>
+    <rect x="420" y="212" width="120" height="8" rx="2" fill="#0ea5e9"/>
+  </g>
+  <line x1="565" y1="170" x2="595" y2="170" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <g>
+    <rect x="600" y="90" width="170" height="160" rx="10" fill="white" stroke="#f59e0b" stroke-width="2"/>
+    <text x="685" y="115" text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">下一个 token 概率</text>
+    <g font-size="11" fill="#475569">
+      <text x="615" y="140">好</text>
+      <rect x="640" y="132" width="100" height="10" fill="#10b981"/>
+      <text x="745" y="140" fill="#10b981" font-weight="700">0.62</text>
+      <text x="615" y="163">不</text>
+      <rect x="640" y="155" width="40" height="10" fill="#94a3b8"/>
+      <text x="745" y="163">0.18</text>
+      <text x="615" y="186">闷</text>
+      <rect x="640" y="178" width="20" height="10" fill="#94a3b8"/>
+      <text x="745" y="186">0.07</text>
+      <text x="615" y="209">冷</text>
+      <rect x="640" y="201" width="12" height="10" fill="#94a3b8"/>
+      <text x="745" y="209">0.04</text>
+      <text x="615" y="232">…</text>
+    </g>
+  </g>
+  <line x1="775" y1="170" x2="805" y2="170" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <g>
+    <rect x="810" y="120" width="120" height="100" rx="10" fill="#10b981" stroke="#10b981" stroke-width="2"/>
+    <text x="870" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="white">采样输出</text>
+    <text x="870" y="186" text-anchor="middle" font-size="28" font-weight="700" fill="white">好</text>
+    <text x="870" y="208" text-anchor="middle" font-size="10" fill="white" opacity="0.9">拼回输入</text>
+  </g>
+
+  <path d="M 870 220 Q 870 320 480 320 Q 100 320 105 220" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arr1)"/>
+  <text x="480" y="348" text-anchor="middle" font-size="12" fill="#64748b">把新 token 追加回输入 → 继续循环，直到生成停止符</text>
+</svg>

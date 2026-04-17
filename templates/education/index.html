@@ -300,6 +300,14 @@
     background: linear-gradient(90deg, #0ea5e9, #22c55e);
 }
 
+.lang-card-new.ai-office::before {
+    background: linear-gradient(90deg, #2563eb, #6366f1);
+}
+
+.lang-card-new.ai-office-deck::before {
+    background: linear-gradient(90deg, #6366f1, #a855f7);
+}
+
 .lang-card-new:hover {
     transform: translateY(-10px);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.08);
@@ -363,6 +371,20 @@
 .vibe .lang-card-icon {
     background: linear-gradient(135deg, #0ea5e9, #22c55e);
     box-shadow: 0 8px 24px rgba(14, 165, 233, 0.3);
+}
+
+.ai-office .lang-card-icon {
+    background: linear-gradient(135deg, #2563eb, #6366f1);
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
+    font-size: 1.2rem;
+    letter-spacing: 1px;
+}
+
+.ai-office-deck .lang-card-icon {
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+    font-size: 1.1rem;
+    letter-spacing: 0.5px;
 }
 
 .lang-card-title {
@@ -675,6 +697,32 @@
             </div>
             <div class="lang-card-cta">
                 开始学习 <span class="lang-card-cta-arrow">&rarr;</span>
+            </div>
+        </a>
+
+        <a href="/ai_office/lessons" class="lang-card-new ai-office scroll-reveal scroll-delay-4">
+            <div class="lang-card-icon">AI</div>
+            <div class="lang-card-title">AI 办公</div>
+            <div class="lang-card-desc">LLM、Agent 与 Prompt 工程 —— 用 AI 改写日常办公</div>
+            <div class="lang-card-meta">
+                <span>3 章课程</span>
+                <span>内部培训</span>
+            </div>
+            <div class="lang-card-cta">
+                开始学习 <span class="lang-card-cta-arrow">&rarr;</span>
+            </div>
+        </a>
+
+        <a href="/ai_office_deck/lessons" class="lang-card-new ai-office-deck scroll-reveal scroll-delay-4">
+            <div class="lang-card-icon">讲案</div>
+            <div class="lang-card-title">AI 办公 · 讲案</div>
+            <div class="lang-card-desc">幻灯片骨架 · 讲师现场速查用（与 AI 办公 共享同一套图与知识点）</div>
+            <div class="lang-card-meta">
+                <span>3 章讲案</span>
+                <span>讲师专用</span>
+            </div>
+            <div class="lang-card-cta">
+                打开讲案 <span class="lang-card-cta-arrow">&rarr;</span>
             </div>
         </a>
     </div>

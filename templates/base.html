@@ -21,17 +21,48 @@
 
 <body>
     {% set lang = language|default('python') %}
-    {% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+    {% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' if lang == 'vibe' else 'AI 办公' if lang == 'ai_office' else 'AI 办公 · 讲案' if lang == 'ai_office_deck' else 'Python' %}
     {% set lang_prefix = '/' + lang %}
 
+    {% set nav_section = 'code' %}
+    {% if request.path == '/' %}
+        {% set nav_section = 'home' %}
+    {% elif request.path.startswith('/summer') %}
+        {% set nav_section = 'projects' %}
+    {% elif request.path.startswith('/oa') or request.path.startswith('/auth') %}
+        {% set nav_section = 'oa' %}
+    {% endif %}
+
     <nav class="navbar">
-        <!-- Debug: Request Path = [{{ request.path }}] -->
-        <div class="nav-container">
-            {% if request.path.startswith('/oa') or request.path.startswith('/auth') %}
-            <!-- OA 内部系统导航（角色分流） -->
-            <a href="{% if current_user.is_authenticated %}{% if current_user.role == 'admin' %}/auth/admin/dashboard{% elif current_user.role == 'teacher' %}/auth/teacher/dashboard{% elif current_user.role == 'student' %}/auth/student/dashboard{% else %}/oa/{% endif %}{% else %}/auth/login{% endif %}" class="nav-logo">SCF OA</a>
-            <div class="nav-links">
-                {% if current_user.is_authenticated %}
+        <!-- Tier 1: 全局导航 -->
+        <div class="nav-global">
+            <div class="nav-container">
+                <a href="/" class="nav-logo">
+                    <img src="{{ url_for('static', filename='images/logo-nav.png') }}" alt="" class="nav-logo-img">
+                    SCF
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link {% if nav_section == 'home' %}active{% endif %}">首页</a>
+                    <a href="/summer" class="nav-link {% if nav_section == 'projects' %}active{% endif %}">项目</a>
+                    <a href="/oa/" class="nav-link {% if nav_section == 'oa' %}active{% endif %}">OA</a>
+                    <a href="/code" class="nav-link {% if nav_section == 'code' %}active{% endif %}">Code Learn</a>
+                </div>
+                <div class="nav-user">
+                    {% if current_user.is_authenticated %}
+                    <span class="nav-user-name">{{ current_user.display_name }}</span>
+                    <a href="/auth/logout" class="nav-link nav-link-logout">退出</a>
+                    {% else %}
+                    <a href="/auth/login" class="nav-link">登录</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Tier 2: 区块子导航 -->
+        {% if nav_section == 'oa' and current_user.is_authenticated %}
+        <div class="nav-sub">
+            <div class="nav-container">
+                <div class="nav-links">
                     {% if current_user.role == 'admin' %}
                     <a href="/auth/admin/dashboard" class="nav-link">管理面板</a>
                     <a href="/oa/schedule" class="nav-link">排课表</a>
@@ -48,41 +79,29 @@
                     <a href="/auth/student/dashboard" class="nav-link">我的课表</a>
                     <a href="/auth/chat" class="nav-link">消息 <span id="navUnreadBadge" style="display:none;margin-left:6px;padding:1px 7px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;vertical-align:middle"></span></a>
                     {% endif %}
-                    <span class="nav-link" style="opacity:0.6;font-size:0.85em;cursor:default">{{ current_user.display_name }}</span>
-                    <a href="/auth/logout" class="nav-link" style="opacity:0.7;font-size:0.9em">退出</a>
-                {% else %}
-                    <a href="/auth/login" class="nav-link">登录</a>
-                {% endif %}
+                </div>
             </div>
-            {% elif request.path.startswith('/company') or request.path.startswith('/projects') %}
-            <!-- Agent 导航 -->
-            <a href="/company/agents" class="nav-logo">SCF Agent Hub</a>
-            <div class="nav-links">
-                <a href="/company/creative" class="nav-link">创意助手</a>
-                <a href="/company/plans" class="nav-link">计划书</a>
-                <a href="/company/handbook/library" class="nav-link">工程手册</a>
-                <a href="/" class="nav-link" style="opacity: 0.7; font-size: 0.9em;">返回首页</a>
-            </div>
-            {% else %}
-            <!-- Code Learn 导航 -->
-            <a href="/" class="nav-logo">Code Learn</a>
-
-            <!-- 导航链接 -->
-            <div class="nav-links">
-                <a href="{{ lang_prefix }}/lessons" class="nav-link">教程</a>
-                <a href="{{ lang_prefix }}/playground" class="nav-link">练习场</a>
-                <a href="{{ lang_prefix }}/exercises" class="nav-link">题库</a>
-                <a href="/" class="nav-link nav-link-home">返回首页</a>
-            </div>
-
-            <!-- 语言切换器 -->
-            <div class="lang-switcher">
-                <a href="/python/lessons" class="lang-btn {% if lang == 'python' %}active{% endif %}">Python</a>
-                <a href="/c/lessons" class="lang-btn {% if lang == 'c' %}active{% endif %}">C</a>
-                <a href="/vibe/lessons" class="lang-btn {% if lang == 'vibe' %}active{% endif %}">Vibe</a>
-            </div>
-            {% endif %}
         </div>
+        {% elif nav_section == 'code' %}
+        <div class="nav-sub">
+            <div class="nav-container">
+                <div class="nav-links">
+                    <a href="{{ lang_prefix }}/lessons" class="nav-link">教程</a>
+                    {% if lang not in ['ai_office', 'ai_office_deck'] %}
+                    <a href="{{ lang_prefix }}/playground" class="nav-link">练习场</a>
+                    <a href="{{ lang_prefix }}/exercises" class="nav-link">题库</a>
+                    {% endif %}
+                </div>
+                <div class="lang-switcher">
+                    <a href="/python/lessons" class="lang-btn {% if lang == 'python' %}active{% endif %}">Python</a>
+                    <a href="/c/lessons" class="lang-btn {% if lang == 'c' %}active{% endif %}">C</a>
+                    <a href="/vibe/lessons" class="lang-btn {% if lang == 'vibe' %}active{% endif %}">Vibe</a>
+                    <a href="/ai_office/lessons" class="lang-btn {% if lang == 'ai_office' %}active{% endif %}">AI 办公</a>
+                    <a href="/ai_office_deck/lessons" class="lang-btn {% if lang == 'ai_office_deck' %}active{% endif %}">讲案</a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </nav>
 
     <main class="main-content">

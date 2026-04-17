@@ -171,6 +171,21 @@
     </div>
 
     <div class="section">
+        <h2><span class="material-icons">upload_file</span> 导入 Excel 课表</h2>
+        <div class="card">
+            <div style="background:#f9fafb;border:2px dashed #d1d5db;border-radius:12px;padding:24px;text-align:center">
+                <p style="color:#6b7280;font-size:.9rem;margin:0 0 12px 0">上传 2026年总课表.xlsx 将自动解析并导入课程和待办数据</p>
+                <input type="file" id="importFile" accept=".xlsx,.xls" style="display:none">
+                <button id="importBtn" onclick="document.getElementById('importFile').click()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:.9rem;cursor:pointer">
+                    <span class="material-icons" style="font-size:1.1rem">cloud_upload</span>
+                    选择 Excel 文件
+                </button>
+                <div id="importResult" style="margin-top:12px;font-size:.85rem"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
         <h2><span class="material-icons">psychology_alt</span> 排课风险台</h2>
         <div class="card">
             <div id="riskSummary" class="workflow-summary"></div>
@@ -284,6 +299,40 @@ let adminActionCenter = null;
 let leaveDecisionState = {id: null};
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+// Excel 课表导入
+document.getElementById('importFile').addEventListener('change', async function() {
+    const file = this.files[0];
+    if (!file) return;
+    const btn = document.getElementById('importBtn');
+    const result = document.getElementById('importResult');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="material-icons" style="font-size:1.1rem">hourglass_top</span> 导入中...';
+    result.textContent = '';
+    result.style.color = '';
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res = await fetch('/oa/api/import-excel', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (json.success) {
+            const warningCount = Array.isArray(json.data.warnings) ? json.data.warnings.length : 0;
+            const aliasHits = json.data.teacher_alias_hits ? Object.values(json.data.teacher_alias_hits).reduce((s, c) => s + Number(c || 0), 0) : 0;
+            result.textContent = `导入成功: ${json.data.schedules_count} 条课程, ${json.data.todos_count} 条待办${warningCount ? `，${warningCount} 条警告` : ''}${aliasHits ? `，${aliasHits} 个教师别名被归一化` : ''}`;
+            result.style.color = '#059669';
+        } else {
+            result.textContent = json.error || '导入失败';
+            result.style.color = '#dc2626';
+        }
+    } catch (e) {
+        result.textContent = '网络错误: ' + e.message;
+        result.style.color = '#dc2626';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons" style="font-size:1.1rem">cloud_upload</span> 选择 Excel 文件';
+        this.value = '';
+    }
+});
 function weekRange(){
     const now = new Date();
     const day = (now.getDay() + 6) % 7;

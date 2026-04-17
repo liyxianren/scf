@@ -1,0 +1,90 @@
+<svg viewBox="0 0 960 640" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="arrL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="960" height="640" fill="#f8fafc"/>
+  <text x="480" y="34" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Openclaw 5 层架构总览</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#64748b">感官 → 交通枢纽 → 大脑 → 双手 → 长期记忆，每层各司其职且可替换</text>
+
+  <!-- Layer 1 -->
+  <g>
+    <rect x="80" y="90" width="800" height="86" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <rect x="80" y="90" width="130" height="86" rx="12" fill="#2563eb"/>
+    <text x="145" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="white">Layer 1</text>
+    <text x="145" y="144" text-anchor="middle" font-size="12" fill="white">接口与输入层</text>
+    <text x="145" y="162" text-anchor="middle" font-size="10" fill="white" opacity="0.85">(感官)</text>
+    <g font-size="12" fill="#1e293b">
+      <text x="230" y="118" font-weight="600">多渠道接入</text>
+      <text x="230" y="140">CLI（核心）· WhatsApp / Telegram · Discord / Slack · Cron / Webhooks</text>
+      <text x="230" y="160" fill="#64748b">所有任务的起点：无论消息来自哪，都从这里进入系统</text>
+    </g>
+  </g>
+
+  <!-- Layer 2 -->
+  <g>
+    <rect x="80" y="188" width="800" height="100" rx="12" fill="#e0e7ff" stroke="#6366f1" stroke-width="2"/>
+    <rect x="80" y="188" width="130" height="100" rx="12" fill="#6366f1"/>
+    <text x="145" y="222" text-anchor="middle" font-size="14" font-weight="700" fill="white">Layer 2</text>
+    <text x="145" y="242" text-anchor="middle" font-size="12" fill="white">网关控制平面</text>
+    <text x="145" y="260" text-anchor="middle" font-size="10" fill="white" opacity="0.85">(交通枢纽)</text>
+    <g font-size="12" fill="#1e293b">
+      <text x="230" y="214" font-weight="600">标准化 + 隔离 + 并发控制（工程核心）</text>
+      <text x="230" y="234">· 通道适配器：不同渠道的输入统一成标准结构</text>
+      <text x="230" y="252">· 会话路由器：按用户 / 任务分配独立会话，彻底隔离</text>
+      <text x="230" y="270">· 车道队列：同一会话内 FIFO 串行执行，消除竞态</text>
+    </g>
+  </g>
+
+  <!-- Layer 3 -->
+  <g>
+    <rect x="80" y="300" width="800" height="100" rx="12" fill="#cffafe" stroke="#0ea5e9" stroke-width="2"/>
+    <rect x="80" y="300" width="130" height="100" rx="12" fill="#0ea5e9"/>
+    <text x="145" y="334" text-anchor="middle" font-size="14" font-weight="700" fill="white">Layer 3</text>
+    <text x="145" y="354" text-anchor="middle" font-size="12" fill="white">Agent 运行器</text>
+    <text x="145" y="372" text-anchor="middle" font-size="10" fill="white" opacity="0.85">(大脑)</text>
+    <g font-size="12" fill="#1e293b">
+      <text x="230" y="326" font-weight="600">理解 · 拆解 · 规划 · 上下文管理</text>
+      <text x="230" y="346">· 模型解析器：Claude / OpenAI / Ollama 之间动态选型</text>
+      <text x="230" y="364">· 系统提示词构建器：任务 + 工具 + 记忆 + 规则 动态注入</text>
+      <text x="230" y="382">· 上下文窗口防护：Token 精细化管理，可控降级而非静默截断</text>
+    </g>
+  </g>
+
+  <!-- Layer 4 -->
+  <g>
+    <rect x="80" y="412" width="800" height="100" rx="12" fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+    <rect x="80" y="412" width="130" height="100" rx="12" fill="#10b981"/>
+    <text x="145" y="446" text-anchor="middle" font-size="14" font-weight="700" fill="white">Layer 4</text>
+    <text x="145" y="466" text-anchor="middle" font-size="12" fill="white">执行与工具层</text>
+    <text x="145" y="484" text-anchor="middle" font-size="10" fill="white" opacity="0.85">(双手)</text>
+    <g font-size="12" fill="#1e293b">
+      <text x="230" y="438" font-weight="600">把决策变成真实操作</text>
+      <text x="230" y="458">· LLM API 调用模块：流式 / 重试 / 成本统计 / 错误兜底</text>
+      <text x="230" y="476">· 沙箱运行时：Shell 命令 · 无头浏览器(Puppeteer) · 文件系统读写</text>
+    </g>
+  </g>
+
+  <!-- Layer 5 -->
+  <g>
+    <rect x="80" y="524" width="800" height="100" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="80" y="524" width="130" height="100" rx="12" fill="#f59e0b"/>
+    <text x="145" y="558" text-anchor="middle" font-size="14" font-weight="700" fill="white">Layer 5</text>
+    <text x="145" y="578" text-anchor="middle" font-size="12" fill="white">混合内存系统</text>
+    <text x="145" y="596" text-anchor="middle" font-size="10" fill="white" opacity="0.85">(长期记忆)</text>
+    <g font-size="12" fill="#1e293b">
+      <text x="230" y="550" font-weight="600">三层存储，解决 Agent 失忆问题</text>
+      <text x="230" y="570">· JSONL 日志：原始执行记录，可审计 / 可回放</text>
+      <text x="230" y="588">· MEMORY.md：核心规则 / 用户偏好 / 长期知识</text>
+      <text x="230" y="606">· 向量 + FTS5 索引：语义检索，精准召回相关历史</text>
+    </g>
+  </g>
+
+  <!-- Right side flow arrows -->
+  <line x1="905" y1="130" x2="905" y2="250" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrL)"/>
+  <line x1="905" y1="260" x2="905" y2="360" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrL)"/>
+  <line x1="905" y1="370" x2="905" y2="470" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrL)"/>
+  <line x1="905" y1="480" x2="905" y2="580" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrL)"/>
+  <text x="935" y="360" font-size="10" fill="#64748b" transform="rotate(90 935 360)">数据 / 请求流向</text>
+</svg>

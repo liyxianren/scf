@@ -1,0 +1,57 @@
+<svg viewBox="0 0 960 460" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <rect width="960" height="460" fill="#f8fafc"/>
+  <text x="480" y="34" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Layer 3 · 上下文窗口防护：可控降级 vs. 静默截断</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#64748b">提前算 token 占用，优先保留关键内容，非核心历史做摘要压缩，避免核心指令被默默截断</text>
+
+  <!-- Naive approach -->
+  <text x="80" y="100" font-size="13" font-weight="700" fill="#ef4444">多数 Agent：静默截断（有问题）</text>
+  <g>
+    <rect x="80" y="115" width="800" height="44" rx="6" fill="white" stroke="#cbd5e1"/>
+    <rect x="80" y="115" width="120" height="44" rx="6" fill="#2563eb"/>
+    <text x="140" y="142" text-anchor="middle" font-size="11" font-weight="600" fill="white">系统指令</text>
+    <rect x="200" y="115" width="140" height="44" fill="#6366f1"/>
+    <text x="270" y="142" text-anchor="middle" font-size="11" fill="white">任务要求</text>
+    <rect x="340" y="115" width="180" height="44" fill="#0ea5e9"/>
+    <text x="430" y="142" text-anchor="middle" font-size="11" fill="white">早期对话</text>
+    <rect x="520" y="115" width="200" height="44" fill="#94a3b8"/>
+    <text x="620" y="142" text-anchor="middle" font-size="11" fill="white">中期对话</text>
+    <rect x="720" y="115" width="160" height="44" fill="#f59e0b"/>
+    <text x="800" y="142" text-anchor="middle" font-size="11" fill="white">最新结果</text>
+  </g>
+  <g>
+    <line x1="80" y1="175" x2="520" y2="175" stroke="#ef4444" stroke-width="2.5"/>
+    <text x="300" y="193" text-anchor="middle" font-size="11" fill="#ef4444" font-weight="700">← 溢出部分从头截掉：系统指令和任务要求直接丢失 → Agent 跑偏</text>
+  </g>
+
+  <!-- Separator -->
+  <line x1="80" y1="225" x2="880" y2="225" stroke="#cbd5e1" stroke-dasharray="4,4"/>
+
+  <!-- Openclaw approach -->
+  <text x="80" y="265" font-size="13" font-weight="700" fill="#10b981">Openclaw：按优先级降级（正确）</text>
+  <g>
+    <rect x="80" y="280" width="800" height="44" rx="6" fill="white" stroke="#cbd5e1"/>
+    <rect x="80" y="280" width="120" height="44" rx="6" fill="#2563eb"/>
+    <text x="140" y="301" text-anchor="middle" font-size="11" font-weight="600" fill="white">系统指令</text>
+    <text x="140" y="316" text-anchor="middle" font-size="9" fill="white" opacity="0.85">必保留</text>
+    <rect x="200" y="280" width="140" height="44" fill="#6366f1"/>
+    <text x="270" y="301" text-anchor="middle" font-size="11" fill="white">任务要求</text>
+    <text x="270" y="316" text-anchor="middle" font-size="9" fill="white" opacity="0.85">必保留</text>
+    <rect x="340" y="280" width="140" height="44" fill="#f59e0b"/>
+    <text x="410" y="301" text-anchor="middle" font-size="11" fill="white">历史摘要</text>
+    <text x="410" y="316" text-anchor="middle" font-size="9" fill="white" opacity="0.9">压缩后</text>
+    <rect x="480" y="280" width="240" height="44" fill="#0ea5e9"/>
+    <text x="600" y="301" text-anchor="middle" font-size="11" fill="white">最近的执行结果</text>
+    <text x="600" y="316" text-anchor="middle" font-size="9" fill="white" opacity="0.9">必保留</text>
+    <rect x="720" y="280" width="160" height="44" fill="#10b981"/>
+    <text x="800" y="301" text-anchor="middle" font-size="11" fill="white">当前工具输出</text>
+    <text x="800" y="316" text-anchor="middle" font-size="9" fill="white" opacity="0.9">必保留</text>
+  </g>
+
+  <g>
+    <rect x="80" y="340" width="800" height="80" rx="8" fill="white" stroke="#10b981" stroke-width="1.5"/>
+    <text x="100" y="364" font-size="12" font-weight="700" fill="#047857">三条规则：</text>
+    <text x="100" y="384" font-size="11" fill="#1e293b">① 系统指令 / 任务要求 / 最新结果 —— 永远保留</text>
+    <text x="100" y="400" font-size="11" fill="#1e293b">② 早期/中期对话 —— 不直接丢，而是摘要压缩成 1-2 段（保留关键决策和结论）</text>
+    <text x="100" y="416" font-size="11" fill="#1e293b">③ 工具调用的冗长原始输出 —— 二次处理后再入上下文（只保留有用字段）</text>
+  </g>
+</svg>

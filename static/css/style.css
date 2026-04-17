@@ -105,13 +105,17 @@ body {
     background: rgba(255, 255, 255, 0.78);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
     padding: 0;
     position: sticky;
     top: 0;
     z-index: 1000;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
     transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Tier 1: 全局导航 */
+.nav-global {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .nav-container {
@@ -121,7 +125,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    height: 60px;
+    height: 56px;
 }
 
 .nav-logo {
@@ -131,6 +135,9 @@ body {
     text-decoration: none;
     letter-spacing: -0.02em;
     transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .nav-logo:hover {
@@ -142,6 +149,11 @@ body {
 
 .nav-logo::before {
     display: none;
+}
+
+.nav-logo-img {
+    height: 22px;
+    width: auto;
 }
 
 .nav-links {
@@ -174,6 +186,47 @@ body {
 .nav-link.active {
     color: var(--text-primary);
     background: var(--hover-bg);
+}
+
+.nav-global .nav-link.active {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.08);
+    font-weight: 600;
+}
+
+/* 右侧用户信息 */
+.nav-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.nav-user-name {
+    color: var(--text-secondary);
+    opacity: 0.7;
+    font-size: 0.85em;
+}
+
+.nav-link-logout {
+    opacity: 0.7;
+    font-size: 0.9em;
+}
+
+/* Tier 2: 区块子导航 */
+.nav-sub {
+    background: rgba(249, 250, 251, 0.85);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+}
+
+.nav-sub .nav-container {
+    height: 42px;
+}
+
+.nav-sub .nav-link {
+    font-size: 13px;
+    padding: 5px 12px;
 }
 
 /* 语言切换器 */

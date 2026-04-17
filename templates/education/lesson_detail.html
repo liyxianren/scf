@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% set lang = language|default('python') %}
-{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' if lang == 'vibe' else 'AI 办公' if lang == 'ai_office' else 'AI 办公 · 讲案' if lang == 'ai_office_deck' else 'Python' %}
 {% set lang_prefix = '/' + lang %}
 
 {% block title %}教程详情 - {{ lang_name }}学习平台{% endblock %}
@@ -527,6 +527,248 @@
     border-radius: 8px;
 }
 
+/* AI 办公 阅读模式：无右侧栏，讲义居中、限宽、更适合长文阅读 */
+.lesson-page-reading {
+    max-width: 960px;
+}
+.lesson-page-reading .lesson-main {
+    max-width: 100%;
+}
+.lesson-page-reading .lesson-detail {
+    padding: 40px 44px;
+}
+.lesson-page-reading .lesson-body {
+    font-size: 16px;
+    line-height: 1.85;
+}
+.lesson-page-reading .lesson-body img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 24px auto;
+}
+
+/* ========== AI 办公 · 讲案（幻灯片骨架）投影友好样式 ========== */
+.lesson-page-deck {
+    max-width: 1280px;
+}
+.lesson-page-deck .lesson-detail {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+}
+.lesson-page-deck .lesson-header {
+    background: #fff;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border-radius: 14px;
+    padding: 36px 44px;
+    border-bottom: none;
+    margin-bottom: 28px;
+}
+.lesson-page-deck .lesson-header h1 {
+    font-size: 34px !important;
+}
+.lesson-page-deck .lesson-header .lesson-chapter-badge {
+    background: linear-gradient(135deg, #2563eb 0%, #6366f1 100%);
+    font-size: 15px;
+    padding: 7px 18px;
+}
+/* 讲案主体全局字号放大 —— 投影给观众看 */
+.lesson-page-deck .lesson-body {
+    font-size: 20px !important;
+    line-height: 1.75 !important;
+}
+/* 幻灯片卡片容器 */
+.deck-slide {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    padding: 44px 56px 48px;
+    margin: 0 0 32px;
+    position: relative;
+    border-left: 6px solid #2563eb;
+}
+.deck-slide::before {
+    content: 'SLIDE ' attr(data-slide-num);
+    position: absolute;
+    top: -12px;
+    left: 36px;
+    background: linear-gradient(135deg, #2563eb 0%, #6366f1 100%);
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.8px;
+    padding: 6px 16px;
+    border-radius: 14px;
+    box-shadow: 0 3px 12px rgba(37,99,235,0.35);
+}
+.deck-slide h2:first-child,
+.deck-slide h3:first-child {
+    margin-top: 4px !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    font-size: 32px !important;
+    line-height: 1.35 !important;
+    color: #0f172a !important;
+}
+.deck-slide h2,
+.deck-slide h3 {
+    font-size: 26px !important;
+    line-height: 1.4 !important;
+}
+.deck-slide > *:first-child {
+    margin-top: 4px;
+}
+.deck-slide p {
+    font-size: 20px !important;
+    line-height: 1.75 !important;
+    margin-bottom: 16px;
+}
+.deck-slide ul, .deck-slide ol {
+    font-size: 20px !important;
+    line-height: 1.75 !important;
+    padding-left: 28px;
+}
+.deck-slide li {
+    margin-bottom: 10px;
+}
+.deck-slide img {
+    display: block;
+    max-width: 100%;
+    margin: 22px auto;
+    border-radius: 8px;
+}
+.deck-slide pre {
+    margin: 22px 0 !important;
+}
+.deck-slide pre code {
+    font-size: 16px !important;
+    padding: 22px !important;
+    line-height: 1.65 !important;
+}
+.deck-slide table {
+    font-size: 18px !important;
+}
+.deck-slide table th,
+.deck-slide table td {
+    padding: 14px 18px !important;
+}
+.deck-slide p code,
+.deck-slide li code {
+    font-size: 18px !important;
+    padding: 3px 10px !important;
+}
+/* 金句 / 关键结论卡：深色稳重，投影时醒目 */
+.deck-slide blockquote {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%) !important;
+    border-left: 5px solid #0ea5e9 !important;
+    color: #e2e8f0 !important;
+    padding: 22px 28px !important;
+    border-radius: 0 12px 12px 0 !important;
+    margin: 26px 0 !important;
+    font-size: 20px !important;
+    font-weight: 500;
+    line-height: 1.7 !important;
+}
+.deck-slide blockquote strong {
+    color: #7dd3fc !important;
+}
+.deck-slide blockquote p {
+    margin: 0 !important;
+    font-size: 20px !important;
+    line-height: 1.7 !important;
+}
+/* 讲案正文中 hr 不显示（分片已由 section 承担） */
+.lesson-page-deck .lesson-body > hr {
+    display: none;
+}
+/* 讲案的练习题区域也不显示 */
+.lesson-page-deck .chapter-exercises {
+    display: none !important;
+}
+
+/* 讲义正文图片：点击放大 */
+.lesson-body img {
+    cursor: zoom-in;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    border-radius: 6px;
+}
+.lesson-body img:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(14, 165, 233, 0.18);
+}
+
+/* Lightbox 遮罩层 */
+.img-lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.92);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+    cursor: zoom-out;
+    backdrop-filter: blur(3px);
+}
+.img-lightbox.is-open {
+    opacity: 1;
+}
+.img-lightbox .lb-img {
+    max-width: 95vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    transform: scale(0.96);
+    transition: transform 0.22s ease;
+    cursor: default;
+    user-select: none;
+}
+.img-lightbox.is-open .lb-img {
+    transform: scale(1);
+}
+.img-lightbox .lb-close {
+    position: absolute;
+    top: 20px;
+    right: 28px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 28px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.img-lightbox .lb-close:hover {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    transform: scale(1.08);
+}
+.img-lightbox .lb-hint {
+    position: absolute;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    pointer-events: none;
+}
+body.lb-lock {
+    overflow: hidden;
+}
+
 /* 响应式 */
 @media (max-width: 1200px) {
     .lesson-page {
@@ -547,7 +789,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="lesson-page">
+<div class="lesson-page {% if lang in ['ai_office', 'ai_office_deck'] %}lesson-page-reading{% endif %} {% if lang == 'ai_office_deck' %}lesson-page-deck{% endif %}">
     <!-- 左侧主内容 -->
     <div class="lesson-main">
         <div class="lesson-detail" id="lesson-content">
@@ -572,7 +814,8 @@
         </div>
     </div>
 
-    <!-- 右侧辅助区域 -->
+    <!-- 右侧辅助区域（AI 办公 / 讲案 无需代码/API 练习区，不渲染） -->
+    {% if lang not in ['ai_office', 'ai_office_deck'] %}
     <div class="lesson-sidebar">
         {% if lang != 'vibe' %}
         <div class="code-playground">
@@ -659,6 +902,7 @@ print(f"我是{name}，今年{age}岁")
         </div>
         {% endif %}
     </div>
+    {% endif %}
 </div>
 {% endblock %}
 
@@ -728,8 +972,16 @@ function loadLesson() {
                 // 为代码块添加运行按钮
                 addRunButtons();
 
+                // 讲案模式：按 <hr> 分组成幻灯片卡片
+                if (LANG === 'ai_office_deck') {
+                    groupIntoDeckSlides();
+                }
+
+                // 为讲义正文图片启用点击放大（lightbox）
+                initImageLightbox();
+
                 // 设置下一章按钮（根据语言设置不同的章节数）
-                const maxChapter = LANG === 'c' ? 8 : (LANG === 'vibe' ? 17 : 7);
+                const maxChapter = LANG === 'c' ? 8 : (LANG === 'vibe' ? 17 : ((LANG === 'ai_office' || LANG === 'ai_office_deck') ? 3 : 7));
                 if (lesson.chapter_num < maxChapter) {
                     const nextBtn = document.getElementById('next-lesson-btn');
                     nextBtn.href = `${LANG_PREFIX}/lessons/${lesson.id + 1}`;
@@ -776,7 +1028,7 @@ function loadExercises() {
 }
 
 function addRunButtons() {
-    if (LANG === 'vibe') {
+    if (LANG === 'vibe' || LANG === 'ai_office' || LANG === 'ai_office_deck') {
         return;
     }
     document.querySelectorAll('.lesson-body pre').forEach((pre, index) => {
@@ -1011,5 +1263,93 @@ document.addEventListener('keydown', function(e) {
         runPlaygroundCode();
     }
 });
+
+// ========== 讲案模式：把 Markdown 渲染结果按 <hr> 分组成幻灯片卡片 ==========
+function groupIntoDeckSlides() {
+    const body = document.querySelector('.lesson-body');
+    if (!body) return;
+
+    const children = Array.from(body.childNodes).filter(n => {
+        // 跳过空文本节点
+        if (n.nodeType === Node.TEXT_NODE && !n.textContent.trim()) return false;
+        return true;
+    });
+
+    let slides = [];
+    let current = [];
+    children.forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'HR') {
+            if (current.length) slides.push(current);
+            current = [];
+        } else {
+            current.push(node);
+        }
+    });
+    if (current.length) slides.push(current);
+
+    // 清空 body，重新填入 section.deck-slide
+    body.innerHTML = '';
+    slides.forEach((nodes, i) => {
+        const section = document.createElement('section');
+        section.className = 'deck-slide';
+        section.setAttribute('data-slide-num', String(i + 1).padStart(2, '0'));
+        nodes.forEach(n => section.appendChild(n));
+        body.appendChild(section);
+    });
+}
+
+// ========== 图片点击放大（Lightbox） ==========
+function initImageLightbox() {
+    const imgs = document.querySelectorAll('.lesson-body img');
+    imgs.forEach(img => {
+        // 防止重复绑定
+        if (img.dataset.lbBound === '1') return;
+        img.dataset.lbBound = '1';
+        img.setAttribute('title', '点击放大');
+        img.addEventListener('click', function(e) {
+            e.stopPropagation();
+            openImageLightbox(img.getAttribute('src'), img.getAttribute('alt') || '');
+        });
+    });
+}
+
+function openImageLightbox(src, alt) {
+    // 若已存在则先移除
+    const existing = document.querySelector('.img-lightbox');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'img-lightbox';
+    overlay.innerHTML = `
+        <div class="lb-close" role="button" aria-label="关闭">×</div>
+        <img class="lb-img" src="${encodeURI(src)}" alt="${(alt || '').replace(/"/g, '&quot;')}" />
+        <div class="lb-hint">点击任意处 / 按 Esc 关闭</div>
+    `;
+    document.body.appendChild(overlay);
+    document.body.classList.add('lb-lock');
+
+    // 动画打开
+    requestAnimationFrame(() => overlay.classList.add('is-open'));
+
+    const close = () => {
+        overlay.classList.remove('is-open');
+        document.removeEventListener('keydown', onEsc);
+        setTimeout(() => {
+            overlay.remove();
+            // 如果还有别的 lightbox 存在（理论上不会）保留 lock
+            if (!document.querySelector('.img-lightbox')) {
+                document.body.classList.remove('lb-lock');
+            }
+        }, 220);
+    };
+
+    const onEsc = (e) => {
+        if (e.key === 'Escape') close();
+    };
+
+    // 点击遮罩任意处 + 关闭按钮都关闭；点击图片本身也关闭（体验最符合预期）
+    overlay.addEventListener('click', close);
+    document.addEventListener('keydown', onEsc);
+}
 </script>
 {% endblock %}

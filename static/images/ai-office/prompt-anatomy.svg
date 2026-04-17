@@ -1,0 +1,69 @@
+<svg viewBox="0 0 960 540" xmlns="http://www.w3.org/2000/svg" font-family="Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">
+  <rect width="960" height="540" fill="#f8fafc"/>
+  <text x="480" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">一个"能用"的 Prompt 的 5 个构件</text>
+  <text x="480" y="58" text-anchor="middle" font-size="12" fill="#64748b">缺哪一块，产出就会在对应维度翻车；记住这 5 个词，下次写 prompt 就有骨架</text>
+
+  <!-- Block 1: 角色 -->
+  <g>
+    <rect x="60" y="90" width="180" height="90" rx="10" fill="#2563eb"/>
+    <text x="150" y="128" text-anchor="middle" font-size="20" font-weight="800" fill="white">①</text>
+    <text x="150" y="158" text-anchor="middle" font-size="16" font-weight="700" fill="white">角色</text>
+  </g>
+  <g>
+    <rect x="260" y="90" width="640" height="90" rx="10" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="280" y="118" font-size="12" font-weight="600" fill="#1e293b">你是一个 ___</text>
+    <text x="280" y="140" font-size="11" fill="#475569">给模型一个"身份锚点"，它会调动对应领域的表达风格和专业术语</text>
+    <text x="280" y="160" font-size="11" fill="#6366f1">例：你是一个做过 10 年咨询的 PPT 设计师；你是一个严谨的财务分析师</text>
+  </g>
+
+  <!-- Block 2: 任务 -->
+  <g>
+    <rect x="60" y="190" width="180" height="80" rx="10" fill="#6366f1"/>
+    <text x="150" y="226" text-anchor="middle" font-size="20" font-weight="800" fill="white">②</text>
+    <text x="150" y="254" text-anchor="middle" font-size="16" font-weight="700" fill="white">任务</text>
+  </g>
+  <g>
+    <rect x="260" y="190" width="640" height="80" rx="10" fill="white" stroke="#6366f1" stroke-width="2"/>
+    <text x="280" y="216" font-size="12" font-weight="600" fill="#1e293b">要做什么（动词 + 对象 + 数量）</text>
+    <text x="280" y="236" font-size="11" fill="#475569">说清"动作 + 产物 + 规模"，避免模型自己猜</text>
+    <text x="280" y="256" font-size="11" fill="#6366f1">例：生成 8 页 PPT 大纲；把下列 20 条数据做成 Excel 表并画柱状图</text>
+  </g>
+
+  <!-- Block 3: 约束 -->
+  <g>
+    <rect x="60" y="280" width="180" height="80" rx="10" fill="#0ea5e9"/>
+    <text x="150" y="316" text-anchor="middle" font-size="20" font-weight="800" fill="white">③</text>
+    <text x="150" y="344" text-anchor="middle" font-size="16" font-weight="700" fill="white">约束</text>
+  </g>
+  <g>
+    <rect x="260" y="280" width="640" height="80" rx="10" fill="white" stroke="#0ea5e9" stroke-width="2"/>
+    <text x="280" y="306" font-size="12" font-weight="600" fill="#1e293b">字数 / 风格 / 格式 / 禁止项</text>
+    <text x="280" y="326" font-size="11" fill="#475569">最容易被忽视但收益最大的一块，明确边界能让产出质量飞跃</text>
+    <text x="280" y="346" font-size="11" fill="#0369a1">例：每页标题 ≤15 字；语气克制专业；禁止使用 emoji；禁止虚构数据</text>
+  </g>
+
+  <!-- Block 4: 素材 -->
+  <g>
+    <rect x="60" y="370" width="180" height="80" rx="10" fill="#10b981"/>
+    <text x="150" y="406" text-anchor="middle" font-size="20" font-weight="800" fill="white">④</text>
+    <text x="150" y="434" text-anchor="middle" font-size="16" font-weight="700" fill="white">素材</text>
+  </g>
+  <g>
+    <rect x="260" y="370" width="640" height="80" rx="10" fill="white" stroke="#10b981" stroke-width="2"/>
+    <text x="280" y="396" font-size="12" font-weight="600" fill="#1e293b">上下文 / 数据 / 参考文件</text>
+    <text x="280" y="416" font-size="11" fill="#475569">不给素材，模型只能靠训练记忆和编造；给了素材，它能基于事实生成</text>
+    <text x="280" y="436" font-size="11" fill="#047857">例：【附：Q1 销售数据.csv】；【参考格式：去年的年报 annual_2024.pdf】</text>
+  </g>
+
+  <!-- Block 5: 产出格式 -->
+  <g>
+    <rect x="60" y="460" width="180" height="60" rx="10" fill="#f59e0b"/>
+    <text x="150" y="488" text-anchor="middle" font-size="20" font-weight="800" fill="white">⑤</text>
+    <text x="150" y="510" text-anchor="middle" font-size="16" font-weight="700" fill="white">产出格式</text>
+  </g>
+  <g>
+    <rect x="260" y="460" width="640" height="60" rx="10" fill="white" stroke="#f59e0b" stroke-width="2"/>
+    <text x="280" y="482" font-size="12" font-weight="600" fill="#1e293b">返回什么类型的文件 + 结构样板</text>
+    <text x="280" y="502" font-size="11" fill="#b45309">例：产出 .pptx 文件；或"返回 JSON，字段：title / bullets[] / chart_data"</text>
+  </g>
+</svg>

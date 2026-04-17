@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% set lang = language|default('python') %}
-{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' %}
+{% set lang_name = 'Python' if lang == 'python' else 'C语言' if lang == 'c' else 'Vibe Coding' if lang == 'vibe' else 'AI 办公' if lang == 'ai_office' else 'AI 办公 · 讲案' if lang == 'ai_office_deck' else 'Python' %}
 {% set lang_prefix = '/' + lang %}
 
 {% block title %}练习题详情 - {{ lang_name }}学习平台{% endblock %}

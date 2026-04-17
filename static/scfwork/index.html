@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>熵创未来暑期项目汇总 | Summer Project Studio</title>
+  <meta name="description" content="熵创未来暑期项目汇总，支持按项目类型、学科方向和适合年级筛选查看，并下载项目计划书。">
+  <link rel="stylesheet" href="assets/site.css?v=20260329-singleleg">
+</head>
+<body class="page-home">
+  <div class="site-shell">
+    <header class="topbar">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">SCF</span>
+        <span class="brand-text">
+          <strong>熵创未来</strong>
+          <small>2026 暑期项目汇总</small>
+        </span>
+      </a>
+      <div class="topbar-right">
+        <div class="view-toggle" id="viewToggle">
+          <button class="view-btn is-active" data-view="detailed">详细</button>
+          <button class="view-btn" data-view="simple">简洁</button>
+        </div>
+        <a class="topbar-note" href="/" target="_top" style="cursor:pointer;text-decoration:none;color:inherit;">&#8592; 返回首页</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">SCF Summer Projects</p>
+          <h1>熵创未来暑期项目汇总</h1>
+          <div class="hero-topic-row">
+            <span class="hero-topic">AI 编程</span>
+            <span class="hero-topic">生物医学</span>
+            <span class="hero-topic">机器人</span>
+            <span class="hero-topic">工程实践</span>
+          </div>
+          <p class="hero-text">
+            面向不同年级与兴趣方向的暑期项目集合。可按项目类型、学科方向和适合年级快速筛选，查看详细介绍并下载正式计划书。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#projects">浏览项目</a>
+            <a class="btn btn-secondary" href="#projects">查看全部项目</a>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-summary">
+            <div class="hero-summary__head">
+              <span>浏览方式</span>
+              <strong>按方向筛选，按项目查看</strong>
+              <p>进入项目详情页后，可以查看项目海报、详细介绍、适合年级、项目方向与正式计划书。</p>
+            </div>
+            <div class="hero-summary__points">
+              <div class="hero-point">按项目类型、学科方向与适合年级快速筛选</div>
+              <div class="hero-point">点击海报或详情按钮进入项目介绍页</div>
+              <div class="hero-point">支持下载正式 PDF 项目计划书</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="filter-panel" id="projects">
+        <div class="section-heading">
+          <p class="eyebrow">Project List</p>
+          <h2>全部项目</h2>
+          <p>按项目类型、学科方向和适合年级快速筛选。</p>
+        </div>
+
+        <div class="filter-shell">
+          <div class="filter-group">
+            <span class="filter-group__label">项目类型</span>
+            <div class="filter-row" id="typeFilters"></div>
+          </div>
+          <div class="filter-group">
+            <span class="filter-group__label">专业 / 学科</span>
+            <div class="filter-row" id="subjectFilters"></div>
+          </div>
+          <div class="filter-group">
+            <span class="filter-group__label">适合年级</span>
+            <div class="filter-row" id="gradeFilters"></div>
+          </div>
+        </div>
+
+        <div class="filter-summary" id="filterSummary"></div>
+      </section>
+
+      <section class="project-grid" id="projectGrid"></section>
+    </main>
+
+    <footer class="footer">
+      <p>熵创未来暑期项目汇总 · Summer Project Studio</p>
+    </footer>
+  </div>
+
+  <script src="assets/projects-data.js?v=20260329-singleleg"></script>
+  <script src="assets/home.js?v=20260329-singleleg"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
