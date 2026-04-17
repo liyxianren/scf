@@ -413,7 +413,8 @@ def external_list_todos():
         query.order_by(
             OATodo.is_completed,
             OATodo.priority,
-            OATodo.due_date.asc().nullslast()
+            OATodo.due_date.is_(None).asc(),
+            OATodo.due_date.asc(),
         ).all(),
         reconcile_feedback_visibility=True,
     )

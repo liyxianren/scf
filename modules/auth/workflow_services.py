@@ -343,7 +343,8 @@ def list_workflow_todos_for_user(user, *, status='open', todo_type=None, enrollm
     todos = query.order_by(
         OATodo.is_completed,
         OATodo.priority,
-        OATodo.due_date.asc().nullslast(),
+        OATodo.due_date.is_(None).asc(),
+        OATodo.due_date.asc(),
         OATodo.created_at.desc(),
     ).all()
     visible_todos = []

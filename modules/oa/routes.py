@@ -959,7 +959,12 @@ def api_list_todos():
         query = query.filter(OATodo.todo_type == todo_type)
 
     todos = _filter_visible_todos(
-        query.order_by(OATodo.is_completed, OATodo.priority, OATodo.due_date.asc().nullslast()).all(),
+        query.order_by(
+            OATodo.is_completed,
+            OATodo.priority,
+            OATodo.due_date.is_(None).asc(),
+            OATodo.due_date.asc(),
+        ).all(),
         reconcile_feedback_visibility=True,
     )
     return jsonify({'success': True, 'data': [_build_oa_todo_payload(todo) for todo in todos], 'total': len(todos)})
