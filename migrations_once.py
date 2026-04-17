@@ -43,7 +43,7 @@ def run_once_migrations():
 def _ensure_migration_table():
     db.session.execute(db.text(
         "CREATE TABLE IF NOT EXISTS _applied_migrations "
-        "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        "(name VARCHAR(255) PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     ))
     db.session.commit()
 

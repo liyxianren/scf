@@ -1187,9 +1187,17 @@ def import_schedule_from_excel(file_path, original_filename=None):
 
 def _resolve_data_root():
     try:
+        runtime_root = current_app.config.get('SCF_RUNTIME_ROOT', '')
         db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
     except RuntimeError:
+        runtime_root = ''
         db_uri = ''
+
+    if runtime_root:
+        runtime_root = os.path.abspath(runtime_root)
+        os.makedirs(runtime_root, exist_ok=True)
+        return runtime_root
+
     if db_uri.startswith('sqlite:///'):
         db_path = db_uri.replace('sqlite:///', '', 1)
         db_path = os.path.abspath(db_path)

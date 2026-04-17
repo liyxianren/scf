@@ -6,3 +6,4 @@ from . import routes
 from . import enrollment_routes
 from . import chat_routes
 from . import workflow_routes
+from . import external_routes

@@ -16,9 +16,27 @@ def _build_sqlite_uri(db_path):
     normalized = abs_path.replace("\\", "/")
     return f"sqlite:///{normalized}"
 
+
+def _resolve_database_uri():
+    explicit_uri = os.environ.get("SCF_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if explicit_uri:
+        return explicit_uri
+    return _build_sqlite_uri(_resolve_db_path())
+
+
+def _resolve_runtime_root():
+    runtime_root = os.environ.get("SCF_RUNTIME_ROOT")
+    if runtime_root:
+        abs_root = os.path.abspath(runtime_root)
+        os.makedirs(abs_root, exist_ok=True)
+        return abs_root
+    return os.path.dirname(os.path.abspath(_resolve_db_path()))
+
+
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'python-teaching-website-secret-key'
-    SQLALCHEMY_DATABASE_URI = _build_sqlite_uri(_resolve_db_path())
+    SQLALCHEMY_DATABASE_URI = _resolve_database_uri()
+    SCF_RUNTIME_ROOT = _resolve_runtime_root()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TESTING = False
     OA_EXTERNAL_API_KEY = 'scf233'
